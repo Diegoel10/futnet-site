@@ -749,7 +749,7 @@
     <!-- SCRIPT -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, getRedirectResult, GoogleAuthProvider, FacebookAuthProvider, TwitterAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, TwitterAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         let app, auth, db, appId, currentUser = null;
@@ -846,15 +846,6 @@
                 db = getFirestore(app);
 
                 await setPersistence(auth, browserLocalPersistence);
-
-                try {
-                    const redirectResult = await getRedirectResult(auth);
-                    if (redirectResult && redirectResult.user) {
-                        currentUser = redirectResult.user;
-                    }
-                } catch (redirectErr) {
-                    console.error("Redirect login error:", redirectErr);
-                }
 
                 onAuthStateChanged(auth, async (user) => {
                     currentUser = user;
@@ -982,7 +973,7 @@
             else if (providerType === 'apple') provider = new OAuthProvider('apple.com');
 
             try {
-                await signInWithRedirect(auth, provider);
+                await signInWithPopup(auth, provider);
             } catch (error) {
                 showToast(error.message, 'error');
             }
