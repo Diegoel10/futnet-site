@@ -749,7 +749,7 @@
     <!-- SCRIPT -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, getRedirectResult, GoogleAuthProvider, FacebookAuthProvider, TwitterAuthProvider, OAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, getRedirectResult, GoogleAuthProvider, FacebookAuthProvider, TwitterAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         let app, auth, db, appId, currentUser = null;
@@ -845,8 +845,13 @@
                 auth = getAuth(app);
                 db = getFirestore(app);
 
+                await setPersistence(auth, browserLocalPersistence);
+
                 try {
-                    await getRedirectResult(auth);
+                    const redirectResult = await getRedirectResult(auth);
+                    if (redirectResult && redirectResult.user) {
+                        currentUser = redirectResult.user;
+                    }
                 } catch (redirectErr) {
                     console.error("Redirect login error:", redirectErr);
                 }
@@ -872,7 +877,7 @@
                                 showAuthScreen('signup');
                             }
                         } catch (err) {
-                            showAuthScreen('signup');
+                            console.error("Firestore error loading profile:", err);
                         }
                     } else {
                         showAuthScreen('login');
