@@ -149,14 +149,14 @@
                         <input type="email" id="reg-email" required class="w-full bg-[#090d16] border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand">
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div id="email-password-registration-fields" class="grid grid-cols-2 gap-2">
                         <div>
                             <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Password</label>
-                            <input type="password" id="reg-password" required class="w-full bg-[#090d16] border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand">
+                            <input type="password" id="reg-password" class="w-full bg-[#090d16] border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand">
                         </div>
                         <div>
                             <label class="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Confirm Password</label>
-                            <input type="password" id="reg-confirm" required class="w-full bg-[#090d16] border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand">
+                            <input type="password" id="reg-confirm" class="w-full bg-[#090d16] border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand">
                         </div>
                     </div>
 
@@ -749,11 +749,26 @@
     <!-- SCRIPT -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, TwitterAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {
+            getAuth,
+            setPersistence,
+            browserLocalPersistence,
+            signInWithEmailAndPassword,
+            createUserWithEmailAndPassword,
+            signInWithRedirect,
+            getRedirectResult,
+            GoogleAuthProvider,
+            FacebookAuthProvider,
+            TwitterAuthProvider,
+            OAuthProvider,
+            onAuthStateChanged,
+            signOut
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         let app, auth, db, appId, currentUser = null;
         let userProfile = null;
+        let isProfileSetupForExistingAuthUser = false;
         let eventsList = [];
         let chatsThreads = [];
         let activeChatThreadId = null;
@@ -832,7 +847,7 @@
         window.onload = async function() {
             try {
                 const firebaseConfig = {
-                    apiKey: "AIzaSyCF_6foG4Y9Pq9FSbFcpKaoQNi2I_MQiAg",
+                    apiKey: "AIzaSyCF_6foG4Y9Pq9FSBfCpkKaoQNi2I_MQiAg",
                     authDomain: "futnetsite-de7c3.firebaseapp.com",
                     projectId: "futnetsite-de7c3",
                     storageBucket: "futnetsite-de7c3.firebasestorage.app",
@@ -840,42 +855,99 @@
                     appId: "1:540556709101:web:31d653e4b6d50d67a390e4",
                     measurementId: "G-8BFTQ9HWCY"
                 };
+
                 appId = 'futnetsite-de7c3';
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
 
+                // Keep Firebase's authentication session after the browser/app is closed.
                 await setPersistence(auth, browserLocalPersistence);
+
+                // Complete any pending Google/Facebook/X/Apple redirect.
+                // onAuthStateChanged remains the single source of truth for the session.
+                try {
+                    const redirectResult = await getRedirectResult(auth);
+                    if (redirectResult && redirectResult.user) {
+                        console.log('Social redirect completed:', redirectResult.user.uid);
+                    }
+                } catch (redirectErr) {
+                    console.error('Redirect login error:', redirectErr);
+                    showToast(redirectErr.message || 'Social login could not be completed.', 'error');
+                }
 
                 onAuthStateChanged(auth, async (user) => {
                     currentUser = user;
-                    if (user) {
-                        try {
-                            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
-                            const docSnap = await getDoc(docRef);
-                            if (docSnap.exists()) {
-                                userProfile = docSnap.data();
-                                
-                                if (!userProfile.avatar && user.photoURL) {
-                                    userProfile.avatar = user.photoURL;
-                                    await setDoc(docRef, userProfile);
-                                }
 
-                                await setDoc(doc(db, 'artifacts', appId, 'directory', currentUser.uid), userProfile);
-                                setupRealtimeListeners();
-                                initAppDashboard();
-                            } else {
-                                showAuthScreen('signup');
-                            }
-                        } catch (err) {
-                            console.error("Firestore error loading profile:", err);
-                        }
-                    } else {
+                    if (!user) {
+                        isProfileSetupForExistingAuthUser = false;
                         showAuthScreen('login');
+                        return;
+                    }
+
+                    try {
+                        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+                        const docSnap = await getDoc(docRef);
+
+                        if (docSnap.exists()) {
+                            // Returning FutNet user: load the existing profile and dashboard.
+                            userProfile = docSnap.data();
+                            userProfile.uid = user.uid;
+
+                            if (!userProfile.email && user.email) {
+                                userProfile.email = user.email;
+                            }
+
+                            if (!userProfile.avatar && user.photoURL) {
+                                userProfile.avatar = user.photoURL;
+                                await setDoc(docRef, userProfile);
+                            }
+
+                            await setDoc(
+                                doc(db, 'artifacts', appId, 'directory', user.uid),
+                                userProfile
+                            );
+
+                            isProfileSetupForExistingAuthUser = false;
+                            setupRealtimeListeners();
+                            initAppDashboard();
+                            return;
+                        }
+
+                        // Firebase user exists but has no FutNet profile yet.
+                        // Do NOT create another Firebase account.
+                        isProfileSetupForExistingAuthUser = true;
+
+                        const emailInput = document.getElementById('reg-email');
+                        if (emailInput && user.email) {
+                            emailInput.value = user.email;
+                            emailInput.readOnly = true;
+                        }
+
+                        const passwordFields = document.getElementById('email-password-registration-fields');
+                        const passwordInput = document.getElementById('reg-password');
+                        const confirmInput = document.getElementById('reg-confirm');
+                        const signupButton = document.querySelector('#view-signup button[type="submit"]');
+
+                        if (passwordFields) passwordFields.classList.add('hidden');
+                        if (passwordInput) passwordInput.required = false;
+                        if (confirmInput) confirmInput.required = false;
+                        if (signupButton) signupButton.innerText = 'Complete Profile';
+
+                        showAuthScreen('signup');
+
+                    } catch (err) {
+                        // A Firestore/network/permission error is NOT the same as a missing profile.
+                        console.error('Error loading authenticated user profile:', err);
+                        showToast(
+                            'We could not load your FutNet profile. Please check your connection and try again.',
+                            'error'
+                        );
                     }
                 });
             } catch (err) {
-                showAuthScreen('login');
+                console.error('Firebase initialization error:', err);
+                showToast('Unable to initialize FutNet authentication.', 'error');
             }
         };
 
@@ -967,76 +1039,140 @@
 
         window.handleSocialAuth = async function(providerType) {
             let provider;
-            if (providerType === 'google') provider = new GoogleAuthProvider();
-            else if (providerType === 'facebook') provider = new FacebookAuthProvider();
-            else if (providerType === 'x') provider = new TwitterAuthProvider();
-            else if (providerType === 'apple') provider = new OAuthProvider('apple.com');
+
+            if (providerType === 'google') {
+                provider = new GoogleAuthProvider();
+            } else if (providerType === 'facebook') {
+                provider = new FacebookAuthProvider();
+            } else if (providerType === 'x') {
+                provider = new TwitterAuthProvider();
+            } else if (providerType === 'apple') {
+                provider = new OAuthProvider('apple.com');
+            } else {
+                showToast('Unsupported login provider.', 'error');
+                return;
+            }
 
             try {
-                await signInWithPopup(auth, provider);
+                await signInWithRedirect(auth, provider);
             } catch (error) {
-                showToast(error.message, 'error');
+                console.error(`Social login error (${providerType}):`, error);
+                showToast(error.message || 'Social login failed.', 'error');
             }
         };
 
         window.handleEmailAuth = async function(e) {
             e.preventDefault();
-            const email = document.getElementById('auth-email').value;
+
+            const email = document.getElementById('auth-email').value.trim();
             const pass = document.getElementById('auth-password').value;
+            const el = document.getElementById('login-error-msg');
+
+            el.classList.add('hidden');
+            el.innerText = '';
+
             try {
-                const userCred = await signInWithEmailAndPassword(auth, email, pass);
-                currentUser = userCred.user;
-                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    userProfile = docSnap.data();
-                    await setDoc(doc(db, 'artifacts', appId, 'directory', currentUser.uid), userProfile);
-                    setupRealtimeListeners();
-                    initAppDashboard();
-                } else {
-                    showAuthScreen('signup');
-                }
+                // Firebase persistence is already configured in window.onload.
+                // The auth-state listener will load the profile/dashboard.
+                await signInWithEmailAndPassword(auth, email, pass);
             } catch (error) {
-                const el = document.getElementById('login-error-msg');
-                el.innerText = error.message;
+                console.error('Email login error:', error);
+                el.innerText = error.message || 'Unable to sign in.';
                 el.classList.remove('hidden');
             }
         };
 
         window.handleUnifiedRegistration = async function(e) {
             e.preventDefault();
-            const email = document.getElementById('reg-email').value;
+
+            const email = document.getElementById('reg-email').value.trim();
             const pass = document.getElementById('reg-password').value;
             const confirm = document.getElementById('reg-confirm').value;
             const errEl = document.getElementById('signup-error-msg');
 
-            if (pass !== confirm) {
-                errEl.innerText = "Passwords do not match";
-                errEl.classList.remove('hidden');
-                return;
-            }
+            errEl.classList.add('hidden');
+            errEl.innerText = '';
 
             try {
+                /*
+                 * If Firebase already authenticated this user (social login,
+                 * or an existing email/password account without a profile),
+                 * create ONLY the FutNet Firestore profile.
+                 * Never create a second Firebase account.
+                 */
+                if (currentUser && isProfileSetupForExistingAuthUser) {
+                    let avatarVal = document.getElementById('unified-avatar').value;
+                    if (!avatarVal || avatarVal.length < 10) {
+                        avatarVal = currentUser.photoURL || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
+                    }
+
+                    userProfile = {
+                        uid: currentUser.uid,
+                        firstName: document.getElementById('reg-firstname').value.trim(),
+                        lastName: document.getElementById('reg-lastname').value.trim(),
+                        nickname: document.getElementById('reg-nickname').value.trim() || '',
+                        email: currentUser.email || email,
+                        avatar: avatarVal,
+                        gender: document.getElementById('reg-gender').value,
+                        dob: document.getElementById('reg-dob').value,
+                        position: document.getElementById('reg-position').value,
+                        isOrganizer: true,
+                        played: 0,
+                        wins: 0,
+                        goals: 0
+                    };
+
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
+                    await setDoc(docRef, userProfile);
+                    await setDoc(doc(db, 'artifacts', appId, 'directory', currentUser.uid), userProfile);
+
+                    isProfileSetupForExistingAuthUser = false;
+
+                    // Restore the normal email/password signup fields for future use.
+                    const passwordFields = document.getElementById('email-password-registration-fields');
+                    const passwordInput = document.getElementById('reg-password');
+                    const confirmInput = document.getElementById('reg-confirm');
+                    const signupButton = document.querySelector('#view-signup button[type="submit"]');
+                    if (passwordFields) passwordFields.classList.remove('hidden');
+                    if (passwordInput) passwordInput.required = true;
+                    if (confirmInput) confirmInput.required = true;
+                    if (signupButton) signupButton.innerText = 'Create Account';
+
+                    setupRealtimeListeners();
+                    initAppDashboard();
+                    showToast('FutNet profile created successfully!');
+                    return;
+                }
+
+                // Normal email/password registration for a brand-new Firebase user.
+                if (!pass || pass !== confirm) {
+                    errEl.innerText = 'Passwords do not match';
+                    errEl.classList.remove('hidden');
+                    return;
+                }
+
                 const userCred = await createUserWithEmailAndPassword(auth, email, pass);
                 currentUser = userCred.user;
 
                 let avatarVal = document.getElementById('unified-avatar').value;
                 if (!avatarVal || avatarVal.length < 10) {
-                    avatarVal = currentUser?.photoURL || "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100";
+                    avatarVal = currentUser.photoURL || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
                 }
 
                 userProfile = {
                     uid: currentUser.uid,
-                    firstName: document.getElementById('reg-firstname').value,
-                    lastName: document.getElementById('reg-lastname').value,
-                    nickname: document.getElementById('reg-nickname').value || '',
+                    firstName: document.getElementById('reg-firstname').value.trim(),
+                    lastName: document.getElementById('reg-lastname').value.trim(),
+                    nickname: document.getElementById('reg-nickname').value.trim() || '',
                     email: email,
                     avatar: avatarVal,
                     gender: document.getElementById('reg-gender').value,
                     dob: document.getElementById('reg-dob').value,
                     position: document.getElementById('reg-position').value,
                     isOrganizer: true,
-                    played: 0, wins: 0, goals: 0
+                    played: 0,
+                    wins: 0,
+                    goals: 0
                 };
 
                 const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
@@ -1045,25 +1181,12 @@
 
                 setupRealtimeListeners();
                 initAppDashboard();
-                showToast("Account & profile created successfully!");
+                showToast('Account & profile created successfully!');
+
             } catch (error) {
-                console.error("Registration error:", error);
-                userProfile = {
-                    uid: currentUser.uid,
-                    firstName: document.getElementById('reg-firstname').value,
-                    lastName: document.getElementById('reg-lastname').value,
-                    nickname: document.getElementById('reg-nickname').value || '',
-                    email: email,
-                    avatar: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100",
-                    gender: document.getElementById('reg-gender').value,
-                    dob: document.getElementById('reg-dob').value,
-                    position: document.getElementById('reg-position').value,
-                    isOrganizer: true,
-                    played: 0, wins: 0, goals: 0
-                };
-                setupRealtimeListeners();
-                initAppDashboard();
-                showToast("Account created successfully!");
+                console.error('Registration/profile creation error:', error);
+                errEl.innerText = error.message || 'Unable to create your profile.';
+                errEl.classList.remove('hidden');
             }
         };
 
