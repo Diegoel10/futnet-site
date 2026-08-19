@@ -865,7 +865,28 @@
                                 setupRealtimeListeners();
                                 initAppDashboard();
                             } else {
-                                showAuthScreen('signup');
+                                // Auto-create profile from Google/Facebook metadata for first-time social users
+                                const nameParts = (user.displayName || "Player User").split(" ");
+                                userProfile = {
+                                    uid: user.uid,
+                                    firstName: nameParts[0] || "Player",
+                                    lastName: nameParts.slice(1).join(" ") || "",
+                                    nickname: "",
+                                    email: user.email || "",
+                                    avatar: user.photoURL || "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100",
+                                    gender: "Male",
+                                    dob: "2000-01-01",
+                                    position: "Forward",
+                                    isOrganizer: true,
+                                    played: 0, wins: 0, goals: 0
+                                };
+
+                                await setDoc(docRef, userProfile);
+                                await setDoc(doc(db, 'artifacts', appId, 'directory', currentUser.uid), userProfile);
+
+                                setupRealtimeListeners();
+                                initAppDashboard();
+                                showToast("Account & profile created successfully!");
                             }
                         } catch (err) {
                             console.error("Firestore error loading profile:", err);
