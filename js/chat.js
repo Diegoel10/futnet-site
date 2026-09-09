@@ -1,39 +1,69 @@
-// js/chat.js: Handles WhatsApp-style messaging threads and real-time chat sync
+// js/chat.js: Handles WhatsApp-style messaging threads, directory user search, and real-time chat sync
 import { db, appId } from './firebase-config.js';
-import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 window.activeChatThreadId = null;
 
-window.renderChatsList = function() {
+window.renderChatsList = async function() {
     const query = (document.getElementById('chats-search-input')?.value || '').toLowerCase().trim();
     const container = document.getElementById('chats-threads-container');
     if (!container) return;
 
-    let activeThreads = (window.chatsThreads || []).filter(th => th.messages && th.messages.length > 0);
+    if (!window.cachedDirectoryList) {
+        try {
+            const snap = await getDocs(collection(db, 'artifacts', appId, 'directory'));
+            window.cachedDirectoryList = snap.docs.map(d => d.data());
+        } catch (e) {
+            window.cachedDirectoryList = [];
+        }
+    }
+
+    let activeThreads = [...(window.chatsThreads || [])];
 
     if (query !== '') {
         activeThreads = activeThreads.filter(th => th.name.toLowerCase().includes(query));
+
+        const existingThreadIds = new Set(activeThreads.map(t => t.id));
+        const matchingDirectoryUsers = (window.cachedDirectoryList || []).filter(u => {
+            if (u.uid === window.currentUser?.uid) return false;
+            const fullName = (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase();
+            const nickName = (u.nickname || '').toLowerCase();
+            return (fullName.includes(query) || nickName.includes(query)) && !existingThreadIds.has(u.uid);
+        });
+
+        matchingDirectoryUsers.forEach(u => {
+            const displayName = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Player';
+            activeThreads.push({
+                id: u.uid,
+                name: displayName,
+                avatar: u.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+                messages: []
+            });
+        });
+    } else {
+        activeThreads = activeThreads.filter(th => th.messages && th.messages.length > 0);
     }
 
     if (activeThreads.length === 0) {
-        container.innerHTML = `<div class="p-6 text-center text-xs text-slate-500 italic">No active conversations. Start a chat from your Friends list!</div>`;
+        container.innerHTML = `<div class="p-6 text-center text-xs text-slate-500 italic">No conversations found. Search above to start chatting with anyone!</div>`;
         return;
     }
 
     container.innerHTML = activeThreads.map(th => {
-        const lastMsg = th.messages[th.messages.length - 1].text;
-        const lastTime = th.messages[th.messages.length - 1].time;
+        const hasMessages = th.messages && th.messages.length > 0;
+        const lastMsg = hasMessages ? th.messages[th.messages.length - 1].text : 'Click to start conversation';
+        const lastTime = hasMessages ? th.messages[th.messages.length - 1].time : '';
 
         return `
-            <div onclick="openChatThread('${th.id}')" class="p-3.5 flex items-center justify-between hover:bg-[#090d16] cursor-pointer transition ${window.activeChatThreadId === th.id ? 'bg-[#090d16]' : ''}">
-                <div class="flex items-center gap-3">
-                    <img src="${th.avatar}" class="w-10 h-10 rounded-full object-cover">
-                    <div>
-                        <h3 class="text-xs font-black text-white">${th.name}</h3>
-                        <p class="text-[11px] text-slate-400 mt-0.5 truncate max-w-[140px]">${lastMsg}</p>
+            <div onclick="openChatThread('${th.id}')" class="p-3.5 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition ${window.activeChatThreadId === th.id ? 'bg-slate-50' : ''}">
+                <div class="flex items-center gap-3 truncate">
+                    <img src="${th.avatar}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200">
+                    <div class="truncate">
+                        <h3 class="text-xs font-black text-slate-900 truncate">${th.name}</h3>
+                        <p class="text-[11px] text-slate-500 mt-0.5 truncate">${lastMsg}</p>
                     </div>
                 </div>
-                <span class="text-[9px] text-slate-500">${lastTime}</span>
+                <span class="text-[9px] text-slate-400 shrink-0 ml-2">${lastTime}</span>
             </div>
         `;
     }).join('');
@@ -41,8 +71,30 @@ window.renderChatsList = function() {
 
 window.openChatThread = function(id) {
     window.activeChatThreadId = id;
-    const th = (window.chatsThreads || []).find(t => t.id === id);
-    if (!th) return;
+    let th = (window.chatsThreads || []).find(t => t.id === id);
+
+    if (!th) {
+        let targetUser = (window.cachedDirectoryList || []).find(d => d.uid === id);
+        if (!targetUser && window.friendsList) {
+            targetUser = window.friendsList.find(f => f.uid === id);
+        }
+        if (targetUser) {
+            const displayName = targetUser.name || `${targetUser.firstName || ''} ${targetUser.lastName || ''}`.trim() || 'Player';
+            th = {
+                id: targetUser.uid,
+                name: displayName,
+                avatar: targetUser.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+                messages: []
+            };
+            window.chatsThreads = window.chatsThreads || [];
+            window.chatsThreads.push(th);
+        } else {
+            return;
+        }
+    }
+
+    const searchInput = document.getElementById('chats-search-input');
+    if (searchInput) searchInput.value = '';
 
     document.getElementById('no-chat-selected')?.classList.add('hidden');
     document.getElementById('active-chat-box')?.classList.remove('hidden');
@@ -54,6 +106,21 @@ window.openChatThread = function(id) {
 
     window.renderActiveChatMessages();
     window.renderChatsList();
+};
+
+window.startChatWithPlayer = function(uid, name, avatar) {
+    let th = (window.chatsThreads || []).find(t => t.id === uid);
+    if (!th) {
+        th = {
+            id: uid,
+            name: name,
+            avatar: avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+            messages: []
+        };
+        window.chatsThreads = window.chatsThreads || [];
+        window.chatsThreads.push(th);
+    }
+    window.openChatThread(uid);
 };
 
 window.renderActiveChatMessages = function() {
@@ -97,6 +164,8 @@ window.handleSendActiveChatMessage = async function(e) {
     if (!text) return;
 
     let th = (window.chatsThreads || []).find(t => t.id === window.activeChatThreadId);
+    if (!th) return;
+
     const newMessage = {
         sender: `${window.userProfile.firstName}`,
         text: text,
@@ -104,10 +173,8 @@ window.handleSendActiveChatMessage = async function(e) {
         avatar: window.userProfile.avatar
     };
 
-    if (th) {
-        if (!th.messages) th.messages = [];
-        th.messages.push(newMessage);
-    }
+    if (!th.messages) th.messages = [];
+    th.messages.push(newMessage);
 
     input.value = '';
     window.renderActiveChatMessages();

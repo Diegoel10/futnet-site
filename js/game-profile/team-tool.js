@@ -3,19 +3,77 @@ import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 async function updateEventInFirestore(event) {
-    try {
-        const docRef = doc(db, 'artifacts', appId, 'global', 'events');
-        const list = (window.eventsList || []).map(ev => ev.id === event.id ? event : ev);
-        await setDoc(docRef, { list });
-    } catch (err) {
-        console.error("Error updating event:", err);
+    const docRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
+    
+    event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
+    event.teamNames = window.teamNames[event.id] || event.teamNames || {};
+    
+    window.eventsList = (window.eventsList || []).map(ev => ev.id === event.id ? event : ev);
+    
+    const cleanPayload = JSON.parse(JSON.stringify(event));
+
+    // Strip massive base64 strings from avatars to prevent breaking Firestore's 1MB document limit
+    if (cleanPayload.attendees) {
+        cleanPayload.attendees.forEach(att => {
+            if (att.avatar && att.avatar.startsWith('data:')) {
+                att.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
+            }
+            if (att.guests) {
+                att.guests.forEach(g => {
+                    if (g.avatar && g.avatar.startsWith('data:')) {
+                        g.avatar = '';
+                    }
+                });
+            }
+        });
     }
+    if (cleanPayload.teamAssignments) {
+        Object.keys(cleanPayload.teamAssignments).forEach(tKey => {
+            if (Array.isArray(cleanPayload.teamAssignments[tKey])) {
+                cleanPayload.teamAssignments[tKey].forEach(p => {
+                    if (p && p.avatar && p.avatar.startsWith('data:')) {
+                        p.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name || 'Player')}`;
+                    }
+                });
+            }
+        });
+    }
+
+    await setDoc(docRef, cleanPayload, { merge: true });
+
+    window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
 }
 
 window.activeTeamTab = 0;
 window.teamAssignments = {};
 window.teamFormations = {};
 window.teamNames = {};
+
+function getFlattenedPlayersList(attendees) {
+    const list = [];
+    (attendees || []).forEach(att => {
+        list.push({
+            uid: String(att.uid),
+            name: String(att.name || 'Player'),
+            avatar: String(att.avatar || ''),
+            position: String(att.position || 'Player')
+        });
+        
+        if (att.guests && Array.isArray(att.guests)) {
+            att.guests.forEach((g, gIdx) => {
+                list.push({
+                    uid: `${att.uid}_guest_${gIdx}`,
+                    name: String(g.name || 'Guest'),
+                    avatar: String(att.avatar || ''),
+                    position: 'Guest',
+                    isHostGuest: true,
+                    hostUid: String(att.uid)
+                });
+            });
+        }
+    });
+    return list;
+}
 
 window.openTeamMakingModal = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
@@ -59,19 +117,30 @@ window.saveTeamName = async function(eventId, teamIndex) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (event) {
         event.teamNames = window.teamNames[eventId];
-        await updateEventInFirestore(event);
-        window.showToast(`Team name updated to "${newName}"!`);
-        renderTeamMakingContent();
+        try {
+            await updateEventInFirestore(event);
+            if (typeof window.showToast === 'function') {
+                window.showToast(`Team name updated to "${newName}"!`);
+            }
+            renderTeamMakingContent();
+        } catch (err) {
+            console.error("Failed to save team name:", err);
+            if (typeof window.showToast === 'function') {
+                window.showToast("Failed to save team name. Please try again.", "error");
+            }
+        }
     }
 };
 
 window.randomizeTeams = async function(eventId) {
     const event = window.currentTeamBuildingEvent;
     if (!event) return;
-    const attendees = [...(event.attendees || [])];
-    for (let i = attendees.length - 1; i > 0; i--) {
+    
+    const allPlayers = getFlattenedPlayersList(event.attendees);
+    
+    for (let i = allPlayers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [attendees[i], attendees[j]] = [attendees[j], attendees[i]];
+        [allPlayers[i], allPlayers[j]] = [allPlayers[j], allPlayers[i]];
     }
 
     const teamsCount = event.teamsCount || 3;
@@ -80,24 +149,40 @@ window.randomizeTeams = async function(eventId) {
         window.teamAssignments[eventId][i] = [];
     }
 
-    attendees.forEach((player, idx) => {
+    allPlayers.forEach((player, idx) => {
         const targetTeam = idx % teamsCount;
         window.teamAssignments[eventId][targetTeam].push(player);
     });
 
     event.teamAssignments = window.teamAssignments[eventId];
-    await updateEventInFirestore(event);
-
-    window.showToast("Teams randomized and saved!");
-    renderTeamMakingContent();
+    
+    try {
+        await updateEventInFirestore(event);
+        if (typeof window.showToast === 'function') {
+            window.showToast("Teams randomized and saved!");
+        }
+        renderTeamMakingContent();
+    } catch (err) {
+        console.error("Failed to randomize/save teams:", err);
+        if (typeof window.showToast === 'function') {
+            window.showToast("Failed to save randomized teams. Please try again.", "error");
+        }
+    }
 };
 
 window.renderTeamMakingContent = function() {
     const modal = document.getElementById('team-making-modal');
     if (!modal || !window.currentTeamBuildingEvent) return;
+    
+    const currentEvtId = window.currentTeamBuildingEvent.id;
+    const latestEvent = (window.eventsList || []).find(ev => ev.id === currentEvtId);
+    if (latestEvent) {
+        window.currentTeamBuildingEvent = latestEvent;
+    }
     const event = window.currentTeamBuildingEvent;
 
     const attendees = event.attendees || [];
+    const allPlayers = getFlattenedPlayersList(attendees);
     const teamsCount = event.teamsCount || 3;
     const format = event.format || '7v7';
 
@@ -139,7 +224,7 @@ window.renderTeamMakingContent = function() {
         teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(p.uid); });
     });
 
-    const freeAgents = attendees.filter(a => !currentAssignedUIDs.has(a.uid));
+    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(a.uid));
     const currentTeamPlayers = window.teamAssignments[event.id][window.activeTeamTab] || [];
 
     let teamTabsHtml = '';
@@ -270,7 +355,10 @@ window.renderTeamMakingContent = function() {
                             <div class="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between shadow-sm">
                                 <div class="flex items-center gap-2.5">
                                     <img src="${a.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-7 h-7 rounded-full object-cover">
-                                    <span class="text-xs font-bold text-slate-900">${a.name}</span>
+                                    <div>
+                                        <span class="text-xs font-bold text-slate-900">${a.name}</span>
+                                        ${a.isHostGuest ? `<div class="text-[9px] text-emerald-600 font-bold">Guest (+1)</div>` : ''}
+                                    </div>
                                 </div>
                                 ${hasTeamPower ? `<button onclick="assignPlayerToNextEmptySpot('${event.id}', ${window.activeTeamTab}, '${a.uid}')" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-3 py-1 rounded-lg text-[10px] shadow">Assign</button>` : ''}
                             </div>
@@ -290,16 +378,16 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    const attendees = event.attendees || [];
+    const allPlayers = getFlattenedPlayersList(event.attendees);
     window.teamAssignments[eventId] = event.teamAssignments || {};
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[eventId]).forEach(teamArr => {
         teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(p.uid); });
     });
 
-    const freeAgents = attendees.filter(a => !currentAssignedUIDs.has(a.uid));
+    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(a.uid));
     if (freeAgents.length === 0) {
-        window.showToast("No Free Agents available.", "error");
+        if (typeof window.showToast === 'function') window.showToast("No Free Agents available.", "error");
         return;
     }
 
@@ -321,7 +409,10 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                 ${freeAgents.map(a => `
                     <div onclick="assignSpecificPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl cursor-pointer transition shadow-xs">
                         <img src="${a.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover">
-                        <span class="text-xs font-black text-slate-900">${a.name}</span>
+                        <div>
+                            <span class="text-xs font-black text-slate-900">${a.name}</span>
+                            ${a.isHostGuest ? `<div class="text-[9px] text-emerald-600 font-bold">Guest (+1)</div>` : ''}
+                        </div>
                     </div>
                 `).join('')}
             </div>
@@ -333,7 +424,8 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
 window.assignSpecificPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
-    const player = (event.attendees || []).find(a => a.uid === uid);
+    const allPlayers = getFlattenedPlayersList(event.attendees);
+    const player = allPlayers.find(a => String(a.uid) === String(uid));
     if (!player) return;
 
     window.teamAssignments[eventId] = event.teamAssignments || {};
@@ -341,17 +433,22 @@ window.assignSpecificPlayerToSlot = async function(eventId, teamIndex, slotIndex
     window.teamAssignments[eventId][teamIndex][slotIndex] = player;
 
     event.teamAssignments = window.teamAssignments[eventId];
-    await updateEventInFirestore(event);
-
-    const picker = document.getElementById('assign-picker-modal');
-    if (picker) picker.remove();
-    renderTeamMakingContent();
+    try {
+        await updateEventInFirestore(event);
+        renderTeamMakingContent();
+    } catch (err) {
+        console.error("Failed to assign player:", err);
+        if (typeof window.showToast === 'function') {
+            window.showToast("Failed to assign player. Please try again.", "error");
+        }
+    }
 };
 
 window.assignPlayerToNextEmptySpot = async function(eventId, teamIndex, uid) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
-    const player = (event.attendees || []).find(a => a.uid === uid);
+    const allPlayers = getFlattenedPlayersList(event.attendees);
+    const player = allPlayers.find(a => String(a.uid) === String(uid));
     if (!player) return;
 
     window.teamAssignments[eventId] = event.teamAssignments || {};
@@ -359,7 +456,6 @@ window.assignPlayerToNextEmptySpot = async function(eventId, teamIndex, uid) {
     
     const teamArr = window.teamAssignments[eventId][teamIndex];
     
-    // Find the first completely empty index (undefined, null, or missing name)
     let emptyIdx = -1;
     for (let i = 0; i < teamArr.length; i++) {
         if (!teamArr[i] || !teamArr[i].name) {
@@ -375,9 +471,15 @@ window.assignPlayerToNextEmptySpot = async function(eventId, teamIndex, uid) {
     teamArr[emptyIdx] = player;
 
     event.teamAssignments = window.teamAssignments[eventId];
-    await updateEventInFirestore(event);
-
-    renderTeamMakingContent();
+    try {
+        await updateEventInFirestore(event);
+        renderTeamMakingContent();
+    } catch (err) {
+        console.error("Failed to assign player to empty spot:", err);
+        if (typeof window.showToast === 'function') {
+            window.showToast("Failed to save assignment. Please try again.", "error");
+        }
+    }
 };
 
 window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
@@ -387,11 +489,19 @@ window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
 
     window.teamAssignments[eventId][teamIndex][slotIndex] = null;
     event.teamAssignments = window.teamAssignments[eventId];
-    await updateEventInFirestore(event);
-
-    renderTeamMakingContent();
+    try {
+        await updateEventInFirestore(event);
+        renderTeamMakingContent();
+    } catch (err) {
+        console.error("Failed to unassign player:", err);
+        if (typeof window.showToast === 'function') {
+            window.showToast("Failed to remove player. Please try again.", "error");
+        }
+    }
 };
 
 window.promptNoPower = function() {
-    window.showToast("Only Admins and Team Captains can manage lineups.", "error");
+    if (typeof window.showToast === 'function') {
+        window.showToast("Only Admins and Team Captains can manage lineups.", "error");
+    }
 };

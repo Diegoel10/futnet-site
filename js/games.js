@@ -1,6 +1,6 @@
-// js/games.js: Manages game publishing, date navigation, live Firestore listeners, and event copying
+// js/games.js: Manages date navigation, live Firestore listeners for individual event docs, and event copying
 import { db, appId } from './firebase-config.js';
-import { doc, setDoc, getDoc, collection, addDoc, getDocs, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, getDoc, collection, getDocs, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 window.selectedDateStr = (() => {
     const d = new Date();
@@ -8,13 +8,46 @@ window.selectedDateStr = (() => {
 })();
 
 let eventsUnsubscribe = null;
+let directoryUnsubscribe = null;
+
+// 🛑 Stop active listeners upon logout to prevent permission errors
+window.stopAllLiveListeners = function() {
+    if (eventsUnsubscribe) {
+        eventsUnsubscribe();
+        eventsUnsubscribe = null;
+    }
+    if (directoryUnsubscribe) {
+        directoryUnsubscribe();
+        directoryUnsubscribe = null;
+    }
+};
+
+function formatTimeTo12Hour(timeStr) {
+    if (!timeStr || !timeStr.includes(':')) return timeStr;
+    const [hourStr, minuteStr] = timeStr.split(':');
+    let hour = parseInt(hourStr, 10);
+    if (isNaN(hour)) return timeStr;
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12;
+    hour = hour ? hour : 12;
+    return `${hour}:${minuteStr} ${ampm}`;
+}
 
 window.initEventsLiveListener = function() {
     if (eventsUnsubscribe) eventsUnsubscribe();
-    const docRef = doc(db, 'artifacts', appId, 'global', 'events');
     
-    eventsUnsubscribe = onSnapshot(docRef, (docSnap) => {
-        window.eventsList = docSnap.exists() ? (docSnap.data().list || []) : [];
+    // Skip setting up listeners if no user is signed in to avoid permission errors
+    if (!window.currentUser) return;
+
+    const eventsRef = collection(db, 'artifacts', appId, 'eventsList');
+    
+    eventsUnsubscribe = onSnapshot(eventsRef, (snapshot) => {
+        const list = [];
+        snapshot.forEach(docSnap => {
+            list.push(docSnap.data());
+        });
+        window.eventsList = list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
         if (window.renderDateTabs) window.renderDateTabs();
         if (window.renderEvents) window.renderEvents();
         
@@ -22,9 +55,34 @@ window.initEventsLiveListener = function() {
             window.renderEventDetailModalContent();
         }
     }, (error) => {
-        console.error("Error listening to events:", error);
+        // Silently handle permission denied on logout/unauthenticated states
+        if (error.code !== 'permission-denied') {
+            console.error("Error listening to events collection:", error);
+        }
         window.eventsList = [];
         if (window.renderEvents) window.renderEvents();
+    });
+};
+
+window.initDirectoryLiveListener = function() {
+    if (directoryUnsubscribe) directoryUnsubscribe();
+    
+    // Skip setting up listeners if no user is signed in
+    if (!window.currentUser) return;
+
+    const dirRef = collection(db, 'artifacts', appId, 'directory');
+    
+    directoryUnsubscribe = onSnapshot(dirRef, (snapshot) => {
+        window.directoryList = [];
+        snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.uid) data.uid = docSnap.id;
+            window.directoryList.push(data);
+        });
+    }, (err) => {
+        if (err.code !== 'permission-denied') {
+            console.error("Error listening to global directory:", err);
+        }
     });
 };
 
@@ -73,94 +131,6 @@ window.selectDateTab = function(dateStr) {
     if (window.renderEvents) window.renderEvents();
 };
 
-async function saveParkToCloudIfNeeded(parkName, cityName, stateName) {
-    if (!parkName || !cityName) return;
-    try {
-        const parksRef = collection(db, 'artifacts', appId, 'global', 'parks', 'list');
-        const q = query(parksRef, where("name", "==", parkName));
-        const querySnapshot = await getDocs(q);
-        
-        if (querySnapshot.empty) {
-            await addDoc(parksRef, {
-                name: parkName,
-                city: cityName,
-                state: stateName || 'FL',
-                address: `${parkName}, ${cityName}, ${stateName || 'FL'}`,
-                createdAt: Date.now()
-            });
-        }
-    } catch (err) {
-        console.error("Error saving park:", err);
-    }
-}
-
-window.handleCreateEvent = async function(e) {
-    e.preventDefault();
-    
-    const parkName = document.getElementById('ce-parkname').value.trim();
-    const cityName = document.getElementById('ce-city').value.trim();
-    const stateName = document.getElementById('ce-state').value.trim();
-
-    await saveParkToCloudIfNeeded(parkName, cityName, stateName);
-    const feeVal = document.getElementById('ce-fee').value.trim();
-    const editingEventId = document.getElementById('ce-edit-event-id')?.value;
-
-    const newEvent = {
-        id: editingEventId || ('evt_' + Date.now()),
-        title: document.getElementById('ce-title').value,
-        visibility: document.getElementById('ce-visibility').value,
-        date: document.getElementById('ce-date').value,
-        time: document.getElementById('ce-time').value,
-        location: `${parkName} (${cityName}, ${stateName})`,
-        description: document.getElementById('ce-description').value || 'Friendly match.',
-        rules: document.getElementById('ce-rules').value || 'Standard fair play rules.',
-        format: document.getElementById('ce-format').value,
-        teamsCount: parseInt(document.getElementById('ce-teams-count').value),
-        fee: feeVal || "Free",
-        organizer: window.editingOrganizerName || `${window.userProfile.firstName} ${window.userProfile.lastName}`,
-        organizerAvatar: window.editingOrganizerAvatar || window.userProfile.avatar,
-        organizerId: window.editingOrganizerId || window.userProfile.uid,
-        attendees: window.editingAttendees || [{ uid: window.userProfile.uid, name: `${window.userProfile.firstName} ${window.userProfile.lastName}`, avatar: window.userProfile.avatar, role: 'Organizer', status: 'confirmed', paid: 'Unpaid' }],
-        waitingList: [],
-        declinedList: [],
-        invitedList: [],
-        comments: window.editingComments || [],
-        typingUsers: [],
-        matches: window.editingMatches || []
-    };
-    
-    // Clear editing states
-    window.editingOrganizerName = null;
-    window.editingOrganizerAvatar = null;
-    window.editingOrganizerId = null;
-    window.editingAttendees = null;
-    window.editingComments = null;
-    window.editingMatches = null;
-
-    try {
-        const docRef = doc(db, 'artifacts', appId, 'global', 'events');
-        const docSnap = await getDoc(docRef);
-        let currentList = docSnap.exists() ? (docSnap.data().list || []) : [];
-        
-        if (editingEventId) {
-            currentList = currentList.map(ev => ev.id === editingEventId ? newEvent : ev);
-        } else {
-            currentList.unshift(newEvent);
-        }
-
-        await setDoc(docRef, { list: currentList });
-        window.eventsList = currentList;
-    } catch (err) {
-        window.eventsList = window.eventsList || [];
-        window.eventsList.unshift(newEvent);
-        await setDoc(doc(db, 'artifacts', appId, 'global', 'events'), { list: window.eventsList });
-    }
-
-    window.showToast(editingEventId ? "Game updated successfully!" : "Game successfully created & published!");
-    window.switchTab('events');
-};
-
-// Copy Event feature: loads event data into creation form with a mandatory new date
 window.copyEvent = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
@@ -170,10 +140,9 @@ window.copyEvent = function(eventId) {
     setTimeout(() => {
         document.getElementById('ce-title').value = `${event.title} (Copy)`;
         document.getElementById('ce-visibility').value = event.visibility || 'Public';
-        document.getElementById('ce-date').value = ''; // Mandatory date to fill
+        document.getElementById('ce-date').value = '';
         document.getElementById('ce-time').value = event.time || '20:00';
         
-        // Parse location back out
         const locParts = event.location.match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
         if (locParts) {
             document.getElementById('ce-park-search').value = locParts[1];
@@ -190,7 +159,6 @@ window.copyEvent = function(eventId) {
         document.getElementById('ce-format').value = event.format || '7v7';
         document.getElementById('ce-fee').value = event.fee || 'Free';
 
-        // Keep original organizer data for cloning
         window.editingOrganizerName = event.organizer;
         window.editingOrganizerAvatar = event.organizerAvatar;
         window.editingOrganizerId = event.organizerId;
@@ -225,10 +193,16 @@ window.renderEvents = function() {
         const formatMatch = (ev.format || "").match(/(\d+)/);
         const playersPerTeam = formatMatch ? parseInt(formatMatch[1]) : 7;
         const maxCapacity = playersPerTeam * (ev.teamsCount || 3);
-        const currentGoing = ev.attendees?.length || 1;
+        
+        let currentGoing = 0;
+        (ev.attendees || []).forEach(a => {
+            currentGoing += 1 + (a.guests ? a.guests.length : 0);
+        });
+        if (currentGoing === 0 && ev.attendees?.length === 0) currentGoing = 1;
 
         const rawFee = ev.fee !== undefined ? ev.fee : "Free";
         const feeDisplay = (rawFee === "Free" || rawFee === "0" || rawFee === 0 || rawFee === "0.00" || rawFee === "") ? "Free" : `$${parseFloat(rawFee).toFixed(2)}`;
+        const formattedTime = formatTimeTo12Hour(ev.time);
 
         return `
             <div onclick="openEventDetails('${ev.id}')" class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:border-brand transition flex flex-col cursor-pointer">
@@ -242,7 +216,7 @@ window.renderEvents = function() {
 
                 <div class="p-6 space-y-4 flex-1 flex flex-col justify-between">
                     <div class="space-y-2 text-xs text-slate-600">
-                        <div class="flex items-center gap-2.5"><i class="fa-solid fa-clock text-brand w-4"></i> <span class="font-bold text-slate-800">${ev.time}</span></div>
+                        <div class="flex items-center gap-2.5"><i class="fa-solid fa-clock text-brand w-4"></i> <span class="font-bold text-slate-800">${formattedTime}</span></div>
                         <div class="flex items-center gap-2.5"><i class="fa-solid fa-location-dot text-brand w-4"></i> <span class="truncate">${ev.location}</span></div>
                     </div>
 
@@ -262,6 +236,12 @@ window.renderEvents = function() {
     }).join('');
 };
 
-setTimeout(() => {
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.initEventsLiveListener) window.initEventsLiveListener();
+        if (window.initDirectoryLiveListener) window.initDirectoryLiveListener();
+    });
+} else {
     if (window.initEventsLiveListener) window.initEventsLiveListener();
-}, 500);
+    if (window.initDirectoryLiveListener) window.initDirectoryLiveListener();
+}

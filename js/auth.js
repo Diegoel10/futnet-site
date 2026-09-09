@@ -1,4 +1,7 @@
 // js/auth.js
+import './profile.js';
+import './home.js';
+import './legal-modal.js';
 import { auth, db, appId } from './firebase-config.js';
 import { 
     signInWithEmailAndPassword, 
@@ -6,7 +9,10 @@ import {
     signInWithPopup, 
     GoogleAuthProvider, 
     FacebookAuthProvider, 
-    TwitterAuthProvider 
+    TwitterAuthProvider,
+    getAuth,
+    signOut,
+    onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -108,6 +114,7 @@ window.handleUnifiedRegistration = async function(event) {
             dob,
             position,
             avatar: window.selectedSignupAvatarUrl || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+            termsAccepted: false,
             createdAt: new Date().toISOString()
         };
 
@@ -125,7 +132,14 @@ window.handleUnifiedRegistration = async function(event) {
 
         window.userProfile = profileData;
         window.showToast("Account created successfully!");
-        window.location.reload();
+        
+        // Hide signup and show main events view smoothly without hard reload
+        if (typeof window.switchTab === 'function') {
+            window.switchTab('events');
+        }
+        if (typeof window.checkAndShowLegalModal === 'function') {
+            window.checkAndShowLegalModal();
+        }
     } catch (err) {
         console.error("Registration error:", err);
         errorBox.textContent = err.message || "Failed to create account.";
@@ -162,6 +176,7 @@ window.handleSocialAuth = async function(providerName) {
                 dob: "1995-01-01",
                 position: "Forward",
                 avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+                termsAccepted: false,
                 createdAt: new Date().toISOString()
             };
 
@@ -175,8 +190,55 @@ window.handleSocialAuth = async function(providerName) {
         }
 
         window.showToast("Signed in successfully!");
+        if (typeof window.checkAndShowLegalModal === 'function') {
+            window.checkAndShowLegalModal();
+        }
     } catch (err) {
         console.error("Social auth error:", err);
         window.showToast(err.message || "Social sign-in failed", "error");
     }
 };
+
+// Global Logout Handler mapped securely in the main entry point
+window.handleLogout = async function() {
+    try {
+        const activeAuth = auth || getAuth();
+        await signOut(activeAuth);
+        window.currentUser = null;
+        window.userProfile = null;
+        window.showToast("Logged out successfully.");
+        window.location.reload();
+    } catch (err) {
+        console.error("Error signing out:", err);
+        window.showToast("Failed to log out", "error");
+    }
+};
+
+// Listen for authentication state changes and boot up live listeners & legal checks instantly on login
+onAuthStateChanged(auth, async (user) => {
+    if (user) {
+        window.currentUser = user;
+        try {
+            const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+            const docSnap = await getDoc(profileRef);
+            if (docSnap.exists()) {
+                window.userProfile = docSnap.data();
+            }
+        } catch (e) {
+            console.error("Error loading profile on auth state change:", e);
+        }
+
+        // Boot up live games listener immediately so games show up
+        if (typeof window.initEventsLiveListener === 'function') {
+            window.initEventsLiveListener();
+        }
+
+        // Check if terms have been accepted
+        if (typeof window.checkAndShowLegalModal === 'function') {
+            window.checkAndShowLegalModal();
+        }
+    } else {
+        window.currentUser = null;
+        window.userProfile = null;
+    }
+});

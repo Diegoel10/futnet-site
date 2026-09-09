@@ -57,12 +57,24 @@ window.renderFriends = async function() {
     if (searchInput && dropdown) {
         const query = searchInput.value.toLowerCase().trim();
         if (query.length > 0) {
-            const matches = window.cachedDirectoryList.filter(u => {
+            // First try strict/partial substring matching
+            let matches = window.cachedDirectoryList.filter(u => {
                 if (u.uid === window.currentUser?.uid) return false;
                 const fullName = (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase();
                 const nickName = (u.nickname || '').toLowerCase();
                 return fullName.includes(query) || nickName.includes(query);
             });
+
+            // Fallback: If no direct matches, split query into terms and find close/partial results
+            if (matches.length === 0) {
+                const queryTerms = query.split(/\s+/);
+                matches = window.cachedDirectoryList.filter(u => {
+                    if (u.uid === window.currentUser?.uid) return false;
+                    const fullName = (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase();
+                    const nickName = (u.nickname || '').toLowerCase();
+                    return queryTerms.some(term => fullName.includes(term) || nickName.includes(term));
+                });
+            }
 
             if (matches.length > 0) {
                 dropdown.innerHTML = matches.map(u => {

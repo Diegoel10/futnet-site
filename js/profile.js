@@ -1,6 +1,7 @@
 // js/profile.js: Handles user profile rendering and account controls
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
 window.renderProfileTab = function() {
     const container = document.getElementById('tab-profile');
@@ -44,17 +45,126 @@ window.renderProfileTab = function() {
                 </div>
             </div>
 
+            <!-- ⚽ My Events Section Button & Container -->
+            <div class="space-y-3 pt-4 border-t border-slate-100">
+                <button onclick="toggleProfileEventsSection()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-900 font-black py-3 px-4 rounded-2xl text-xs flex items-center justify-between transition shadow-sm">
+                    <span class="flex items-center gap-2"><i class="fa-solid fa-calendar-days text-brand"></i> My Events</span>
+                    <i id="profile-events-chevron" class="fa-solid fa-chevron-down text-slate-500"></i>
+                </button>
+
+                <!-- Collapsible Events Container with Tabs -->
+                <div id="profile-events-container" class="hidden space-y-3 bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                    <!-- Tabs Bar -->
+                    <div class="bg-white border border-slate-200 p-1.5 rounded-xl flex items-center gap-1 shadow-sm">
+                        <button onclick="switchProfileEventsTab('upcoming')" id="profile-tab-upcoming" class="flex-1 py-2 rounded-lg text-xs font-black transition bg-brand text-slate-950 shadow">Upcoming</button>
+                        <button onclick="switchProfileEventsTab('previous')" id="profile-tab-previous" class="flex-1 py-2 rounded-lg text-xs font-black transition text-slate-600 hover:text-slate-900">Previous</button>
+                    </div>
+
+                    <!-- Events List Output -->
+                    <div id="profile-events-list-content" class="space-y-2.5 max-h-72 overflow-y-auto pr-1"></div>
+                </div>
+            </div>
+
             <div class="space-y-3 pt-4 border-t border-slate-100">
                 <h3 class="text-xs font-black text-slate-900 uppercase tracking-wider">Account Settings</h3>
                 <button onclick="openEditProfileModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2">
                     <i class="fa-solid fa-pen-to-square"></i> Edit Profile Details
                 </button>
-                <button onclick="handleLogout()" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2">
+                <button id="real-logout-btn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold py-3 rounded-xl transition text-xs flex items-center justify-center gap-2">
                     <i class="fa-solid fa-right-from-bracket"></i> Log Out
                 </button>
             </div>
         </div>
     `;
+
+    // Securely attach the event listener after the element renders
+    setTimeout(() => {
+        const logoutBtn = document.getElementById('real-logout-btn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', window.handleLogout);
+        }
+    }, 50);
+};
+
+// 📂 Toggle Profile Events Dropdown
+window.profileEventsTabState = 'upcoming';
+
+window.toggleProfileEventsSection = function() {
+    const container = document.getElementById('profile-events-container');
+    const chevron = document.getElementById('profile-events-chevron');
+    if (!container) return;
+
+    container.classList.toggle('hidden');
+    if (chevron) {
+        chevron.classList.toggle('fa-chevron-down');
+        chevron.classList.toggle('fa-chevron-up');
+    }
+
+    if (!container.classList.contains('hidden')) {
+        renderProfileEventsList();
+    }
+};
+
+window.switchProfileEventsTab = function(tabName) {
+    window.profileEventsTabState = tabName;
+    
+    const upBtn = document.getElementById('profile-tab-upcoming');
+    const prevBtn = document.getElementById('profile-tab-previous');
+
+    if (!upBtn || !prevBtn) return;
+
+    if (tabName === 'upcoming') {
+        upBtn.className = "flex-1 py-2 rounded-lg text-xs font-black transition bg-brand text-slate-950 shadow";
+        prevBtn.className = "flex-1 py-2 rounded-lg text-xs font-black transition text-slate-600 hover:text-slate-900";
+    } else {
+        prevBtn.className = "flex-1 py-2 rounded-lg text-xs font-black transition bg-brand text-slate-950 shadow";
+        upBtn.className = "flex-1 py-2 rounded-lg text-xs font-black transition text-slate-600 hover:text-slate-900";
+    }
+
+    renderProfileEventsList();
+};
+
+window.renderProfileEventsList = function() {
+    const contentContainer = document.getElementById('profile-events-list-content');
+    if (!contentContainer) return;
+
+    const userUid = window.currentUser?.uid;
+    const allEvents = window.eventsList || [];
+
+    const userEvents = allEvents.filter(ev => {
+        const isOrganizer = ev.organizerId === userUid;
+        const isAttendee = (ev.attendees || []).some(a => a.uid === userUid);
+        return isOrganizer || isAttendee;
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const filteredEvents = userEvents.filter(ev => {
+        const eventDate = ev.date || todayStr;
+        if (window.profileEventsTabState === 'upcoming') {
+            return eventDate >= todayStr && !ev.isSessionEnded;
+        } else {
+            return eventDate < todayStr || ev.isSessionEnded;
+        }
+    });
+
+    if (filteredEvents.length === 0) {
+        contentContainer.innerHTML = `<div class="text-center text-xs text-slate-400 py-6">No ${window.profileEventsTabState} games found.</div>`;
+        return;
+    }
+
+    contentContainer.innerHTML = filteredEvents.map(ev => `
+        <div onclick="openEventDetails('${ev.id}')" class="bg-white border border-slate-200 hover:border-brand rounded-xl p-3 cursor-pointer transition shadow-sm flex items-center justify-between">
+            <div class="space-y-1 truncate pr-2">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-black text-slate-900 truncate">${ev.title}</span>
+                    <span class="text-[9px] px-2 py-0.5 rounded-full font-bold bg-brand/10 text-brand">${ev.format || '7v7'}</span>
+                </div>
+                <p class="text-[10px] text-slate-500 flex items-center gap-1"><i class="fa-solid fa-calendar text-brand"></i> ${ev.date || 'TBD'} • ${ev.time || ''}</p>
+            </div>
+            <button class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-1.5 rounded-lg text-xs shrink-0">View</button>
+        </div>
+    `).join('');
 };
 
 window.openEditProfileModal = function() {
@@ -70,7 +180,6 @@ window.openEditProfileModal = function() {
             </div>
 
             <form onsubmit="handleSaveProfile(event)" class="space-y-4 text-xs">
-                <!-- Profile Picture File Upload Field at the TOP -->
                 <div>
                     <label class="block font-semibold text-slate-600 uppercase mb-1">Profile Picture</label>
                     <div class="flex items-center gap-3">
@@ -124,11 +233,37 @@ window.openEditProfileModal = function() {
 window.previewProfileImage = function(event) {
     const file = event.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = function(e) {
-        const base64String = e.target.result;
-        document.getElementById('edit-avatar').value = base64String;
-        document.getElementById('edit-avatar-preview').src = base64String;
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            const TARGET_SIZE = 300;
+            canvas.width = TARGET_SIZE;
+            canvas.height = TARGET_SIZE;
+            const ctx = canvas.getContext('2d');
+
+            let sourceWidth = img.width;
+            let sourceHeight = img.height;
+            let startX = 0;
+            let startY = 0;
+
+            if (sourceWidth > sourceHeight) {
+                startX = (sourceWidth - sourceHeight) / 2;
+                sourceWidth = sourceHeight;
+            } else {
+                startY = (sourceHeight - sourceWidth) / 2;
+                sourceHeight = sourceWidth;
+            }
+
+            ctx.drawImage(img, startX, startY, sourceWidth, sourceHeight, 0, 0, TARGET_SIZE, TARGET_SIZE);
+            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.75);
+
+            document.getElementById('edit-avatar').value = compressedBase64;
+            document.getElementById('edit-avatar-preview').src = compressedBase64;
+        };
+        img.src = e.target.result;
     };
     reader.readAsDataURL(file);
 };
@@ -146,9 +281,18 @@ window.handleSaveProfile = async function(e) {
 
     try {
         await setDoc(doc(db, 'artifacts', appId, 'users', window.currentUser.uid, 'profile', 'data'), window.userProfile);
+        
+        const fullName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim();
+        await setDoc(doc(db, 'artifacts', appId, 'directory', window.currentUser.uid), {
+            uid: window.currentUser.uid,
+            name: fullName,
+            nickname: window.userProfile.nickname || '',
+            avatar: window.userProfile.avatar || window.userProfile.photoURL || '',
+            position: window.userProfile.position || 'Player'
+        }, { merge: true });
+
         window.showToast("Profile updated successfully!");
         
-        // Refresh avatar icons across nav
         const navIcon = document.getElementById('nav-avatar-icon');
         const mobNavIcon = document.getElementById('mob-nav-avatar-icon');
         if (navIcon) navIcon.src = window.userProfile.avatar;
@@ -157,5 +301,19 @@ window.handleSaveProfile = async function(e) {
         window.renderProfileTab();
     } catch (err) {
         window.showToast("Failed to update profile", "error");
+    }
+};
+
+window.handleLogout = async function() {
+    try {
+        const auth = getAuth();
+        await signOut(auth);
+        window.currentUser = null;
+        window.userProfile = null;
+        window.showToast("Logged out successfully.");
+        window.location.reload();
+    } catch (err) {
+        console.error("Error signing out:", err);
+        window.showToast("Failed to log out", "error");
     }
 };

@@ -228,24 +228,27 @@
                     <div id="events-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
                 </div>
 
+                <!-- FULL SCREEN: EVENT DETAILS & GAME PROFILE -->
+                <div id="tab-event-details-screen" class="hidden space-y-6"></div>
+
                 <!-- FULL SCREEN: CREATE GAME -->
                 <div id="tab-create-event" class="hidden max-w-2xl mx-auto bg-white border border-slate-200 rounded-3xl p-8 shadow-xl space-y-6">
                     <div class="flex items-center justify-between border-b border-slate-100 pb-4">
                         <div>
-                            <h2 class="text-2xl font-black text-slate-900">Create New Soccer Game</h2>
-                            <p class="text-slate-500 text-xs mt-0.5">Fill out the details below to publish your match.</p>
+                            <h2 class="text-2xl font-black text-slate-900 flex items-center gap-2">⚽ Create New Soccer Game</h2>
+                            <p class="text-slate-500 text-xs mt-0.5">Fill out the details below to publish your match to the squad.</p>
                         </div>
                         <button onclick="switchTab('events')" class="text-slate-400 hover:text-slate-700 text-sm font-bold"><i class="fa-solid fa-xmark text-xl"></i></button>
                     </div>
 
                     <form onsubmit="handleCreateEvent(event)" class="space-y-5">
                         <div>
-                            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">Game / Event Title</label>
+                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🏷️ Game / Event Title</label>
                             <input type="text" id="ce-title" placeholder="e.g. Saturday Sunset 7v7" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
                         </div>
 
                         <div>
-                            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">Game Visibility</label>
+                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🔒 Game Visibility</label>
                             <select id="ce-visibility" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
                                 <option value="Public">Public (Anyone can see and join)</option>
                                 <option value="Private">Squad Only (Invite only)</option>
@@ -254,20 +257,20 @@
 
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">Date</label>
+                                <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">📅 Date</label>
                                 <input type="date" id="ce-date" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand cursor-pointer">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">Time (e.g. 20:00)</label>
-                                <input type="text" id="ce-time" value="20:00" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
+                                <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">⏰ Time</label>
+                                <input type="time" id="ce-time" value="20:00" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand cursor-pointer">
                             </div>
                         </div>
 
-                        <!-- Park & Location Cloud Search Field -->
+                        <!-- Park & Location Cloud Search Field with Inline oninput Handler -->
                         <div class="space-y-2 bg-slate-50/70 p-4 rounded-2xl border border-slate-200">
-                            <label class="block text-xs font-semibold text-slate-700 uppercase">Park & Location</label>
+                            <label class="block text-xs font-semibold text-slate-700 uppercase">📍 Park & Location</label>
                             <div class="relative">
-                                <input type="text" id="ce-park-search" placeholder="Type park name or search database..." class="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-2.5 text-slate-900 text-xs focus:outline-none focus:border-brand" autocomplete="off">
+                                <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Type park name or search database..." class="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-2.5 text-slate-900 text-xs focus:outline-none focus:border-brand" autocomplete="off">
                                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-xs"></i>
                             </div>
                             <div class="grid grid-cols-3 gap-2 pt-2">
@@ -277,19 +280,9 @@
                             </div>
                         </div>
 
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">Description & Overview</label>
-                            <textarea id="ce-description" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="Friendly match, bring light/dark shirts..."></textarea>
-                        </div>
-
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">Rules & Guidelines</label>
-                            <textarea id="ce-rules" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="No sliding tackles, respect referee calls..."></textarea>
-                        </div>
-
                         <div class="grid grid-cols-3 gap-3">
                             <div>
-                                <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Teams Count</label>
+                                <label class="block text-[10px] font-semibold text-slate-700 uppercase mb-1">👥 Teams Count</label>
                                 <select id="ce-teams-count" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
                                     <option value="2">2 Teams</option>
                                     <option value="3" selected>3 Teams</option>
@@ -297,7 +290,7 @@
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Game Format</label>
+                                <label class="block text-[10px] font-semibold text-slate-700 uppercase mb-1">⚽ Game Format</label>
                                 <select id="ce-format" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
                                     <option value="3v3">3v3</option>
                                     <option value="4v4">4v4</option>
@@ -312,14 +305,58 @@
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Entry Fee</label>
+                                <label class="block text-[10px] font-semibold text-slate-700 uppercase mb-1">💵 Entry Fee</label>
                                 <input type="text" id="ce-fee" value="Free" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs">
+                            </div>
+                        </div>
+
+                        <!-- COLLAPSIBLE ADVANCED SETTINGS SECTION -->
+                        <div class="border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
+                            <button type="button" onclick="toggleAdvancedSettings()" class="w-full p-4 flex items-center justify-between text-xs font-black text-slate-800 uppercase tracking-wider hover:bg-slate-100 transition">
+                                <span class="flex items-center gap-2"><i class="fa-solid fa-sliders text-brand"></i> ⚙️ Advanced Settings</span>
+                                <i id="advanced-settings-chevron" class="fa-solid fa-chevron-down text-slate-500"></i>
+                            </button>
+                            
+                            <div id="advanced-settings-container" class="hidden p-4 space-y-4 border-t border-slate-200 bg-white">
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">📝 Description & Overview</label>
+                                    <textarea id="ce-description" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="Friendly match, bring light/dark shirts..."></textarea>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">📜 Rules & Guidelines</label>
+                                    <textarea id="ce-rules" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="No sliding tackles, respect referee calls..."></textarea>
+                                </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">➕ Allow Plus Ones?</label>
+                                        <select id="ce-allow-plus-ones" onchange="togglePlusOneLimit(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
+                                            <option value="no" selected>No</option>
+                                            <option value="yes">Yes</option>
+                                        </select>
+                                    </div>
+                                    <div id="plus-one-limit-box" class="hidden">
+                                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🔢 Limit of Plus Ones per Player</label>
+                                        <select id="ce-plus-one-limit" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
+                                            <option value="1" selected>1 Guest</option>
+                                            <option value="2">2 Guests</option>
+                                            <option value="3">3 Guests</option>
+                                            <option value="4">4 Guests</option>
+                                            <option value="5">5 Guests</option>
+                                            <option value="6">6 Guests</option>
+                                            <option value="7">7 Guests</option>
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
                         <div class="pt-4 flex gap-4">
                             <button type="button" onclick="switchTab('events')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition text-xs uppercase">Cancel</button>
-                            <button type="submit" class="flex-1 bg-brand hover:bg-brand-dark text-slate-950 font-black py-3.5 rounded-xl transition text-xs uppercase shadow-md">Publish Game</button>
+                            <button type="submit" class="flex-1 bg-brand hover:bg-brand-dark text-slate-950 font-black py-3.5 rounded-xl transition text-xs uppercase shadow-md flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-check"></i> Publish Game
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -448,13 +485,14 @@
         import './js/auth.js';
         import './js/home.js';
         import './js/games.js';
+        import './js/game-creation.js';
         import './js/game-profile/modal-core.js';
         import './js/friends.js';
         import './js/chat.js';
         import './js/profile.js';
         import './js/leaderboard.js';
         import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { doc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         window.currentUser = null;
         window.userProfile = null;
@@ -475,7 +513,7 @@
         };
 
         window.switchTab = function(tabName) {
-            ['events', 'create-event', 'friends', 'leaderboard', 'chat', 'profile'].forEach(t => {
+            ['events', 'create-event', 'event-details-screen', 'friends', 'leaderboard', 'chat', 'profile'].forEach(t => {
                 const el = document.getElementById(`tab-${t}`);
                 if (el) el.classList.toggle('hidden', t !== tabName);
                 
@@ -498,104 +536,17 @@
                 window.renderDateTabs();
                 if (window.renderEvents) window.renderEvents();
             }
-            if (tabName === 'create-event') {
-                setupCloudParksAutocomplete();
+            if (tabName === 'create-event' && window.setupCloudParksAutocomplete) {
+                window.setupCloudParksAutocomplete();
+            }
+            if (tabName === 'event-details-screen' && window.renderEventDetailModalContent) {
+                window.renderEventDetailModalContent();
             }
             if (tabName === 'leaderboard' && window.renderLeaderboard) {
                 window.renderLeaderboard();
             }
             if (tabName === 'chat' && window.renderChatsList) window.renderChatsList();
             if (tabName === 'profile' && window.renderProfileTab) window.renderProfileTab();
-        };
-
-        let cachedParks = [];
-        async function setupCloudParksAutocomplete() {
-            const input = document.getElementById('ce-park-search');
-            const parkNameInput = document.getElementById('ce-parkname');
-            const cityInput = document.getElementById('ce-city');
-            const stateInput = document.getElementById('ce-state');
-            if (!input || !parkNameInput) return;
-
-            if (cachedParks.length === 0) {
-                try {
-                    const snap = await getDocs(collection(db, 'artifacts', appId, 'global', 'parks', 'list'));
-                    const cloudList = snap.docs.map(d => d.data());
-                    const defaults = [
-                        { name: "Cypress Park", address: "1300 Coral Springs Dr, Coral Springs, FL 33071", city: "Coral Springs", state: "FL" },
-                        { name: "Firefighters Park", address: "2500 N Rock Island Rd, Margate, FL 33063", city: "Margate", state: "FL" },
-                        { name: "Pine Trails Park", address: "10555 Trails End Rd, Parkland, FL 33076", city: "Parkland", state: "FL" },
-                        { name: "Tradition Park", address: "2100 Lyons Rd, Coconut Creek, FL 33063", city: "Coconut Creek", state: "FL" },
-                        { name: "South County Regional Park", address: "11200 Glades Rd, Boca Raton, FL 33434", city: "Boca Raton", state: "FL" }
-                    ];
-                    cachedParks = [...cloudList];
-                    defaults.forEach(def => {
-                        if (!cachedParks.some(p => p.name.toLowerCase() === def.name.toLowerCase())) {
-                            cachedParks.push(def);
-                        }
-                    });
-                } catch (e) {
-                    cachedParks = [
-                        { name: "Cypress Park", address: "1300 Coral Springs Dr, Coral Springs, FL 33071", city: "Coral Springs", state: "FL" },
-                        { name: "Firefighters Park", address: "2500 N Rock Island Rd, Margate, FL 33063", city: "Margate", state: "FL" },
-                        { name: "Pine Trails Park", address: "10555 Trails End Rd, Parkland, FL 33076", city: "Parkland", state: "FL" },
-                        { name: "Tradition Park", address: "2100 Lyons Rd, Coconut Creek, FL 33063", city: "Coconut Creek", state: "FL" }
-                    ];
-                }
-            }
-
-            let dropdown = document.getElementById('park-suggestions-dropdown');
-            if (!dropdown) {
-                dropdown = document.createElement('div');
-                dropdown.id = 'park-suggestions-dropdown';
-                dropdown.className = 'absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100 hidden';
-                input.parentNode.style.position = 'relative';
-                input.parentNode.appendChild(dropdown);
-            }
-
-            input.oninput = function(e) {
-                const query = e.target.value.toLowerCase().trim();
-                parkNameInput.value = e.target.value;
-
-                if (query.length < 1) {
-                    dropdown.classList.add('hidden');
-                    return;
-                }
-
-                const matches = cachedParks.filter(p => 
-                    p.name.toLowerCase().includes(query) || 
-                    (p.city && p.city.toLowerCase().includes(query)) || 
-                    (p.address && p.address.toLowerCase().includes(query))
-                );
-
-                if (matches.length > 0) {
-                    dropdown.innerHTML = matches.map(park => `
-                        <div onclick="selectCloudPark('${park.name.replace(/'/g, "\\'")}', '${park.city || ''}', '${park.state || 'FL'}')" class="p-3 hover:bg-slate-50 cursor-pointer transition text-xs text-left">
-                            <div class="font-bold text-slate-900">${park.name}</div>
-                            <div class="text-[10px] text-slate-500">${park.address || `${park.city}, ${park.state}`}</div>
-                        </div>
-                    `).join('');
-                    dropdown.classList.remove('hidden');
-                } else {
-                    dropdown.innerHTML = `<div class="p-3 text-xs text-slate-400">Custom location (will save automatically to database)</div>`;
-                    dropdown.classList.remove('hidden');
-                }
-            };
-
-            input.onblur = function() {
-                setTimeout(() => {
-                    const drop = document.getElementById('park-suggestions-dropdown');
-                    if (drop) drop.classList.add('hidden');
-                }, 200);
-            };
-        }
-
-        window.selectCloudPark = function(name, city, state) {
-            document.getElementById('ce-park-search').value = name;
-            document.getElementById('ce-parkname').value = name;
-            document.getElementById('ce-city').value = city;
-            document.getElementById('ce-state').value = state;
-            const dropdown = document.getElementById('park-suggestions-dropdown');
-            if (dropdown) dropdown.classList.add('hidden');
         };
 
         onAuthStateChanged(auth, async (user) => {
@@ -646,6 +597,9 @@
                 if (navIcon) navIcon.src = window.userProfile.avatar;
                 if (mobNavIcon) mobNavIcon.src = window.userProfile.avatar;
             }
+
+            if (window.initEventsLiveListener) window.initEventsLiveListener();
+            if (window.initDirectoryLiveListener) window.initDirectoryLiveListener();
 
             window.switchTab('events');
         }

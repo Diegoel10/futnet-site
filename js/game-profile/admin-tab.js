@@ -1,10 +1,24 @@
 // js/game-profile/admin-tab.js
+import { db, appId } from '../firebase-config.js';
+import { collection, getDocs, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
 export function renderAdminTab(event) {
     const isSessionEnded = event.isSessionEnded || false;
-    const teamsCount = event.teamsCount || 3;
+    const attendees = event.attendees || [];
+    const waitingList = event.waitingList || [];
 
     window.teamNames = window.teamNames || {};
     window.teamNames[event.id] = window.teamNames[event.id] || event.teamNames || {};
+
+    const selectedUser = window.selectedDirectoryUserToAdd;
+    const neutralAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+
+    let totalConfirmedPeople = attendees.length;
+    attendees.forEach(att => {
+        if (att.guests && Array.isArray(att.guests)) {
+            totalConfirmedPeople += att.guests.length;
+        }
+    });
 
     return `
         <div class="space-y-4">
@@ -24,7 +38,7 @@ export function renderAdminTab(event) {
                 <div onclick="toggleAdminManagePlayers()" class="flex items-center justify-between cursor-pointer">
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-users-gear text-brand text-xs"></i>
-                        <h4 class="text-xs font-black text-slate-900 uppercase tracking-wider">MANAGE ROSTER PLAYERS & TEAM CAPTAINS</h4>
+                        <h4 class="text-xs font-black text-slate-900 uppercase tracking-wider">MANAGE ROSTER PLAYERS</h4>
                     </div>
                     <i class="fa-solid fa-chevron-${window.adminManagePlayersExpanded ? 'up' : 'down'} text-slate-500 text-xs"></i>
                 </div>
@@ -32,45 +46,83 @@ export function renderAdminTab(event) {
                 <div class="${window.adminManagePlayersExpanded ? 'space-y-4 pt-3 border-t border-slate-100' : 'hidden'}">
                     <!-- Add Player Input Bar Inside -->
                     <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                        <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">➕ Add Player to Roster</label>
+                        <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">➕ Add App User to Roster</label>
                         <div class="relative flex gap-2">
-                            <div class="relative flex-1">
-                                <input type="text" id="admin-add-player-input" oninput="filterDirectoryAutocomplete(this.value, '${event.id}')" placeholder="Search app profiles or type custom name..." autocomplete="off" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-brand font-medium">
+                            <div class="relative flex-1 flex items-center bg-white border border-slate-300 rounded-xl px-3 py-1.5 focus-within:border-brand">
+                                <img id="admin-input-avatar-preview" src="${selectedUser ? selectedUser.avatar : neutralAvatar}" class="w-6 h-6 rounded-full object-cover bg-slate-200 border border-slate-300 mr-2.5 ${selectedUser ? '' : 'opacity-40'}">
+                                <input type="text" id="admin-add-player-input" oninput="filterDirectoryAutocomplete(this.value, '${event.id}')" value="${selectedUser ? selectedUser.name : ''}" placeholder="Search registered app users..." autocomplete="off" class="w-full bg-transparent text-xs text-slate-950 focus:outline-none font-medium">
                                 <div id="friend-autocomplete-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-40 overflow-y-auto divide-y divide-slate-100"></div>
                             </div>
                             <button onclick="addFriendToGameRoster('${event.id}')" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow transition shrink-0">Add Player</button>
                         </div>
                     </div>
 
-                    <!-- Existing Roster List -->
+                    <!-- Confirmed Roster List -->
                     <div class="space-y-2">
-                         ${(event.attendees || []).map(att => {
-                            const captainTeamNum = att.captainTeamIndex !== undefined ? (att.captainTeamIndex + 1) : null;
+                        <h5 class="text-[11px] font-black text-slate-700 uppercase tracking-wider">Confirmed Attendees (${totalConfirmedPeople})</h5>
+                         ${attendees.map(att => {
+                            let rawAttAvatar = att.avatar || att.photoURL || att.profilePic || att.image || att.imageUrl;
+                            if (rawAttAvatar && rawAttAvatar.includes('unsplash.com/photo-1570295999919')) {
+                                rawAttAvatar = null;
+                            }
+                            const attAvatar = rawAttAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
                             return `
-                                <div class="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-sm">
-                                    <div class="flex items-center gap-3">
-                                        <img src="${att.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover">
-                                        <div>
-                                            <span class="text-xs font-bold text-slate-900">${att.name}</span>
-                                            ${att.uid === event.organizerId ? '<span class="ml-2 text-[9px] bg-brand/20 text-emerald-800 px-2 py-0.5 rounded font-black">Organizer</span>' : ''}
-                                            ${captainTeamNum ? `<span class="ml-2 text-[9px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-black">⭐ Captain (${window.teamNames[event.id][att.captainTeamIndex] || `Team ${captainTeamNum}`})</span>` : ''}
+                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-sm space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-3 overflow-hidden">
+                                            <img src="${attAvatar}" class="w-9 h-9 rounded-full object-cover bg-slate-200 border border-slate-300 shrink-0">
+                                            <div class="truncate">
+                                                <div class="flex items-center gap-1.5 flex-wrap">
+                                                    <span class="text-xs font-bold text-slate-900 truncate">${att.name}</span>
+                                                    ${att.uid === event.organizerId ? '<span class="text-[9px] bg-brand/20 text-emerald-800 px-2 py-0.5 rounded font-black">Organizer</span>' : ''}
+                                                </div>
+                                                <div class="flex items-center gap-2 mt-0.5">
+                                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${att.paid === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}">${att.paid || 'Unpaid'}</span>
+                                                </div>
+                                            </div>
                                         </div>
+                                        
+                                        <!-- Mobile-Friendly Manage Button Popup Trigger -->
+                                        <button onclick="openPlayerManagementModal('${event.id}', '${att.uid}', '${(att.name || 'Player').replace(/'/g, "\\'")}')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-1.5 rounded-xl text-xs transition shrink-0 flex items-center gap-1 shadow-sm">
+                                            <i class="fa-solid fa-sliders text-[10px]"></i> Manage
+                                        </button>
                                     </div>
-                                    <div class="flex items-center gap-2">
-                                        <select onchange="assignTeamCaptain('${event.id}', '${att.uid}', this.value)" class="bg-amber-50 border border-amber-300 rounded-lg px-2 py-1 text-[11px] font-bold text-amber-900">
-                                            <option value="">Assign Captain...</option>
-                                            ${Array.from({length: teamsCount}, (_, i) => `<option value="${i}">${window.teamNames[event.id][i] || `Team ${i + 1}`}</option>`).join('')}
-                                        </select>
-                                        <select onchange="updatePlayerPaidStatus('${event.id}', '${att.uid}', this.value)" class="bg-white border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-800">
-                                            <option value="Unpaid" ${att.paid === 'Unpaid' ? 'selected' : ''}>Unpaid</option>
-                                            <option value="Paid" ${att.paid === 'Paid' ? 'selected' : ''}>Paid</option>
-                                            <option value="Free" ${att.paid === 'Free' ? 'selected' : ''}>Free</option>
-                                        </select>
-                                        <button onclick="removePlayerFromEvent('${event.id}', '${att.uid}')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1 rounded-xl text-xs font-bold">Remove</button>
-                                    </div>
+
+                                    <!-- Nested Plus-Ones / Guests Sub-section with Manage Button -->
+                                    ${(att.guests && att.guests.length > 0) ? `
+                                        <div class="ml-11 pl-3 border-l-2 border-emerald-200 space-y-1.5 pt-1">
+                                            ${att.guests.map((g, gIdx) => `
+                                                <div class="flex items-center justify-between text-xs bg-white p-2 rounded-lg border border-slate-200">
+                                                    <div>
+                                                        <span class="text-slate-700 font-medium">➕ ${g.name}</span>
+                                                        <span class="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold ml-1">Guest of ${att.name}</span>
+                                                        <div class="mt-0.5"><span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${g.paid === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}">${g.paid || 'Unpaid'}</span></div>
+                                                    </div>
+                                                    <button onclick="openGuestManagementModal('${event.id}', '${att.uid}', ${gIdx}, '${(g.name || 'Guest').replace(/'/g, "\\'")}')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-2.5 py-1 rounded-xl text-[11px] transition shrink-0 flex items-center gap-1 shadow-sm">
+                                                        <i class="fa-solid fa-sliders text-[9px]"></i> Manage
+                                                    </button>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
                                 </div>
                             `;
                         }).join('')}
+                    </div>
+
+                    <!-- Waitlist Section in Admin Tab -->
+                    <div class="space-y-2 pt-2 border-t border-slate-100">
+                        <h5 class="text-[11px] font-black text-amber-800 uppercase tracking-wider">⏳ Waitlist (${waitingList.length})</h5>
+                        ${waitingList.length === 0 ? '<div class="text-xs text-slate-400 py-2">No players on the waitlist.</div>' : ''}
+                        ${waitingList.map(w => `
+                            <div class="bg-amber-50/50 p-3 rounded-xl border border-amber-200 shadow-sm flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <img src="${w.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover bg-amber-200 border border-amber-300">
+                                    <span class="text-xs font-bold text-slate-900">${w.name}</span>
+                                </div>
+                                <button onclick="removePlayerFromEvent('${event.id}', '${w.uid}')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1 rounded-xl text-xs font-bold">Remove</button>
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
             </div>
@@ -84,13 +136,12 @@ export function renderAdminTab(event) {
                     </div>
                     <div class="flex items-center gap-3">
                         <button onclick="event.stopPropagation(); toggleSessionEnded('${event.id}')" class="px-3 py-1.5 rounded-xl text-xs font-black ${isSessionEnded ? 'bg-amber-400 text-slate-950 shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">${isSessionEnded ? 'Session Ended' : 'End Session'}</button>
-                        <i class="fa-solid fa-chevron-${window.adminManagePlayersExpanded ? 'up' : 'down'} text-slate-500 text-xs"></i>
+                        <i class="fa-solid fa-chevron-${window.adminMatchResultsExpanded ? 'up' : 'down'} text-slate-500 text-xs"></i>
                     </div>
                 </div>
 
                 <div class="${window.adminMatchResultsExpanded ? 'space-y-4 pt-3 border-t border-slate-100' : 'hidden'}">
                     ${(event.matches || []).map((match, mIndex) => {
-                        // Dynamically resolve team names using stored indexes or matching fallback names
                         const tNamesMap = window.teamNames[event.id] || {};
                         let teamA = match.teamAIndex !== undefined ? tNamesMap[match.teamAIndex] : null;
                         if (!teamA) {
@@ -144,12 +195,14 @@ export function renderAdminTab(event) {
                                         <div class="text-xs font-black text-slate-800 uppercase">${teamA} GOALS</div>
                                         <div class="space-y-1.5">
                                             ${t1Goals.map((gName, gIdx) => {
-                                                const scorerObj = (event.attendees || []).find(a => a.name === gName);
-                                                const avatarUrl = scorerObj?.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
+                                                const scorerObj = (attendees || []).find(a => a.name === gName);
+                                                let gAvatar = scorerObj?.avatar || scorerObj?.photoURL;
+                                                if (gAvatar && gAvatar.includes('unsplash.com/photo-1570295999919')) gAvatar = null;
+                                                const finalGoalAvatar = gAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(gName || 'Player')}`;
                                                 return `
                                                     <div class="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs font-bold text-slate-800 flex items-center justify-between">
                                                         <div class="flex items-center gap-2">
-                                                            <img src="${avatarUrl}" class="w-6 h-6 rounded-full object-cover border border-slate-300">
+                                                            <img src="${finalGoalAvatar}" class="w-6 h-6 rounded-full object-cover border border-slate-300">
                                                             <span>⚽ ${gName}</span>
                                                         </div>
                                                         <button onclick="removeTeamGoal('${event.id}', ${mIndex}, 1, ${gIdx})" class="text-red-500 hover:text-red-700 text-sm font-bold">&times;</button>
@@ -166,12 +219,14 @@ export function renderAdminTab(event) {
                                         <div class="text-xs font-black text-slate-800 uppercase">${teamB} GOALS</div>
                                         <div class="space-y-1.5">
                                             ${t2Goals.map((gName, gIdx) => {
-                                                const scorerObj = (event.attendees || []).find(a => a.name === gName);
-                                                const avatarUrl = scorerObj?.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
+                                                const scorerObj = (attendees || []).find(a => a.name === gName);
+                                                let gAvatar = scorerObj?.avatar || scorerObj?.photoURL;
+                                                if (gAvatar && gAvatar.includes('unsplash.com/photo-1570295999919')) gAvatar = null;
+                                                const finalGoalAvatar = gAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(gName || 'Player')}`;
                                                 return `
                                                     <div class="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs font-bold text-slate-800 flex items-center justify-between">
                                                         <div class="flex items-center gap-2">
-                                                            <img src="${avatarUrl}" class="w-6 h-6 rounded-full object-cover border border-slate-300">
+                                                            <img src="${finalGoalAvatar}" class="w-6 h-6 rounded-full object-cover border border-slate-300">
                                                             <span>⚽ ${gName}</span>
                                                         </div>
                                                         <button onclick="removeTeamGoal('${event.id}', ${mIndex}, 2, ${gIdx})" class="text-red-500 hover:text-red-700 text-sm font-bold">&times;</button>
@@ -210,58 +265,371 @@ export function renderAdminTab(event) {
     `;
 }
 
-// Global Directory Autocomplete Helper for Admin Roster Addition
-window.filterDirectoryAutocomplete = function(queryStr, eventId) {
+window.openGuestManagementModal = function(eventId, attendeeUid, guestIndex, guestName) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    const attendee = (event.attendees || []).find(a => a.uid === attendeeUid);
+    if (!attendee || !attendee.guests || !attendee.guests[guestIndex]) return;
+
+    const guest = attendee.guests[guestIndex];
+    const isPaid = guest.paid === 'Paid';
+
+    let modal = document.getElementById('guest-management-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'guest-management-modal';
+        modal.className = 'fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="bg-white rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-slate-900 animate-in fade-in zoom-in duration-200">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h4 class="text-xs font-black uppercase text-slate-900 truncate">Manage Guest: ${guestName}</h4>
+                <button onclick="document.getElementById('guest-management-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Payment Status Toggle -->
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Payment Status</label>
+                    <button onclick="updateGuestPaidStatus('${eventId}', '${attendeeUid}', ${guestIndex}, '${isPaid ? 'Unpaid' : 'Paid'}'); document.getElementById('guest-management-modal').remove();" class="w-full py-3 px-4 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 ${isPaid ? 'bg-emerald-500 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">
+                        <i class="fa-solid ${isPaid ? 'fa-circle-check text-sm' : 'fa-circle text-slate-400'}"></i>
+                        ${isPaid ? 'Mark as Unpaid' : 'Mark as Paid'}
+                    </button>
+                </div>
+
+                <!-- Remove Guest -->
+                <div class="pt-2 border-t border-slate-100">
+                    <button onclick="removeGuestFromAttendee('${eventId}', '${attendeeUid}', ${guestIndex}); document.getElementById('guest-management-modal').remove();" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-user-minus"></i> Remove Guest
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+window.updateGuestPaidStatus = async function(eventId, attendeeUid, guestIndex, paidStatus) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    event.attendees = (event.attendees || []).map(att => {
+        if (att.uid === attendeeUid && att.guests) {
+            const updatedGuests = [...att.guests];
+            updatedGuests[guestIndex] = { ...updatedGuests[guestIndex], paid: paidStatus };
+            return { ...att, guests: updatedGuests };
+        }
+        return att;
+    });
+
+    try {
+        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
+        await setDoc(eventDocRef, event);
+        window.showToast("Guest payment status updated!");
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
+    } catch (err) {
+        console.error("Error updating guest payment:", err);
+        window.showToast("Failed to update guest payment", "error");
+    }
+};
+
+window.removeGuestFromAttendee = async function(eventId, uid, guestIndex) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    event.attendees = (event.attendees || []).map(att => {
+        if (att.uid === uid && att.guests) {
+            const updatedGuests = [...att.guests];
+            updatedGuests.splice(guestIndex, 1);
+            return { ...att, guests: updatedGuests };
+        }
+        return att;
+    });
+
+    try {
+        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
+        await setDoc(eventDocRef, event);
+        window.showToast("Guest removed successfully!");
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
+    } catch (err) {
+        console.error("Error removing guest:", err);
+        window.showToast("Failed to remove guest", "error");
+    }
+};
+
+window.openPlayerManagementModal = function(eventId, uid, playerName) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    const player = (event.attendees || []).find(a => a.uid === uid);
+    if (!player) return;
+
+    const isPaid = player.paid === 'Paid';
+
+    let modal = document.getElementById('player-management-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'player-management-modal';
+        modal.className = 'fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="bg-white rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-slate-900 animate-in fade-in zoom-in duration-200">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h4 class="text-xs font-black uppercase text-slate-900 truncate">Manage: ${playerName}</h4>
+                <button onclick="document.getElementById('player-management-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Payment Status Toggle -->
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Payment Status</label>
+                    <button onclick="updatePlayerPaidStatus('${eventId}', '${uid}', '${isPaid ? 'Unpaid' : 'Paid'}'); document.getElementById('player-management-modal').remove();" class="w-full py-3 px-4 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 ${isPaid ? 'bg-emerald-500 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">
+                        <i class="fa-solid ${isPaid ? 'fa-circle-check text-sm' : 'fa-circle text-slate-400'}"></i>
+                        ${isPaid ? 'Mark as Unpaid' : 'Mark as Paid'}
+                    </button>
+                </div>
+
+                <!-- Remove from Roster -->
+                <div class="pt-2 border-t border-slate-100">
+                    <button onclick="removePlayerFromEvent('${eventId}', '${uid}'); document.getElementById('player-management-modal').remove();" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-user-minus"></i> Remove from Roster
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+window._directoryProfileMap = {};
+window.selectedDirectoryUserToAdd = null;
+
+window.filterDirectoryAutocomplete = async function(queryStr, eventId) {
     const dropdown = document.getElementById('friend-autocomplete-dropdown');
     if (!dropdown) return;
-    const query = queryStr.toLowerCase().trim();
-    if (!query) {
+    const queryText = queryStr.toLowerCase().trim();
+    
+    if (window.selectedDirectoryUserToAdd && queryText !== window.selectedDirectoryUserToAdd.name.toLowerCase()) {
+        window.selectedDirectoryUserToAdd = null;
+        const previewImg = document.getElementById('admin-input-avatar-preview');
+        if (previewImg) {
+            previewImg.src = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+            previewImg.classList.add('opacity-40');
+        }
+    }
+
+    if (!queryText) {
         dropdown.classList.add('hidden');
         return;
     }
 
+    try {
+        const dirRef = collection(db, 'artifacts', appId, 'directory');
+        const snap = await getDocs(dirRef);
+        window.directoryList = [];
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.uid) data.uid = docSnap.id;
+            window.directoryList.push(data);
+        });
+    } catch (err) {
+        console.error("Error fetching global directory:", err);
+    }
+
     const combinedPool = [
-        ...(window.friendsList || []),
         ...(window.directoryList || []),
+        ...(window.friendsList || []),
         ...((window.eventsList || []).flatMap(ev => ev.attendees || []))
     ];
 
-    if (window.userProfile) {
-        combinedPool.push({
-            name: `${window.userProfile.firstName} ${window.userProfile.lastName || ''}`.trim(),
-            avatar: window.userProfile.avatar,
-            uid: window.userProfile.uid
-        });
-    }
-
     const seen = new Set();
     const uniqueProfiles = combinedPool.filter(p => {
-        const key = p.uid || p.name;
-        if (!p.name || seen.has(key)) return false;
-        seen.has(key);
+        const displayName = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim();
+        const key = p.uid || displayName;
+        if (!displayName || seen.has(key)) return false;
+        seen.add(key);
         return true;
     });
 
-    const matches = uniqueProfiles.filter(p => p.name.toLowerCase().includes(query));
+    const matches = uniqueProfiles.filter(p => {
+        const displayName = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim();
+        return displayName.toLowerCase().includes(queryText);
+    });
 
     if (matches.length > 0) {
-        dropdown.innerHTML = matches.map(f => `
-            <div onclick="selectDirectoryProfileForRoster('${f.name.replace(/'/g, "\\'")}', '${f.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}', '${f.uid || ('usr_' + Date.now())}')" class="p-2.5 hover:bg-slate-50 cursor-pointer text-xs flex items-center gap-2">
-                <img src="${f.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-6 h-6 rounded-full object-cover">
-                <span class="font-bold text-slate-900">${f.name}</span>
-            </div>
-        `).join('');
+        window._directoryProfileMap = {};
+        dropdown.innerHTML = matches.map((f, idx) => {
+            const displayName = f.name || `${f.firstName || ''} ${f.lastName || ''}`.trim();
+            let rawAvatar = f.avatar || f.photoURL || f.profilePic || f.image || f.imageUrl || f.picture;
+            if (rawAvatar && rawAvatar.includes('unsplash.com/photo-1570295999919')) rawAvatar = null;
+            
+            const avatarUrl = rawAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}`;
+            const realUid = f.uid || f.id || ('usr_' + idx + '_' + Date.now());
+            
+            window._directoryProfileMap[realUid] = {
+                name: displayName,
+                avatar: avatarUrl,
+                uid: realUid,
+                position: f.position || 'Player'
+            };
+
+            return `
+                <div onclick="selectDirectoryProfileById('${realUid}')" class="p-2.5 hover:bg-slate-50 cursor-pointer text-xs flex items-center gap-2">
+                    <img src="${avatarUrl}" class="w-6 h-6 rounded-full object-cover bg-slate-200 border border-slate-300">
+                    <span class="font-bold text-slate-900">${displayName}</span>
+                </div>
+            `;
+        }).join('');
         dropdown.classList.remove('hidden');
     } else {
-        dropdown.innerHTML = `<div class="p-2.5 text-xs text-slate-400">Custom name (no profile found)</div>`;
+        dropdown.innerHTML = `<div class="p-2.5 text-xs text-slate-400">No registered profile found</div>`;
         dropdown.classList.remove('hidden');
     }
 };
 
-window.selectDirectoryProfileForRoster = function(name, avatar, uid) {
+window.selectDirectoryProfileById = function(userId) {
+    const profile = window._directoryProfileMap[userId];
+    if (!profile) return;
+
     const input = document.getElementById('admin-add-player-input');
-    if (input) input.value = name;
-    window.selectedDirectoryUserToAdd = { name, avatar, uid };
+    if (input) input.value = profile.name;
+    
+    const previewImg = document.getElementById('admin-input-avatar-preview');
+    if (previewImg) {
+        previewImg.src = profile.avatar;
+        previewImg.classList.remove('opacity-40');
+    }
+    
+    window.selectedDirectoryUserToAdd = {
+        uid: profile.uid,
+        name: profile.name,
+        avatar: profile.avatar,
+        position: profile.position || 'Player'
+    };
+
     const dropdown = document.getElementById('friend-autocomplete-dropdown');
     if (dropdown) dropdown.classList.add('hidden');
+};
+
+window.addFriendToGameRoster = async function(eventId) {
+    const input = document.getElementById('admin-add-player-input');
+    const typedName = input ? input.value.trim() : '';
+    if (!typedName) return;
+
+    if (!window.selectedDirectoryUserToAdd) {
+        window.showToast("Please select a registered app user from the dropdown list.", "error");
+        return;
+    }
+
+    if (!eventId) {
+        console.error("Error: eventId is missing or undefined!");
+        window.showToast("Failed to add player: Invalid event ID", "error");
+        return;
+    }
+
+    try {
+        let eventData = null;
+        let eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
+        let docSnap = await getDoc(eventDocRef);
+
+        if (docSnap.exists()) {
+            eventData = docSnap.data();
+        } else {
+            const globalRef = doc(db, 'artifacts', appId, 'global', 'events');
+            const globalSnap = await getDoc(globalRef);
+            if (globalSnap.exists()) {
+                const list = globalSnap.data().list || [];
+                eventData = list.find(ev => ev.id === eventId);
+            }
+        }
+
+        if (!eventData) {
+            window.showToast("Game event not found", "error");
+            return;
+        }
+
+        eventData.attendees = eventData.attendees || [];
+        eventData.waitingList = eventData.waitingList || [];
+
+        const formatStr = String(eventData.format || "7v7");
+        const formatMatch = formatStr.match(/(\d+)/);
+        const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
+        const teamsCount = parseInt(eventData.teamsCount, 10) || 3;
+        const maxCapacity = playersPerTeam * teamsCount;
+
+        // Calculate actual total heads currently confirmed including guest sub-arrays
+        let currentConfirmedHeads = 0;
+        eventData.attendees.forEach(a => {
+            currentConfirmedHeads += 1 + (a.guests ? a.guests.length : 0);
+        });
+
+        const selected = window.selectedDirectoryUserToAdd;
+        const fallbackAvatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selected.name)}`;
+        const finalAvatar = selected.avatar && !selected.avatar.includes('dicebear.com/7.x/initials') 
+            ? selected.avatar 
+            : fallbackAvatar;
+        
+        const newAttendee = {
+            uid: String(selected.uid),
+            name: String(selected.name || 'Player'),
+            avatar: String(finalAvatar),
+            position: String(selected.position || 'Player'),
+            role: 'Player',
+            status: 'confirmed',
+            paid: 'Unpaid',
+            guests: []
+        };
+
+        const alreadyExists = eventData.attendees.some(a => String(a.uid).trim() === String(newAttendee.uid).trim()) || 
+                              eventData.waitingList.some(w => String(w.uid).trim() === String(newAttendee.uid).trim());
+
+        if (alreadyExists) {
+            window.showToast("This specific user account is already on the roster or waitlist!", "error");
+            return;
+        }
+
+        // Use strict head count check instead of row count
+        const isFull = currentConfirmedHeads >= maxCapacity;
+        if (isFull) {
+            newAttendee.status = 'waiting';
+            eventData.waitingList.push(newAttendee);
+            window.showToast(`${newAttendee.name} added to the waitlist (Roster limit reached)!`, "info");
+        } else {
+            eventData.attendees.push(newAttendee);
+            window.showToast(`${newAttendee.name} added to roster successfully!`);
+        }
+
+        await setDoc(eventDocRef, eventData);
+
+        if (window.eventsList) {
+            const index = window.eventsList.findIndex(ev => ev.id === eventId);
+            if (index !== -1) {
+                window.eventsList[index] = eventData;
+            }
+        }
+        window.currentSelectedEvent = eventData;
+        
+        if (input) input.value = '';
+        const previewImg = document.getElementById('admin-input-avatar-preview');
+        if (previewImg) {
+            previewImg.src = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+            previewImg.classList.add('opacity-40');
+        }
+
+        window.selectedDirectoryUserToAdd = null;
+
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
+    } catch (err) {
+        console.error("DETAILED ADD PLAYER ERROR:", err);
+        window.showToast("Failed to add player: " + (err.message || "Unknown error"), "error");
+    }
 };

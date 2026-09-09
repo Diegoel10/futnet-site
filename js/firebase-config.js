@@ -1,6 +1,6 @@
 // js/firebase-config.js: Connects your app to Firebase
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getAuth, setPersistence, browserLocalPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -18,5 +18,8 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Keep user logged in across page refreshes
-setPersistence(auth, browserLocalPersistence);
+// 🛡️ Keep user logged in across page refreshes with incognito/private mode fallback
+setPersistence(auth, browserLocalPersistence).catch((error) => {
+    console.warn("Browser storage blocked (likely Private/Incognito mode). Falling back to in-memory persistence:", error);
+    return setPersistence(auth, inMemoryPersistence);
+});
