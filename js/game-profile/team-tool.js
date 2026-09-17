@@ -407,7 +407,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto">
                 ${freeAgents.map(a => `
-                    <div onclick="assignSpecificPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl cursor-pointer transition shadow-xs">
+                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignSpecificPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl cursor-pointer transition shadow-xs">
                         <img src="${a.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover">
                         <div>
                             <span class="text-xs font-black text-slate-900">${a.name}</span>

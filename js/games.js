@@ -23,7 +23,13 @@ window.stopAllLiveListeners = function() {
 };
 
 function formatTimeTo12Hour(timeStr) {
-    if (!timeStr || !timeStr.includes(':')) return timeStr;
+    if (!timeStr) return '';
+    // If it already has AM or PM, return it cleaned up so it never doubles
+    if (timeStr.toUpperCase().includes('AM') || timeStr.toUpperCase().includes('PM')) {
+        return timeStr.toUpperCase();
+    }
+    if (!timeStr.includes(':')) return timeStr;
+
     const [hourStr, minuteStr] = timeStr.split(':');
     let hour = parseInt(hourStr, 10);
     if (isNaN(hour)) return timeStr;
@@ -135,34 +141,46 @@ window.copyEvent = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    window.switchTab('create-event');
-    
-    setTimeout(() => {
-        document.getElementById('ce-title').value = `${event.title} (Copy)`;
-        document.getElementById('ce-visibility').value = event.visibility || 'Public';
-        document.getElementById('ce-date').value = '';
-        document.getElementById('ce-time').value = event.time || '20:00';
-        
-        const locParts = event.location.match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
-        if (locParts) {
-            document.getElementById('ce-park-search').value = locParts[1];
-            document.getElementById('ce-parkname').value = locParts[1];
-            document.getElementById('ce-city').value = locParts[2];
-            document.getElementById('ce-state').value = locParts[3];
-        } else {
-            document.getElementById('ce-parkname').value = event.location;
+    // Reset form state first, then store the copied event
+    if (typeof window.resetCreateGameForm === 'function') {
+        window.resetCreateGameForm();
+    }
+
+    window.pendingCopiedEvent = event;
+    window.activeModalEventId = null; 
+
+    // 1. Switch to create event tab
+    if (typeof window.switchTab === 'function') {
+        window.switchTab('create-event');
+        const createTabEl = document.getElementById('tab-create-event') || document.getElementById('tab-create-game');
+        if (!createTabEl) {
+            window.switchTab('create-game');
         }
+    }
 
-        document.getElementById('ce-description').value = event.description || '';
-        document.getElementById('ce-rules').value = event.rules || '';
-        document.getElementById('ce-teams-count').value = event.teamsCount || 3;
-        document.getElementById('ce-format').value = event.format || '7v7';
-        document.getElementById('ce-fee').value = event.fee || 'Free';
+    // 2. If your app has a specific render function for the create tab, call it here:
+    if (typeof window.renderCreateEventScreen === 'function') {
+        window.renderCreateEventScreen();
+    }
 
-        window.editingOrganizerName = event.organizer;
-        window.editingOrganizerAvatar = event.organizerAvatar;
-        window.editingOrganizerId = event.organizerId;
-    }, 100);
+    // 3. Populate form fields safely after the DOM updates
+    setTimeout(() => {
+        if (typeof window.populateCreateFormFromCopy === 'function') {
+            window.populateCreateFormFromCopy();
+        } else {
+            const titleEl = document.getElementById('ce-title');
+            const dateEl = document.getElementById('ce-date');
+            if (titleEl) titleEl.value = `${event.title} (Copy)`;
+            if (dateEl) {
+                dateEl.value = '';
+                dateEl.focus();
+            }
+        }
+    }, 200);
+
+    if (typeof window.showToast === 'function') {
+        window.showToast("Game details copied! Please select a future date.");
+    }
 };
 
 window.renderEvents = function() {
@@ -181,7 +199,7 @@ window.renderEvents = function() {
                 </div>
                 <h3 class="text-base font-black text-slate-900">No games scheduled for this date</h3>
                 <p class="text-slate-500 text-xs">Be the first to organize a match for this day!</p>
-                <button onclick="switchTab('create-event')" class="mt-2 inline-flex items-center gap-2 bg-brand text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs shadow">
+                <button onclick="if(window.resetCreateGameForm) window.resetCreateGameForm(); switchTab('create-event')" class="mt-2 inline-flex items-center gap-2 bg-brand text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs shadow">
                     <i class="fa-solid fa-plus"></i> Create Game
                 </button>
             </div>

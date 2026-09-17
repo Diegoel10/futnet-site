@@ -35,6 +35,17 @@ async function preloadParks() {
 }
 preloadParks();
 
+// Global click listener to close park autocomplete dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const searchInput = document.getElementById('ce-park-search');
+    const dropdown = document.getElementById('park-suggestions-dropdown');
+    if (dropdown && searchInput) {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    }
+});
+
 window.handleParkSearchInput = async function(val) {
     await preloadParks();
     const parkNameInput = document.getElementById('ce-parkname');
@@ -100,6 +111,148 @@ window.selectCloudPark = function(name, city, state) {
     if (dropdown) dropdown.classList.add('hidden');
 };
 
+window.resetCreateGameForm = function() {
+    window.pendingCopiedEvent = null;
+    window.editingEventSnapshot = null;
+
+    const editIdInput = document.getElementById('ce-edit-event-id');
+    if (editIdInput) editIdInput.remove();
+
+    const titleEl = document.getElementById('ce-title');
+    const visibilityEl = document.getElementById('ce-visibility');
+    const dateEl = document.getElementById('ce-date');
+    const timeEl = document.getElementById('ce-time');
+    const parkSearchEl = document.getElementById('ce-park-search');
+    const parkNameEl = document.getElementById('ce-parkname');
+    const cityEl = document.getElementById('ce-city');
+    const stateEl = document.getElementById('ce-state');
+    const descEl = document.getElementById('ce-description');
+    const rulesEl = document.getElementById('ce-rules');
+    const teamsCountEl = document.getElementById('ce-teams-count');
+    const formatEl = document.getElementById('ce-format');
+    const feeEl = document.getElementById('ce-fee');
+    const allowPlusOnesEl = document.getElementById('ce-allow-plus-ones');
+    const plusOneLimitEl = document.getElementById('ce-plus-one-limit');
+    const plusOneBoxEl = document.getElementById('plus-one-limit-box');
+    const advancedContainer = document.getElementById('advanced-settings-container');
+    const advancedChevron = document.getElementById('advanced-settings-chevron');
+
+    if (titleEl) titleEl.value = '';
+    if (visibilityEl) visibilityEl.value = 'Public';
+    if (dateEl) dateEl.value = '';
+    if (timeEl) timeEl.value = '';
+    if (parkSearchEl) parkSearchEl.value = '';
+    if (parkNameEl) parkNameEl.value = '';
+    if (cityEl) cityEl.value = '';
+    if (stateEl) stateEl.value = 'FL';
+    if (descEl) descEl.value = '';
+    if (rulesEl) rulesEl.value = '';
+    if (teamsCountEl) teamsCountEl.value = '3';
+    if (formatEl) formatEl.value = '7v7';
+    if (feeEl) feeEl.value = 'Free';
+    if (allowPlusOnesEl) allowPlusOnesEl.value = 'no';
+    if (plusOneLimitEl) plusOneLimitEl.value = '1';
+    if (plusOneBoxEl) plusOneBoxEl.classList.add('hidden');
+
+    if (advancedContainer && !advancedContainer.classList.contains('hidden')) {
+        advancedContainer.classList.add('hidden');
+        if (advancedChevron) {
+            advancedChevron.classList.remove('fa-chevron-up');
+            advancedChevron.classList.add('fa-chevron-down');
+        }
+    }
+};
+
+window.populateCreateFormFromCopy = function() {
+    const event = window.pendingCopiedEvent;
+    if (!event) return;
+
+    const editIdInput = document.getElementById('ce-edit-event-id');
+    if (editIdInput) editIdInput.remove();
+
+    const titleEl = document.getElementById('ce-title');
+    const visibilityEl = document.getElementById('ce-visibility');
+    const dateEl = document.getElementById('ce-date');
+    const timeEl = document.getElementById('ce-time');
+    const parkSearchEl = document.getElementById('ce-park-search');
+    const parkNameEl = document.getElementById('ce-parkname');
+    const cityEl = document.getElementById('ce-city');
+    const stateEl = document.getElementById('ce-state');
+    const descEl = document.getElementById('ce-description');
+    const rulesEl = document.getElementById('ce-rules');
+    const teamsCountEl = document.getElementById('ce-teams-count');
+    const formatEl = document.getElementById('ce-format');
+    const feeEl = document.getElementById('ce-fee');
+    const allowPlusOnesEl = document.getElementById('ce-allow-plus-ones');
+    const plusOneLimitEl = document.getElementById('ce-plus-one-limit');
+    const plusOneBoxEl = document.getElementById('plus-one-limit-box');
+
+    if (titleEl) titleEl.value = `${event.title || 'Game'} (Copy)`;
+    if (visibilityEl) visibilityEl.value = event.visibility || 'Public';
+    
+    if (dateEl) {
+        dateEl.value = '';
+        dateEl.focus();
+    }
+    
+    if (event.time && timeEl) {
+        let tVal = event.time;
+        if (tVal.includes('AM') || tVal.includes('PM')) {
+            const parts = tVal.split(' ');
+            const timeParts = parts[0].split(':');
+            let h = parseInt(timeParts[0], 10);
+            const m = timeParts[1];
+            if (parts[1] === 'PM' && h < 12) h += 12;
+            if (parts[1] === 'AM' && h === 12) h = 0;
+            tVal = `${String(h).padStart(2, '0')}:${m}`;
+        }
+        timeEl.value = tVal;
+    }
+
+    const locationStr = event.location || '';
+    const locParts = locationStr.match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
+    if (locParts) {
+        if (parkSearchEl) parkSearchEl.value = locParts[1];
+        if (parkNameEl) parkNameEl.value = locParts[1];
+        if (cityEl) cityEl.value = locParts[2];
+        if (stateEl) stateEl.value = locParts[3];
+    } else {
+        if (parkNameEl) parkNameEl.value = locationStr;
+        if (parkSearchEl) parkSearchEl.value = locationStr;
+    }
+
+    if (descEl) descEl.value = event.description || '';
+    if (rulesEl) rulesEl.value = event.rules || '';
+    if (teamsCountEl) teamsCountEl.value = event.teamsCount || 3;
+    if (formatEl) formatEl.value = event.format || '7v7';
+    if (feeEl) feeEl.value = event.fee !== undefined ? event.fee : 'Free';
+
+    const hasPlusOnes = event.allowPlusOnes === true || event.allowPlusOnes === 'yes';
+    if (allowPlusOnesEl) {
+        allowPlusOnesEl.value = hasPlusOnes ? 'yes' : 'no';
+        if (hasPlusOnes && plusOneBoxEl) {
+            plusOneBoxEl.classList.remove('hidden');
+        }
+    }
+    if (plusOneLimitEl && event.plusOneLimit !== undefined) {
+        plusOneLimitEl.value = event.plusOneLimit;
+    }
+
+    if (event.description || event.rules || hasPlusOnes) {
+        const advancedContainer = document.getElementById('advanced-settings-container');
+        const advancedChevron = document.getElementById('advanced-settings-chevron');
+        if (advancedContainer && advancedContainer.classList.contains('hidden')) {
+            advancedContainer.classList.remove('hidden');
+            if (advancedChevron) {
+                advancedChevron.classList.remove('fa-chevron-down');
+                advancedChevron.classList.add('fa-chevron-up');
+            }
+        }
+    }
+
+    window.pendingCopiedEvent = null;
+};
+
 async function saveParkToCloudIfNeeded(parkName, cityName, stateName) {
     if (!parkName || !cityName) return;
     try {
@@ -155,16 +308,22 @@ window.handleCreateEvent = async function(e) {
     const title = document.getElementById('ce-title').value.trim();
     const visibility = document.getElementById('ce-visibility').value;
     const date = document.getElementById('ce-date').value;
-    const rawTime = document.getElementById('ce-time').value;
     
+    const rawTime = document.getElementById('ce-time').value.trim();
     let time = rawTime;
-    if (rawTime && rawTime.includes(':')) {
-        const [hStr, mStr] = rawTime.split(':');
-        let h = parseInt(hStr, 10);
+    
+    if (rawTime.toUpperCase().includes('AM') || rawTime.toUpperCase().includes('PM')) {
+        let clean = rawTime.replace(/am/gi, '').replace(/pm/gi, '').trim();
+        const upper = rawTime.toUpperCase().includes('PM') ? 'PM' : 'AM';
+        time = `${clean} ${upper}`;
+    } else if (rawTime && rawTime.includes(':')) {
+        const parts = rawTime.split(':');
+        let h = parseInt(parts[0], 10);
+        const m = (parts[1] || '00').replace(/[^0-9]/g, '');
         const ampm = h >= 12 ? 'PM' : 'AM';
         h = h % 12;
         h = h ? h : 12;
-        time = `${h}:${mStr} ${ampm}`;
+        time = `${h}:${m} ${ampm}`;
     }
 
     const parkname = document.getElementById('ce-parkname').value.trim();
@@ -181,7 +340,7 @@ window.handleCreateEvent = async function(e) {
     const allowPlusOnes = document.getElementById('ce-allow-plus-ones')?.value === 'yes';
     const plusOneLimit = allowPlusOnes ? (parseInt(document.getElementById('ce-plus-one-limit')?.value, 10) || 1) : 0;
 
-    const locationStr = `${parkname} (${city}, ${state})`;
+    const locationStr = `${parkname} (${city || 'Park'}, ${state || 'FL'})`;
     const editEventIdInput = document.getElementById('ce-edit-event-id');
     const isEditing = editEventIdInput && editEventIdInput.value;
 
@@ -229,10 +388,10 @@ window.handleCreateEvent = async function(e) {
     if (editEventIdInput) editEventIdInput.remove();
 
     try {
-        // Save to individual event document instead of packing into one giant array document
         const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
         await setDoc(eventDocRef, newEvent);
 
+        window.resetCreateGameForm();
         window.showToast(isEditing ? "⚽ Game updated successfully!" : "⚽ Game published successfully!");
         window.switchTab('events');
     } catch (err) {

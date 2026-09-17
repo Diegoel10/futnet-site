@@ -145,7 +145,7 @@ window.renderEventDetailModalContent = function() {
                         </div>
                     </div>
 
-                    ${isCreator ? `<button onclick="copyEvent('${event.id}'); closeEventModal();" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-2 rounded-xl text-xs hidden sm:flex items-center gap-1.5"><i class="fa-solid fa-copy"></i> Copy</button>` : ''}
+                    ${isCreator ? `<button onclick="copyEvent('${event.id}')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-2 rounded-xl text-xs hidden sm:flex items-center gap-1.5"><i class="fa-solid fa-copy"></i> Copy</button>` : ''}
                 </div>
             </div>
 
@@ -206,7 +206,6 @@ window.openJoinGameModal = function(eventId) {
                 <h4 class="text-sm font-black text-slate-800">Bringing guests?</h4>
                 <p class="text-[11px] text-slate-500">You can bring up to ${maxGuests} guest(s).</p>
                 
-                <!-- Counter Control -->
                 <div class="flex items-center justify-center gap-6 pt-2">
                     <button type="button" onclick="window.updateJoinGuestCount(-1)" class="w-10 h-10 bg-slate-100 hover:bg-slate-200 text-slate-800 font-black rounded-xl text-base transition flex items-center justify-center shadow-sm">
                         <i class="fa-solid fa-minus"></i>
@@ -308,11 +307,9 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
     const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
     const maxCapacity = playersPerTeam * (event.teamsCount || 3);
 
-    // Remove current user from attendees or waitlist first so we can re-evaluate cleanly
     event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
     event.waitingList = event.waitingList.filter(w => String(w.uid) !== String(window.currentUser.uid));
 
-    // Calculate current confirmed heads excluding current user
     let currentConfirmedHeads = 0;
     event.attendees.forEach(a => {
         currentConfirmedHeads += 1 + (a.guests ? a.guests.length : 0);
@@ -375,7 +372,6 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
     window.renderEventDetailModalContent();
 };
 
-// Admin Game Cancellation
 window.cancelGameEvent = async function(eventId) {
     if (!confirm("Are you sure you want to cancel and delete this game?")) return;
     try {
@@ -653,53 +649,80 @@ window.openEditEventForm = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    window.switchTab('create-event');
-    closeEventModal();
+    if (typeof window.switchTab === 'function') {
+        window.switchTab('create-event');
+    }
 
     setTimeout(() => {
-        document.getElementById('ce-title').value = event.title;
-        document.getElementById('ce-visibility').value = event.visibility || 'Public';
-        document.getElementById('ce-date').value = event.date;
-        document.getElementById('ce-time').value = event.time;
+        const titleEl = document.getElementById('ce-title');
+        const visibilityEl = document.getElementById('ce-visibility');
+        const dateEl = document.getElementById('ce-date');
+        const timeEl = document.getElementById('ce-time');
+        const parkSearchEl = document.getElementById('ce-park-search');
+        const parkNameEl = document.getElementById('ce-parkname');
+        const cityEl = document.getElementById('ce-city');
+        const stateEl = document.getElementById('ce-state');
+        const descEl = document.getElementById('ce-description');
+        const rulesEl = document.getElementById('ce-rules');
+        const teamsCountEl = document.getElementById('ce-teams-count');
+        const formatEl = document.getElementById('ce-format');
+        const feeEl = document.getElementById('ce-fee');
+
+        if (titleEl) titleEl.value = event.title || '';
+        if (visibilityEl) visibilityEl.value = event.visibility || 'Public';
+        if (dateEl) dateEl.value = event.date || '';
         
-        const locParts = event.location.match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
+        if (event.time) {
+            let tVal = event.time;
+            if (tVal.includes('AM') || tVal.includes('PM')) {
+                const parts = tVal.split(' ');
+                const timeParts = parts[0].split(':');
+                let h = parseInt(timeParts[0], 10);
+                const m = timeParts[1];
+                if (parts[1] === 'PM' && h < 12) h += 12;
+                if (parts[1] === 'AM' && h === 12) h = 0;
+                tVal = `${String(h).padStart(2, '0')}:${m}`;
+            }
+            if (timeEl) timeEl.value = tVal;
+        }
+
+        const locParts = (event.location || "").match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
         if (locParts) {
-            document.getElementById('ce-park-search').value = locParts[1];
-            document.getElementById('ce-parkname').value = locParts[1];
-            document.getElementById('ce-city').value = locParts[2];
-            document.getElementById('ce-state').value = locParts[3];
+            if (parkSearchEl) parkSearchEl.value = locParts[1];
+            if (parkNameEl) parkNameEl.value = locParts[1];
+            if (cityEl) cityEl.value = locParts[2];
+            if (stateEl) stateEl.value = locParts[3];
         } else {
-            document.getElementById('ce-parkname').value = event.location;
+            if (parkNameEl) parkNameEl.value = event.location || '';
+            if (parkSearchEl) parkSearchEl.value = event.location || '';
         }
 
-        document.getElementById('ce-description').value = event.description || '';
-        document.getElementById('ce-rules').value = event.rules || '';
-        document.getElementById('ce-teams-count').value = event.teamsCount || 3;
-        document.getElementById('ce-format').value = event.format || '7v7';
-        document.getElementById('ce-fee').value = event.fee || 'Free';
+        if (descEl) descEl.value = event.description || '';
+        if (rulesEl) rulesEl.value = event.rules || '';
+        if (teamsCountEl) teamsCountEl.value = event.teamsCount || 3;
+        if (formatEl) formatEl.value = event.format || '7v7';
+        if (feeEl) feeEl.value = event.fee !== undefined ? event.fee : 'Free';
 
-        let hiddenId = document.getElementById('ce-edit-event-id');
-        if (!hiddenId) {
-            hiddenId = document.createElement('input');
-            hiddenId.type = 'hidden';
-            hiddenId.id = 'ce-edit-event-id';
-            document.querySelector('#tab-create-event form').appendChild(hiddenId);
+        const formEl = document.querySelector('#tab-create-event form') || document.querySelector('#create-event-form');
+        if (formEl) {
+            let hiddenId = document.getElementById('ce-edit-event-id');
+            if (!hiddenId) {
+                hiddenId = document.createElement('input');
+                hiddenId.type = 'hidden';
+                hiddenId.id = 'ce-edit-event-id';
+                formEl.appendChild(hiddenId);
+            }
+            hiddenId.value = event.id;
         }
-        hiddenId.value = event.id;
 
-        window.editingOrganizerName = event.organizer;
-        window.editingOrganizerAvatar = event.organizerAvatar;
-        window.editingOrganizerId = event.organizerId;
-        window.editingAttendees = event.attendees;
-        window.editingComments = event.comments;
-        window.editingMatches = event.matches;
-    }, 100);
+        window.editingEventSnapshot = event;
+    }, 150);
 };
 
 async function updateEventInFirestore(event) {
     try {
         const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
-        await setDoc(eventDocRef, event);
+        await setDoc(eventDocRef, event, { merge: true });
     } catch (err) {
         console.error("Error updating event document:", err);
     }
@@ -721,11 +744,13 @@ window.handleRSVPAction = async function(eventId, action) {
     event.declinedList = event.declinedList || [];
 
     if (action === 'cancel') {
-        event.attendees = event.attendees.filter(a => a.uid !== window.currentUser.uid);
-        event.waitingList = event.waitingList.filter(w => w.uid !== window.currentUser.uid);
+        event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
+        event.waitingList = event.waitingList.filter(w => String(w.uid) !== String(window.currentUser.uid));
 
-        if (!event.declinedList.some(d => d.uid === window.currentUser.uid)) {
-            event.declinedList.push({ uid: window.currentUser.uid, name: `${window.userProfile.firstName} ${window.userProfile.lastName}` });
+        if (!event.declinedList.some(d => String(d.uid) === String(window.currentUser.uid))) {
+            const profile = window.userProfile || {};
+            const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
+            event.declinedList.push({ uid: String(window.currentUser.uid), name: fullName });
         }
         window.showToast("You have left the game.");
         await updateEventInFirestore(event);
@@ -738,8 +763,8 @@ window.removePlayerFromEvent = async function(eventId, uid) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    event.attendees = (event.attendees || []).filter(a => a.uid !== uid);
-    event.waitingList = (event.waitingList || []).filter(w => w.uid !== uid);
+    event.attendees = (event.attendees || []).filter(a => String(a.uid) !== String(uid));
+    event.waitingList = (event.waitingList || []).filter(w => String(w.uid) !== String(uid));
     await updateEventInFirestore(event);
     window.showToast("Player removed from roster.");
 };
