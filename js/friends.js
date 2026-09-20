@@ -1,6 +1,6 @@
 // js/friends.js: Real-time live Firestore syncing for Friends, Player Search Autocomplete, Sent Requests, and Received Requests
 import { db, appId } from './firebase-config.js';
-import { doc, getDoc, setDoc, onSnapshot, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 let friendsUnsubscribe = null;
 
@@ -57,7 +57,6 @@ window.renderFriends = async function() {
     if (searchInput && dropdown) {
         const query = searchInput.value.toLowerCase().trim();
         if (query.length > 0) {
-            // First try strict/partial substring matching
             let matches = window.cachedDirectoryList.filter(u => {
                 if (u.uid === window.currentUser?.uid) return false;
                 const fullName = (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase();
@@ -65,7 +64,6 @@ window.renderFriends = async function() {
                 return fullName.includes(query) || nickName.includes(query);
             });
 
-            // Fallback: If no direct matches, split query into terms and find close/partial results
             if (matches.length === 0) {
                 const queryTerms = query.split(/\s+/);
                 matches = window.cachedDirectoryList.filter(u => {
@@ -219,6 +217,18 @@ window.sendFriendRequest = async function(targetUid) {
                 targetData.receivedRequests.push(myUid);
                 await setDoc(targetRef, targetData, { merge: true });
             }
+
+            // Write notification record for push trigger
+            const myName = window.userProfile?.name || `${window.userProfile?.firstName || ''} ${window.userProfile?.lastName || ''}`.trim() || 'Someone';
+            await addDoc(collection(db, 'artifacts', appId, 'notifications'), {
+                recipientUid: targetUid,
+                senderUid: myUid,
+                type: "friend_request",
+                title: "New Friend Request",
+                body: `${myName} sent you a friend request on FutNet!`,
+                read: false,
+                timestamp: serverTimestamp()
+            });
 
             window.showToast("Friend request sent!");
             const searchInput = document.getElementById('friend-search-input');
