@@ -24,7 +24,6 @@ window.stopAllLiveListeners = function() {
 
 function formatTimeTo12Hour(timeStr) {
     if (!timeStr) return '';
-    // If it already has AM or PM, return it cleaned up so it never doubles
     if (timeStr.toUpperCase().includes('AM') || timeStr.toUpperCase().includes('PM')) {
         return timeStr.toUpperCase();
     }
@@ -41,27 +40,27 @@ function formatTimeTo12Hour(timeStr) {
 
 window.initEventsLiveListener = function() {
     if (eventsUnsubscribe) eventsUnsubscribe();
-    
-    // Skip setting up listeners if no user is signed in to avoid permission errors
-    if (!window.currentUser) return;
 
     const eventsRef = collection(db, 'artifacts', appId, 'eventsList');
-    
+
     eventsUnsubscribe = onSnapshot(eventsRef, (snapshot) => {
         const list = [];
         snapshot.forEach(docSnap => {
-            list.push(docSnap.data());
+            const evData = docSnap.data();
+            if (!evData.attendees) evData.attendees = [];
+            if (!evData.waitingList) evData.waitingList = [];
+            if (!evData.declinedList) evData.declinedList = [];
+            list.push(evData);
         });
         window.eventsList = list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
         if (window.renderDateTabs) window.renderDateTabs();
         if (window.renderEvents) window.renderEvents();
-        
+
         if (window.activeModalEventId && window.renderEventDetailModalContent) {
             window.renderEventDetailModalContent();
         }
     }, (error) => {
-        // Silently handle permission denied on logout/unauthenticated states
         if (error.code !== 'permission-denied') {
             console.error("Error listening to events collection:", error);
         }
@@ -72,12 +71,9 @@ window.initEventsLiveListener = function() {
 
 window.initDirectoryLiveListener = function() {
     if (directoryUnsubscribe) directoryUnsubscribe();
-    
-    // Skip setting up listeners if no user is signed in
-    if (!window.currentUser) return;
 
     const dirRef = collection(db, 'artifacts', appId, 'directory');
-    
+
     directoryUnsubscribe = onSnapshot(dirRef, (snapshot) => {
         window.directoryList = [];
         snapshot.forEach(docSnap => {
@@ -102,15 +98,15 @@ window.renderDateTabs = function() {
     for (let i = 0; i < 8; i++) {
         const d = new Date();
         d.setDate(todayObj.getDate() + i);
-        
+
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         const dateString = `${yyyy}-${mm}-${dd}`;
-        
+
         const dayName = dayNames[d.getDay()];
         const dayNum = d.getDate();
-        
+
         let label = `${dayName} ${dayNum}`;
         if (i === 0) label = `Today`;
         else if (i === 1) label = `Tomorrow`;
@@ -129,10 +125,10 @@ window.selectDateTab = function(dateStr) {
     window.selectedDateStr = dateStr;
     const parts = dateStr.split('-');
     const formattedDate = new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    
+
     const titleEl = document.getElementById('selected-date-title');
     if (titleEl) titleEl.innerText = `Games for ${formattedDate}`;
-    
+
     window.renderDateTabs();
     if (window.renderEvents) window.renderEvents();
 };
@@ -141,15 +137,13 @@ window.copyEvent = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    // Reset form state first, then store the copied event
     if (typeof window.resetCreateGameForm === 'function') {
         window.resetCreateGameForm();
     }
 
     window.pendingCopiedEvent = event;
-    window.activeModalEventId = null; 
+    window.activeModalEventId = null;
 
-    // 1. Switch to create event tab
     if (typeof window.switchTab === 'function') {
         window.switchTab('create-event');
         const createTabEl = document.getElementById('tab-create-event') || document.getElementById('tab-create-game');
@@ -158,12 +152,10 @@ window.copyEvent = function(eventId) {
         }
     }
 
-    // 2. If your app has a specific render function for the create tab, call it here:
     if (typeof window.renderCreateEventScreen === 'function') {
         window.renderCreateEventScreen();
     }
 
-    // 3. Populate form fields safely after the DOM updates
     setTimeout(() => {
         if (typeof window.populateCreateFormFromCopy === 'function') {
             window.populateCreateFormFromCopy();
@@ -209,14 +201,24 @@ window.renderEvents = function() {
 
     grid.innerHTML = filtered.map(ev => {
         const formatMatch = (ev.format || "").match(/(\d+)/);
-        const playersPerTeam = formatMatch ? parseInt(formatMatch[1]) : 7;
-        const maxCapacity = playersPerTeam * (ev.teamsCount || 3);
-        
+        const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
+
+        let teamsCountNum = 3;
+        if (typeof ev.teamsCount === 'number') {
+            teamsCountNum = ev.teamsCount;
+        } else if (typeof ev.teamsCount === 'string') {
+            const parsed = parseInt(ev.teamsCount.match(/(\d+)/)?.[1], 10);
+            if (!isNaN(parsed)) teamsCountNum = parsed;
+        }
+        const maxCapacity = playersPerTeam * teamsCountNum;
+
         let currentGoing = 0;
-        (ev.attendees || []).forEach(a => {
-            currentGoing += 1 + (a.guests ? a.guests.length : 0);
+        const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
+        attendeesArr.forEach(a => {
+            const guestArr = Array.isArray(a.guests) ? a.guests : [];
+            currentGoing += 1 + guestArr.length;
         });
-        if (currentGoing === 0 && ev.attendees?.length === 0) currentGoing = 1;
+        if (currentGoing === 0 && attendeesArr.length === 0) currentGoing = 1;
 
         const rawFee = ev.fee !== undefined ? ev.fee : "Free";
         const feeDisplay = (rawFee === "Free" || rawFee === "0" || rawFee === 0 || rawFee === "0.00" || rawFee === "") ? "Free" : `$${parseFloat(rawFee).toFixed(2)}`;
@@ -243,7 +245,7 @@ window.renderEvents = function() {
                             <img src="${ev.organizerAvatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover border border-slate-200 shadow-sm group-hover:border-brand transition">
                             <div>
                                 <div class="text-[10px] font-bold text-slate-400 uppercase leading-none">By</div>
-                                <div class="text-xs font-black text-slate-900 group-hover:text-brand transition mt-0.5">${ev.organizer}</div>
+                                <div class="text-xs font-black text-slate-900 group-hover:text-brand transition mt-0.5">${ev.organizer || 'Organizer'}</div>
                             </div>
                         </div>
                         <span class="text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-xl">${currentGoing} / ${maxCapacity} Going</span>

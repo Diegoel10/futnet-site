@@ -80,7 +80,15 @@ window.renderEventDetailModalContent = function() {
     // 🛡️ Calculate max capacity & check current user RSVP state (including guests)
     const formatMatch = (event.format || "").match(/(\d+)/);
     const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
-    const maxCapacity = playersPerTeam * (event.teamsCount || 3);
+    
+    let teamsCountNum = 3;
+    if (typeof event.teamsCount === 'number') {
+        teamsCountNum = event.teamsCount;
+    } else if (typeof event.teamsCount === 'string') {
+        const parsed = parseInt(event.teamsCount.match(/(\d+)/)?.[1], 10);
+        if (!isNaN(parsed)) teamsCountNum = parsed;
+    }
+    const maxCapacity = playersPerTeam * teamsCountNum;
     
     // Count total confirmed heads (attendees + guests)
     let totalConfirmed = 0;
@@ -302,10 +310,22 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
 
     event.attendees = event.attendees || [];
     event.waitingList = event.waitingList || [];
+    event.declinedList = event.declinedList || [];
+
+    // 🧹 Clean up: Automatically remove user from declined list if they join/rejoin
+    event.declinedList = event.declinedList.filter(d => String(d.uid) !== String(window.currentUser.uid));
 
     const formatMatch = (event.format || "").match(/(\d+)/);
     const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
-    const maxCapacity = playersPerTeam * (event.teamsCount || 3);
+    
+    let teamsCountNum = 3;
+    if (typeof event.teamsCount === 'number') {
+        teamsCountNum = event.teamsCount;
+    } else if (typeof event.teamsCount === 'string') {
+        const parsed = parseInt(event.teamsCount.match(/(\d+)/)?.[1], 10);
+        if (!isNaN(parsed)) teamsCountNum = parsed;
+    }
+    const maxCapacity = playersPerTeam * teamsCountNum;
 
     event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
     event.waitingList = event.waitingList.filter(w => String(w.uid) !== String(window.currentUser.uid));
@@ -509,7 +529,7 @@ window.promptTeamGoal = function(eventId, mIndex, teamNum) {
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${teamPlayers.map(player => `
-                    <div onclick="selectGoalScorer('${event.id}', ${mIndex}, ${teamNum}, '${(player.name || player).replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl cursor-pointer transition shadow-sm">
+                    <div onclick="selectGoalScorer('${event.id}',${mIndex}, ${teamNum}, '${(player.name || player).replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl cursor-pointer transition shadow-sm">
                         <img src="${player.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover border border-slate-300 shadow-sm">
                         <span class="text-xs font-bold text-slate-900">${player.name || player}</span>
                     </div>

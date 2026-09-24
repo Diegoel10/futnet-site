@@ -1,31 +1,35 @@
 // js/game-profile/roster-tab.js
 export function renderRosterTab(event) {
-    const attendees = event.attendees || [];
-    const waitingList = event.waitingList || [];
-    const declinedList = event.declinedList || [];
+    const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+    const waitingList = Array.isArray(event.waitingList) ? event.waitingList : [];
+    const declinedList = Array.isArray(event.declinedList) ? event.declinedList : [];
 
-    // Calculate max capacity dynamically (e.g., format "8v8" -> 8 players * teamsCount)
     const formatMatch = (event.format || "").match(/(\d+)/);
-    const playersPerTeam = formatMatch ? parseInt(formatMatch[1]) : 7;
-    const maxCapacity = playersPerTeam * (event.teamsCount || 3);
-
-    // 🛡️ Auto-reconcile overflow: If attendees exceed maxCapacity, shift excess players to waitingList automatically
-    if (attendees.length > maxCapacity) {
-        const overflowCount = attendees.length - maxCapacity;
-        const shiftedPlayers = attendees.splice(maxCapacity, overflowCount);
-        shiftedPlayers.forEach(p => { p.status = 'waiting'; });
-        waitingList.push(...shiftedPlayers);
-        event.attendees = attendees;
-        event.waitingList = waitingList;
+    const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
+    
+    // Safely parse teamsCount whether it's a number or string like "3 Teams"
+    let teamsCountNum = 3;
+    if (typeof event.teamsCount === 'number') {
+        teamsCountNum = event.teamsCount;
+    } else if (typeof event.teamsCount === 'string') {
+        const parsed = parseInt(event.teamsCount.match(/(\d+)/)?.[1], 10);
+        if (!isNaN(parsed)) teamsCountNum = parsed;
     }
+    const maxCapacity = playersPerTeam * teamsCountNum;
 
-    // Count total confirmed bodies including attendees + their nested guests
-    let totalConfirmedCount = attendees.length;
+    let totalConfirmedCount = 0;
     attendees.forEach(att => {
+        totalConfirmedCount += 1;
         if (att.guests && Array.isArray(att.guests)) {
             totalConfirmedCount += att.guests.length;
         }
     });
+
+    // Helper to resolve profile details from directory if attendee record is missing fields
+    const resolveDirectoryUser = (uid) => {
+        if (!window.directoryList || !uid) return null;
+        return window.directoryList.find(u => u.uid === uid);
+    };
 
     return `
         <div class="space-y-6">
@@ -47,15 +51,24 @@ export function renderRosterTab(event) {
                     ${attendees.length === 0 ? '<div class="text-center text-xs text-slate-400 py-6">No players confirmed yet. Be the first to join!</div>' : ''}
                     ${attendees.map(att => {
                         const isPaid = att.paid === 'Paid';
-                        const safeAvatar = att.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
-                        const safeName = (att.name || 'Player').replace(/'/g, "\\'");
+                        const dirUser = resolveDirectoryUser(att.uid);
+
+                        const safeAvatar = att.avatar || att.photoURL || att.profilePicture || att.userAvatar || dirUser?.avatar || dirUser?.photoURL || '';
+                        const rawName = att.name || att.firstName || att.displayName || att.fullName || dirUser?.name || dirUser?.firstName || dirUser?.displayName || 'Player';
+                        const safeName = rawName.replace(/'/g, "\\'");
+                        const initialChar = rawName.charAt(0).toUpperCase();
+
+                        const avatarMarkup = safeAvatar ? 
+                            `<img src="${safeAvatar}" class="w-8 h-8 rounded-full object-cover border border-slate-300 group-hover:border-brand transition" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-black flex items-center justify-center text-xs border border-emerald-300\\'>${initialChar}</div>';">` :
+                            `<div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-black flex items-center justify-center text-xs border border-emerald-300">${initialChar}</div>`;
+
                         return `
                             <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl shadow-xs space-y-2">
                                 <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid}', '${safeName}', '${safeAvatar}')">
-                                        <img src="${safeAvatar}" class="w-8 h-8 rounded-full object-cover border border-slate-300 group-hover:border-brand transition">
+                                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '${safeAvatar}')">
+                                        ${avatarMarkup}
                                         <div>
-                                            <div class="text-xs font-bold text-slate-900 group-hover:text-brand transition">${att.name}</div>
+                                            <div class="text-xs font-bold text-slate-900 group-hover:text-brand transition">${rawName}</div>
                                             <div class="text-[10px] text-slate-500">${att.position || 'Player'}</div>
                                         </div>
                                     </div>
@@ -69,9 +82,9 @@ export function renderRosterTab(event) {
                                 <!-- Nested Plus-Ones / Guests Sub-section -->
                                 ${(att.guests && att.guests.length > 0) ? `
                                     <div class="ml-11 pl-3 border-l-2 border-emerald-200 space-y-1.5 pt-1">
-                                        ${att.guests.map((g) => `
+                                        ${att.guests.map((g, gIdx) => `
                                             <div class="flex items-center justify-between text-xs bg-white p-2 rounded-lg border border-slate-200">
-                                                <span class="text-slate-700 font-medium">➕ ${g.name} <span class="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold ml-1">Guest of ${att.name}</span></span>
+                                                <span class="text-slate-700 font-medium">➕ ${g.name || 'Guest'} <span class="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold ml-1">${rawName} +${gIdx + 1}</span></span>
                                                 <span class="text-[10px] font-bold text-slate-400">Confirmed (+1)</span>
                                             </div>
                                         `).join('')}
@@ -89,13 +102,21 @@ export function renderRosterTab(event) {
                 <div class="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
                     ${waitingList.length === 0 ? '<div class="text-center text-xs text-slate-400 py-4">No players on the waitlist.</div>' : ''}
                     ${waitingList.map(w => {
-                        const safeAvatar = w.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
-                        const safeName = (w.name || 'Player').replace(/'/g, "\\'");
+                        const dirUser = resolveDirectoryUser(w.uid);
+                        const safeAvatar = w.avatar || w.photoURL || w.profilePicture || w.userAvatar || dirUser?.avatar || dirUser?.photoURL || '';
+                        const rawName = w.name || w.firstName || w.displayName || w.fullName || dirUser?.name || dirUser?.firstName || dirUser?.displayName || 'Player';
+                        const safeName = rawName.replace(/'/g, "\\'");
+                        const initialChar = rawName.charAt(0).toUpperCase();
+
+                        const avatarMarkup = safeAvatar ? 
+                            `<img src="${safeAvatar}" class="w-8 h-8 rounded-full object-cover border border-amber-300 group-hover:border-brand transition" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-black flex items-center justify-center text-xs border border-amber-300\\'>${initialChar}</div>';">` :
+                            `<div class="w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-black flex items-center justify-center text-xs border border-amber-300">${initialChar}</div>`;
+
                         return `
                             <div class="flex items-center justify-between bg-amber-50/50 border border-amber-200 p-3 rounded-xl shadow-xs">
-                                <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${w.uid}', '${safeName}', '${safeAvatar}')">
-                                    <img src="${safeAvatar}" class="w-8 h-8 rounded-full object-cover border border-amber-300 group-hover:border-brand transition">
-                                    <div class="text-xs font-bold text-slate-900 group-hover:text-brand transition">${w.name}</div>
+                                <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${w.uid || ''}', '${safeName}', '${safeAvatar}')">
+                                    ${avatarMarkup}
+                                    <div class="text-xs font-bold text-slate-900 group-hover:text-brand transition">${rawName}</div>
                                 </div>
                                 <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">Waiting</span>
                             </div>
@@ -110,13 +131,21 @@ export function renderRosterTab(event) {
                 <div class="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
                     ${declinedList.length === 0 ? '<div class="text-center text-xs text-slate-400 py-4">No declined responses.</div>' : ''}
                     ${declinedList.map(d => {
-                        const safeAvatar = d.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
-                        const safeName = (d.name || 'Player').replace(/'/g, "\\'");
+                        const dirUser = resolveDirectoryUser(d.uid);
+                        const safeAvatar = d.avatar || d.photoURL || d.profilePicture || d.userAvatar || dirUser?.avatar || dirUser?.photoURL || '';
+                        const rawName = d.name || d.firstName || d.displayName || d.fullName || dirUser?.name || dirUser?.firstName || dirUser?.displayName || 'Player';
+                        const safeName = rawName.replace(/'/g, "\\'");
+                        const initialChar = rawName.charAt(0).toUpperCase();
+
+                        const avatarMarkup = safeAvatar ? 
+                            `<img src="${safeAvatar}" class="w-8 h-8 rounded-full object-cover border border-red-300 group-hover:border-brand transition" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-8 h-8 rounded-full bg-red-100 text-red-800 font-black flex items-center justify-center text-xs border border-red-300\\'>${initialChar}</div>';">` :
+                            `<div class="w-8 h-8 rounded-full bg-red-100 text-red-800 font-black flex items-center justify-center text-xs border border-red-300">${initialChar}</div>`;
+
                         return `
                             <div class="flex items-center justify-between bg-red-50/50 border border-red-200 p-3 rounded-xl shadow-xs">
-                                <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${d.uid}', '${safeName}', '${safeAvatar}')">
-                                    <img src="${safeAvatar}" class="w-8 h-8 rounded-full object-cover border border-red-300 group-hover:border-brand transition">
-                                    <div class="text-xs font-bold text-slate-900 group-hover:text-brand transition">${d.name}</div>
+                                <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${d.uid || ''}', '${safeName}', '${safeAvatar}')">
+                                    ${avatarMarkup}
+                                    <div class="text-xs font-bold text-slate-900 group-hover:text-brand transition">${rawName}</div>
                                 </div>
                                 <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-800 border border-red-200">Declined</span>
                             </div>
@@ -128,9 +157,8 @@ export function renderRosterTab(event) {
     `;
 }
 
-// 👤 Interactive Player Profile Popup Modal Handler
 window.openPlayerProfileModal = function(uid, name, avatar) {
-    if (!uid || uid === window.currentUser?.uid) return; // Prevent opening on yourself
+    if (!uid || uid === window.currentUser?.uid) return;
 
     let modal = document.getElementById('player-profile-popup');
     if (!modal) {
@@ -140,13 +168,18 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
         document.body.appendChild(modal);
     }
 
+    const initialChar = (name || 'U').charAt(0).toUpperCase();
+    const avatarHtml = avatar ? 
+        `<img src="${avatar}" class="w-20 h-20 rounded-full object-cover border-4 border-brand shadow-md" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-20 h-20 rounded-full bg-brand/20 text-brand font-black flex items-center justify-center text-2xl border-4 border-brand\\'>${initialChar}</div>';">` :
+        `<div class="w-20 h-20 rounded-full bg-brand/20 text-brand font-black flex items-center justify-center text-2xl border-4 border-brand">${initialChar}</div>`;
+
     modal.innerHTML = `
         <div class="bg-white rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-slate-900 text-center animate-in fade-in zoom-in duration-200">
             <div class="flex justify-end">
                 <button onclick="document.getElementById('player-profile-popup').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="flex flex-col items-center space-y-2">
-                <img src="${avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-20 h-20 rounded-full object-cover border-4 border-brand shadow-md">
+                ${avatarHtml}
                 <h3 class="text-base font-black text-slate-900">${name}</h3>
             </div>
             <div class="space-y-2 pt-2">
@@ -164,7 +197,6 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
 window.sendDirectMessageFromRoster = function(uid, name, avatar) {
     const modal = document.getElementById('player-profile-popup');
     if (modal) modal.remove();
-    
     if (typeof window.openChatThread === 'function') {
         window.openChatThread({ uid, name, avatar });
     } else {
@@ -175,7 +207,6 @@ window.sendDirectMessageFromRoster = function(uid, name, avatar) {
 window.sendFriendRequestFromRoster = function(uid) {
     const modal = document.getElementById('player-profile-popup');
     if (modal) modal.remove();
-
     if (typeof window.sendFriendRequest === 'function') {
         window.sendFriendRequest(uid);
     } else {

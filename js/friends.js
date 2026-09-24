@@ -91,7 +91,7 @@ window.renderFriends = async function() {
                                 </div>
                             </div>
                             ${isAlreadyFriend ? '<span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded-lg">Friend</span>' : 
-                              isSent ? '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded-lg">Request Sent</span>' : 
+                              isSent ? `<button onclick="cancelFriendRequest('${u.uid}')" class="bg-red-100 text-red-700 font-bold px-2.5 py-1 rounded-lg text-[10px] hover:bg-red-200 transition">Cancel</button>` : 
                               isReceived ? '<span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded-lg">Incoming Request</span>' :
                               `<button onclick="sendFriendRequest('${u.uid}')" class="bg-brand text-slate-950 font-black px-3 py-1.5 rounded-xl text-[10px] shadow">Send Request</button>`}
                         </div>
@@ -111,34 +111,40 @@ window.renderFriends = async function() {
     const received = window.receivedRequestsList || [];
     const sent = window.sentRequestsList || [];
 
+    let friendsHtml = '';
+    friends.forEach(f => {
+        const fName = f.name || (f.firstName ? `${f.firstName} ${f.lastName || ''}`.trim() : 'Player');
+        const safeName = fName.replace(/'/g, "\\'");
+        const avatar = f.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
+        
+        friendsHtml += `
+            <div class="bg-[#090d16] border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-sm">
+                <div class="flex items-center gap-3 cursor-pointer" onclick="viewPlayerProfile('${f.uid}', '${safeName}')">
+                    <img src="${avatar}" class="w-9 h-9 rounded-full object-cover">
+                    <div>
+                        <div class="text-xs font-bold text-white">${fName}</div>
+                        <div class="text-[10px] text-brand">Squad Member</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="openDirectChat('${f.uid}', '${safeName}', '${f.avatar || ''}')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-xl text-xs transition" title="Message">
+                        <i class="fa-solid fa-comments"></i>
+                    </button>
+                    <button onclick="confirmRemoveFriend('${f.uid}', '${safeName}')" class="text-red-400 hover:text-red-300 p-2 rounded-xl text-xs transition" title="Remove">
+                        <i class="fa-solid fa-user-minus"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+
     friendsContainer.innerHTML = `
         <div class="space-y-6">
             <div class="space-y-3">
                 <h3 class="text-xs font-black text-slate-400 uppercase tracking-wider">My Squad (${friends.length})</h3>
                 ${friends.length === 0 ? '<p class="text-xs text-slate-500 italic">No friends in your squad yet. Search above to add players!</p>' : ''}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    ${friends.map(f => {
-                        const fName = f.name || `${f.firstName || ''} ${f.lastName || ''}`.trim() || 'Player';
-                        return `
-                            <div class="bg-[#090d16] border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-sm">
-                                <div class="flex items-center gap-3 cursor-pointer" onclick="viewPlayerProfile('${f.uid}', '${fName.replace(/'/g, "\\'")}')">
-                                    <img src="${f.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-9 h-9 rounded-full object-cover">
-                                    <div>
-                                        <div class="text-xs font-bold text-white">${fName}</div>
-                                        <div class="text-[10px] text-brand">Squad Member</div>
-                                    </div>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <button onclick="openDirectChat('${f.uid}', '${fName.replace(/'/g, "\\'")}', '${f.avatar || ''}')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-xl text-xs transition" title="Message">
-                                        <i class="fa-solid fa-comments"></i>
-                                    </button>
-                                    <button onclick="confirmRemoveFriend('${f.uid}', '${fName.replace(/'/g, "\\'")}')" class="text-red-400 hover:text-red-300 p-2 rounded-xl text-xs transition" title="Remove">
-                                        <i class="fa-solid fa-user-minus"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
+                    ${friendsHtml}
                 </div>
             </div>
 
@@ -160,7 +166,7 @@ window.renderFriends = async function() {
                                     </div>
                                     <div class="flex gap-2">
                                         <button onclick="acceptFriendRequest('${p.uid}')" class="bg-brand text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow">Accept</button>
-                                        <button onclick="denyFriendRequest('${p.uid}')" class="bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs font-bold">Deny</button>
+                                        <button onclick="denyFriendRequest('${p.uid}')" class="bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs font-bold">Reject</button>
                                     </div>
                                 </div>
                             `;
@@ -177,7 +183,7 @@ window.renderFriends = async function() {
                             const p = (window.cachedDirectoryList || []).find(d => d.uid === reqUid) || { uid: reqUid, name: 'Player', firstName: 'Player', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100' };
                             const pName = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim() || 'Player';
                             return `
-                                <div class="bg-[#090d16] border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-sm opacity-80">
+                                <div class="bg-[#090d16] border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-sm opacity-90">
                                     <div class="flex items-center gap-3 cursor-pointer" onclick="viewPlayerProfile('${p.uid}', '${pName.replace(/'/g, "\\'")}')">
                                         <img src="${p.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover">
                                         <div>
@@ -185,7 +191,7 @@ window.renderFriends = async function() {
                                             <span class="text-[10px] text-slate-500">Request Pending</span>
                                         </div>
                                     </div>
-                                    <span class="text-[10px] bg-slate-800 text-slate-400 font-bold px-2.5 py-1 rounded-full">Sent</span>
+                                    <button onclick="cancelFriendRequest('${p.uid}')" class="bg-red-500/20 text-red-400 border border-red-500/30 font-bold px-3 py-1 rounded-xl text-[10px] hover:bg-red-500/30 transition">Cancel</button>
                                 </div>
                             `;
                         }).join('')}
@@ -218,8 +224,9 @@ window.sendFriendRequest = async function(targetUid) {
                 await setDoc(targetRef, targetData, { merge: true });
             }
 
-            // Write notification record for push trigger
-            const myName = window.userProfile?.name || `${window.userProfile?.firstName || ''} ${window.userProfile?.lastName || ''}`.trim() || 'Someone';
+            const myName = window.userProfile?.name || 
+                           (window.userProfile?.firstName ? `${window.userProfile.firstName} ${window.userProfile.lastName || ''}`.trim() : 'Someone');
+
             await addDoc(collection(db, 'artifacts', appId, 'notifications'), {
                 recipientUid: targetUid,
                 senderUid: myUid,
@@ -240,6 +247,35 @@ window.sendFriendRequest = async function(targetUid) {
     } catch (e) {
         console.error("Error sending friend request:", e);
         window.showToast("Failed to send request", "error");
+    }
+};
+
+window.cancelFriendRequest = async function(targetUid) {
+    if (!window.currentUser) return;
+    try {
+        const myUid = window.currentUser.uid;
+        window.sentRequestsList = window.sentRequestsList.filter(id => id !== targetUid);
+
+        const myRef = doc(db, 'artifacts', appId, 'users', myUid, 'relationships', 'data');
+        await setDoc(myRef, {
+            friends: window.friendsList,
+            sentRequests: window.sentRequestsList,
+            receivedRequests: window.receivedRequestsList
+        }, { merge: true });
+
+        const targetRef = doc(db, 'artifacts', appId, 'users', targetUid, 'relationships', 'data');
+        const targetSnap = await getDoc(targetRef);
+        if (targetSnap.exists()) {
+            let targetData = targetSnap.data();
+            targetData.receivedRequests = (targetData.receivedRequests || []).filter(id => id !== myUid);
+            await setDoc(targetRef, targetData, { merge: true });
+        }
+
+        window.showToast("Friend request canceled.");
+        window.renderFriends();
+    } catch (e) {
+        console.error("Error canceling friend request:", e);
+        window.showToast("Failed to cancel request", "error");
     }
 };
 
@@ -269,9 +305,12 @@ window.acceptFriendRequest = async function(friendUid) {
             let fData = friendSnap.data();
             fData.sentRequests = (fData.sentRequests || []).filter(id => id !== myUid);
             fData.friends = fData.friends || [];
-            const myFullName = window.userProfile.name || `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim() || 'Player';
+            
+            const myFullName = window.userProfile?.name || 
+                               (window.userProfile?.firstName ? `${window.userProfile.firstName} ${window.userProfile.lastName || ''}`.trim() : 'Player');
+
             if (!fData.friends.some(f => f.uid === myUid)) {
-                fData.friends.push({ uid: myUid, name: myFullName, avatar: window.userProfile.avatar });
+                fData.friends.push({ uid: myUid, name: myFullName, avatar: window.userProfile?.avatar });
             }
             await setDoc(friendRef, fData, { merge: true });
         }
@@ -286,13 +325,22 @@ window.acceptFriendRequest = async function(friendUid) {
 window.denyFriendRequest = async function(friendUid) {
     if (!window.currentUser) return;
     try {
+        const myUid = window.currentUser.uid;
         window.receivedRequestsList = window.receivedRequestsList.filter(id => id !== friendUid);
-        const myRef = doc(db, 'artifacts', appId, 'users', window.currentUser.uid, 'relationships', 'data');
+        const myRef = doc(db, 'artifacts', appId, 'users', myUid, 'relationships', 'data');
         await setDoc(myRef, {
             friends: window.friendsList,
             sentRequests: window.sentRequestsList,
             receivedRequests: window.receivedRequestsList
         }, { merge: true });
+
+        const friendRef = doc(db, 'artifacts', appId, 'users', friendUid, 'relationships', 'data');
+        const friendSnap = await getDoc(friendRef);
+        if (friendSnap.exists()) {
+            let fData = friendSnap.data();
+            fData.sentRequests = (fData.sentRequests || []).filter(id => id !== myUid);
+            await setDoc(friendRef, fData, { merge: true });
+        }
 
         window.showToast("Friend request denied.");
         window.renderFriends();
