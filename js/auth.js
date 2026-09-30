@@ -10,6 +10,7 @@ import {
     GoogleAuthProvider, 
     FacebookAuthProvider, 
     TwitterAuthProvider,
+    OAuthProvider,
     getAuth,
     signOut,
     onAuthStateChanged
@@ -151,6 +152,11 @@ window.handleSocialAuth = async function(providerName) {
     let provider;
     if (providerName === 'google') provider = new GoogleAuthProvider();
     else if (providerName === 'facebook') provider = new FacebookAuthProvider();
+    else if (providerName === 'apple') {
+        provider = new OAuthProvider('apple.com');
+        provider.addScope('email');
+        provider.addScope('name');
+    }
     else if (providerName === 'x') provider = new TwitterAuthProvider();
     else return;
 

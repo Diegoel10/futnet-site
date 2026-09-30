@@ -181,8 +181,7 @@ window.renderEvents = function() {
         return;
     }
 
-    const futGreen = '#00F296';
-    const futTeal = '#00B4AE';
+    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
     grid.innerHTML = filtered.map(ev => {
         const formatMatch = (ev.format || "").match(/(\d+)/);
@@ -220,6 +219,8 @@ window.renderEvents = function() {
 
         const communityName = ev.communityName || "";
         const communityThumbnail = ev.communityThumbnail || "";
+        const hostAvatar = (ev.organizerAvatar && ev.organizerAvatar.trim() !== '') ? ev.organizerAvatar : ((ev.hostAvatar && ev.hostAvatar.trim() !== '') ? ev.hostAvatar : defaultAvatar);
+        const hostName = ev.organizer || ev.hostName || 'Organizer';
 
         return `
             <div onclick="openEventDetails('${ev.id}')" class="relative bg-[#010A0F]/90 rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-emerald-500/60 hover:border-emerald-400 transition cursor-pointer p-4 space-y-3">
@@ -231,7 +232,6 @@ window.renderEvents = function() {
                 ` : ''}
 
                 <div class="relative z-10 space-y-3">
-                    <!-- Optional Community Badge Header -->
                     ${communityName ? `
                         <div class="flex justify-center">
                             <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-[#00F296]/50 text-[#00F296] text-[10px] font-black">
@@ -241,7 +241,6 @@ window.renderEvents = function() {
                         </div>
                     ` : ''}
 
-                    <!-- Top Tags Row -->
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-1.5 bg-black/50 px-2.5 py-1 rounded-xl border border-[#00B4AE]/80 text-white text-[10px] font-bold">
                             <i class="fa-solid fa-users text-[10px]"></i>
@@ -254,10 +253,8 @@ window.renderEvents = function() {
                         </div>
                     </div>
 
-                    <!-- Game Title -->
                     ${ev.title ? `<h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${ev.title}</h3>` : ''}
 
-                    <!-- Date, Time, Location -->
                     <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                         <div class="flex items-center space-x-2">
                             <i class="fa-solid fa-calendar text-[#00F296] w-3.5"></i>
@@ -274,16 +271,14 @@ window.renderEvents = function() {
                     </div>
 
                     <div class="border-t border-white/10 pt-2.5 flex items-center justify-between">
-                        <!-- Host Info -->
                         <div onclick="event.stopPropagation(); window.switchTab('profile');" class="flex items-center space-x-2 cursor-pointer group">
-                            <img src="${ev.organizerAvatar || ev.hostAvatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover border border-[#00F296]/60 shadow-sm">
+                            <img src="${hostAvatar}" class="w-6 h-6 rounded-full object-cover border border-[#00F296]/60 shadow-sm">
                             <div>
                                 <div class="text-[7px] font-bold text-white/60 uppercase leading-none">BY</div>
-                                <div class="text-[10px] font-bold text-white group-hover:text-[#00F296] transition">${ev.organizer || ev.hostName || 'Organizer'}</div>
+                                <div class="text-[10px] font-bold text-white group-hover:text-[#00F296] transition">${hostName}</div>
                             </div>
                         </div>
 
-                        <!-- Going Counter Badge -->
                         <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${isFull ? 'bg-red-500/30 border-red-500 text-red-200' : 'bg-[#00F296]/30 border-[#00F296] text-white'}">
                             <i class="fa-solid ${isFull ? 'fa-user-xmark' : 'fa-user-check'}"></i>
                             <span>${isFull ? 'Full' : `${currentGoing} /${maxCapacity} Going`}</span>

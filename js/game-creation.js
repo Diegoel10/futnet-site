@@ -213,7 +213,10 @@ window.handleCreateEvent = async function(e) {
     let eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
     const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim();
-    const organizerAvatar = window.userProfile.avatar || window.userProfile.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const organizerAvatar = (window.userProfile.avatar && window.userProfile.avatar.trim() !== '') 
+        ? window.userProfile.avatar 
+        : (window.currentUser.photoURL || defaultAvatar);
 
     let attendees = [{
         uid: window.currentUser.uid,
@@ -242,6 +245,8 @@ window.handleCreateEvent = async function(e) {
         organizerId: window.currentUser.uid,
         organizer: organizerName,
         organizerAvatar: organizerAvatar,
+        hostName: organizerName,
+        hostAvatar: organizerAvatar,
         attendees: attendees,
         waitingList: [],
         declinedList: [],

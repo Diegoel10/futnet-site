@@ -12,6 +12,14 @@
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6090723692830298" crossorigin="anonymous"></script>
     <!-- Custom Styles -->
     <link rel="stylesheet" href="css/styles.css">
+    <style>
+        /* Prevent mobile browsers from auto-zooming and breaking layout on input focus */
+        @media screen and (max-width: 768px) {
+            input, select, textarea {
+                font-size: 16px !important;
+            }
+        }
+    </style>
     <script>
         tailwind.config = {
             theme: {
@@ -130,14 +138,14 @@
                         <label class="block text-[10px] sm:text-[11px] font-bold text-white/70 tracking-[0.3px] uppercase">Email Address</label>
                         <div class="flex items-center space-x-3 h-[46px] sm:h-[50px] px-4 bg-black rounded-2xl border border-teal-500/85" style="background-color: #000000 !important;">
                             <i class="fa-solid fa-envelope text-[#8DCDD2] text-[14px] w-5"></i>
-                            <input type="email" id="auth-email" placeholder="name@example.com" required class="w-full bg-black text-white text-[14px] font-medium focus:outline-none placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="email" id="auth-email" placeholder="name@example.com" required class="w-full bg-black text-white text-base sm:text-sm font-medium focus:outline-none placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                     </div>
                     <div class="space-y-1">
                         <label class="block text-[10px] sm:text-[11px] font-bold text-white/70 tracking-[0.3px] uppercase">Password</label>
                         <div class="flex items-center space-x-3 h-[46px] sm:h-[50px] px-4 bg-black rounded-2xl border border-sky-400/90" style="background-color: #000000 !important;">
                             <i class="fa-solid fa-lock text-[#8DCDD2] text-[14px] w-5"></i>
-                            <input type="password" id="auth-password" placeholder="Password" required class="w-full bg-black text-white text-[14px] font-medium focus:outline-none placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="password" id="auth-password" placeholder="Password" required class="w-full bg-black text-white text-base sm:text-sm font-medium focus:outline-none placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                     </div>
                     <div id="login-error-msg" class="hidden text-xs font-semibold text-red-400 text-center bg-red-950/40 p-2 rounded-xl border border-red-500/30"></div>
@@ -175,39 +183,39 @@
                     <div class="grid grid-cols-2 gap-2.5">
                         <div>
                             <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">First Name</label>
-                            <input type="text" id="reg-firstname" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="text" id="reg-firstname" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                         <div>
                             <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Last Name</label>
-                            <input type="text" id="reg-lastname" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="text" id="reg-lastname" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                     </div>
 
                     <div>
                         <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Nickname (Optional)</label>
-                        <input type="text" id="reg-nickname" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" placeholder="e.g. R10, El Mago" style="background-color: #000000 !important; color: #ffffff !important;">
+                        <input type="text" id="reg-nickname" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" placeholder="e.g. R10, El Mago" style="background-color: #000000 !important; color: #ffffff !important;">
                     </div>
 
                     <div>
                         <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Email Address</label>
-                        <input type="email" id="reg-email" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                        <input type="email" id="reg-email" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                     </div>
 
                     <div class="grid grid-cols-2 gap-2.5">
                         <div>
                             <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Password</label>
-                            <input type="password" id="reg-password" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="password" id="reg-password" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                         <div>
                             <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Confirm Password</label>
-                            <input type="password" id="reg-confirm" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="password" id="reg-confirm" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2.5">
                         <div>
                             <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Gender</label>
-                            <select id="reg-gender" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <select id="reg-gender" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                                 <option value="Male" class="bg-slate-900">Male</option>
                                 <option value="Female" class="bg-slate-900">Female</option>
                                 <option value="Other" class="bg-slate-900">Other</option>
@@ -215,13 +223,13 @@
                         </div>
                         <div>
                             <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Birthday</label>
-                            <input type="date" id="reg-dob" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
+                            <input type="date" id="reg-dob" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
                     </div>
 
                     <div>
                         <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Favorite Position</label>
-                        <select id="reg-position" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                        <select id="reg-position" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                             <option value="Forward" class="bg-slate-900">Forward (ST / LW / RW)</option>
                             <option value="Midfielder" class="bg-slate-900">Midfielder (CM / CAM / CDM)</option>
                             <option value="Defender" class="bg-slate-900">Defender (CB / LB / RB)</option>
@@ -318,7 +326,7 @@
                             <!-- Title -->
                             <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-1.5">
                                 <label class="block text-[10px] font-black text-white/60 tracking-wider">🏆 GAME / EVENT TITLE (OPTIONAL)</label>
-                                <input type="text" id="ce-title" placeholder="Soccer pick-up (default)" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
+                                <input type="text" id="ce-title" placeholder="Soccer pick-up (default)" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
                             </div>
 
                             <!-- Visibility -->
@@ -347,11 +355,11 @@
                             <div class="grid grid-cols-2 gap-3">
                                 <div class="bg-black/30 p-3.5 rounded-2xl border border-white/10 space-y-1.5">
                                     <label class="block text-[10px] font-black text-white/60 tracking-wider">📅 DATE</label>
-                                    <input type="date" id="ce-date" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <input type="date" id="ce-date" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
                                 </div>
                                 <div class="bg-black/30 p-3.5 rounded-2xl border border-white/10 space-y-1.5">
                                     <label class="block text-[10px] font-black text-white/60 tracking-wider">⏰ TIME</label>
-                                    <input type="time" id="ce-time" value="20:00" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <input type="time" id="ce-time" value="20:00" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
                                 </div>
                             </div>
 
@@ -359,18 +367,18 @@
                             <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-3">
                                 <label class="block text-[10px] font-black text-[#00F296] tracking-wider">📍 PARK & LOCATION *</label>
                                 <div class="relative">
-                                    <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Enter park name (Required)" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2.5 text-white text-xs focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
+                                    <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Enter park name (Required)" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2.5 text-white text-base sm:text-xs focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
                                     <i class="fa-solid fa-location-dot absolute left-3 top-3 text-[#00F296] text-xs"></i>
                                 </div>
                                 <input type="hidden" id="ce-parkname">
                                 <div class="grid grid-cols-3 gap-2">
                                     <div class="col-span-2">
                                         <label class="block text-[9px] font-black text-[#00F296] mb-1">CITY *</label>
-                                        <input type="text" id="ce-city" placeholder="City" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                        <input type="text" id="ce-city" placeholder="City" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                     </div>
                                     <div>
                                         <label class="block text-[9px] font-black text-white/60 mb-1">STATE</label>
-                                        <input type="text" id="ce-state" value="FL" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                        <input type="text" id="ce-state" value="FL" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                     </div>
                                 </div>
                             </div>
@@ -379,7 +387,7 @@
                             <div class="grid grid-cols-3 gap-2.5">
                                 <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
                                     <label class="block text-[9px] font-black text-white/60 mb-1">👥 TEAMS</label>
-                                    <select id="ce-teams-count" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <select id="ce-teams-count" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                         <option value="2">2 Teams</option>
                                         <option value="3" selected>3 Teams</option>
                                         <option value="4">4 Teams</option>
@@ -387,7 +395,7 @@
                                 </div>
                                 <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
                                     <label class="block text-[9px] font-black text-white/60 mb-1">⚽ FORMAT</label>
-                                    <select id="ce-format" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <select id="ce-format" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                         <option value="5v5">5v5</option>
                                         <option value="7v7" selected>7v7</option>
                                         <option value="8v8">8v8</option>
@@ -396,7 +404,7 @@
                                 </div>
                                 <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
                                     <label class="block text-[9px] font-black text-white/60 mb-1">💵 FEE</label>
-                                    <select id="ce-fee" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <select id="ce-fee" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                         <option value="Free" selected>Free</option>
                                         <option value="$5">$5</option>
                                         <option value="$6">$6</option>
@@ -424,13 +432,13 @@
                                 <!-- Description -->
                                 <div class="space-y-1">
                                     <label class="block text-[10px] font-black text-white/60 tracking-wider">📝 DESCRIPTION</label>
-                                    <textarea id="ce-description" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Friendly match, bring light/dark shirts..."></textarea>
+                                    <textarea id="ce-description" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Friendly match, bring light/dark shirts..."></textarea>
                                 </div>
 
                                 <!-- Rules -->
                                 <div class="space-y-1">
                                     <label class="block text-[10px] font-black text-white/60 tracking-wider">📜 RULES</label>
-                                    <textarea id="ce-rules" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="No sliding tackles, respect referee calls..."></textarea>
+                                    <textarea id="ce-rules" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="No sliding tackles, respect referee calls..."></textarea>
                                 </div>
 
                                 <!-- Plus Ones -->
@@ -444,7 +452,7 @@
 
                                     <div id="plus-one-limit-box" class="hidden pt-2 flex items-center justify-between text-xs text-white/80">
                                         <span>Max Plus Ones Limit:</span>
-                                        <select id="ce-plus-one-limit" class="bg-black/50 border border-teal-500/50 rounded-lg px-3 py-1.5 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                        <select id="ce-plus-one-limit" class="bg-black/50 border border-teal-500/50 rounded-lg px-3 py-1.5 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                             <option value="1">1</option>
                                             <option value="2">2</option>
                                             <option value="3">3</option>
@@ -481,7 +489,7 @@
                             <p class="text-white/70 text-xs mt-0.5">Search players by name or nickname to add to your squad.</p>
                         </div>
                         <div class="w-full sm:w-64 relative">
-                            <input type="text" id="friend-search-input" oninput="renderFriends()" autocomplete="off" class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search by name or nickname...">
+                            <input type="text" id="friend-search-input" oninput="renderFriends()" autocomplete="off" class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search by name or nickname...">
                             <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-white/50 text-xs"></i>
                             <div id="search-dropdown" class="hidden absolute left-0 right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto divide-y divide-white/10"></div>
                         </div>
@@ -510,7 +518,7 @@
                                 <h2 class="text-sm font-black text-white uppercase tracking-wider">Chats</h2>
                             </div>
                             <div class="p-3 shrink-0">
-                                <input type="text" id="chats-search-input" oninput="renderChatsList()" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search chats...">
+                                <input type="text" id="chats-search-input" oninput="renderChatsList()" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search chats...">
                             </div>
                             <div id="chats-threads-container" class="flex-1 overflow-y-auto divide-y divide-white/10"></div>
                         </div>
@@ -529,7 +537,7 @@
                                 </div>
                                 <div id="active-chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3"></div>
                                 <form onsubmit="handleSendActiveChatMessage(event)" class="p-3 border-t border-white/10 flex gap-2 bg-black/30 shrink-0">
-                                    <input type="text" id="active-chat-input" oninput="handleChatInputKeypress()" required class="flex-1 bg-black/50 border border-teal-500/60 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Type a message...">
+                                    <input type="text" id="active-chat-input" oninput="handleChatInputKeypress()" required class="flex-1 bg-black/50 border border-teal-500/60 rounded-xl px-4 py-2.5 text-white text-base sm:text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Type a message...">
                                     <button type="submit" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-5 py-2.5 rounded-xl transition text-xs">
                                         <i class="fa-solid fa-paper-plane"></i>
                                     </button>
@@ -573,11 +581,14 @@
  <!-- MAIN SCRIPT CONTROLLER -->
     <script type="module">
         import { auth, db, appId } from './js/firebase-config.js';
+        import { OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import './js/auth.js';
         import './js/home.js';
         import './js/games.js';
         import './js/game-creation.js';
         import './js/game-profile/modal-core.js';
+        import './js/game-profile/add-players-modal.js';
+        import './js/game-profile/match-management.js';
         import './js/friends.js';
         import './js/chat.js';
         import './js/profile.js';
@@ -651,6 +662,43 @@
             if (tabName === 'chat' && window.renderChatsList) window.renderChatsList();
             if (tabName === 'profile' && window.renderProfileTab) window.renderProfileTab();
         };
+
+        window.handleSocialAuth = async function(providerName) {
+            let provider;
+            if (providerName === 'google') {
+                const { GoogleAuthProvider } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                provider = new GoogleAuthProvider();
+            } else if (providerName === 'apple') {
+                provider = new OAuthProvider('apple.com');
+                provider.addScope('email');
+                provider.addScope('name');
+            } else {
+                return;
+            }
+
+            try {
+                if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                    await signInWithRedirect(auth, provider);
+                } else {
+                    try {
+                        await signInWithPopup(auth, provider);
+                    } catch (popupErr) {
+                        if (popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/popup-closed-by-user') {
+                            await signInWithRedirect(auth, provider);
+                        } else {
+                            throw popupErr;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Auth error:", err);
+                window.showToast(`Sign in error: ${err.message}`, "error");
+            }
+        };
+
+        getRedirectResult(auth).catch((error) => {
+            console.error("Redirect auth error:", error);
+        });
 
         onAuthStateChanged(auth, async (user) => {
             window.currentUser = user;
