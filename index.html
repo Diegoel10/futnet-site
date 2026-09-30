@@ -30,16 +30,19 @@
         }
     </script>
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans antialiased min-h-screen flex flex-col pb-20 md:pb-0">
+<body class="bg-slate-950 text-white font-sans antialiased min-h-screen flex flex-col pb-20 md:pb-0" style="background: #040E13 url('img/GamesBackground.png') center/cover no-repeat fixed;">
+
+    <!-- Dark Gradient Overlay for Immersive Stadium Look -->
+    <div class="fixed inset-0 bg-gradient-to-b from-black/60 via-black/70 to-black/90 pointer-events-none z-0"></div>
 
     <!-- Notification Toast Container -->
     <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col space-y-3 pointer-events-none"></div>
 
     <!-- MAIN APP CONTAINER -->
-    <div id="app" class="flex-1 flex flex-col">
+    <div id="app" class="relative z-10 flex-1 flex flex-col">
         
         <!-- INITIAL LOADING SCREEN -->
-        <div id="loading-screen" class="flex-1 flex flex-col items-center justify-center p-6 bg-white text-center">
+        <div id="loading-screen" class="flex-1 flex flex-col items-center justify-center p-6 bg-[#040E13] text-center">
             <div class="relative w-24 h-24 mb-6">
                 <div class="absolute inset-0 rounded-full border-4 border-brand/20 animate-pulse"></div>
                 <div class="absolute inset-0 rounded-full border-4 border-brand border-t-transparent animate-spin"></div>
@@ -47,13 +50,12 @@
                     <i class="fa-solid fa-futbol"></i>
                 </div>
             </div>
-            <h2 class="text-2xl font-black tracking-wider text-slate-900 mb-2">FUTNET</h2>
-            <p id="loading-status" class="text-slate-500 text-sm animate-pulse">Connecting to Firebase Cloud ecosystem...</p>
+            <h2 class="text-2xl font-black tracking-wider text-white mb-2">FUTNET</h2>
+            <p id="loading-status" class="text-white/70 text-sm animate-pulse">Connecting to Firebase Cloud ecosystem...</p>
         </div>
 
         <!-- AUTH & UNIFIED SIGN-UP CONTAINER -->
-        <div id="auth-container" class="hidden fixed inset-0 flex flex-col items-center justify-center p-3 sm:p-6 bg-slate-950 overflow-y-auto" style="background: #040E13 url('img/Background_Login.jpg') center/cover no-repeat;">
-            <!-- Dark Gradient Overlay matching iOS App -->
+        <div id="auth-container" class="hidden fixed inset-0 flex flex-col items-center justify-center p-3 sm:p-6 bg-slate-950 overflow-y-auto" style="background: #040E13 url('img/GamesBackground.png') center/cover no-repeat;">
             <div class="absolute inset-0 bg-gradient-to-b from-black/50 via-black/60 to-black/90 pointer-events-none"></div>
 
             <!-- Login View -->
@@ -200,27 +202,27 @@
         <!-- MAIN DASHBOARD CONTAINER -->
         <div id="main-container" class="hidden flex-1 flex flex-col">
             <!-- Desktop Header Bar with Create Game Button -->
-            <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-40 shadow-sm">
+            <header class="bg-[#040E13]/90 border-b border-emerald-500/30 px-6 py-4 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md shadow-lg">
                 <div class="flex items-center space-x-3">
-                    <div class="flex items-center gap-2 font-black tracking-tight italic text-2xl">
-                        <span class="text-slate-900">FUT<span class="text-brand">NET</span></span>
+                    <div class="flex items-center gap-2 font-black tracking-tight italic text-2xl text-white">
+                        <span class="text-white">FUT<span class="text-brand">NET</span></span>
                     </div>
                 </div>
 
                 <!-- Desktop Centered Nav Tabs with Profile Picture Icon -->
-                <nav class="hidden md:flex items-center space-x-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                <nav class="hidden md:flex items-center space-x-1 bg-black/40 p-1.5 rounded-2xl border border-emerald-500/30">
                     <button onclick="switchTab('events')" id="nav-btn-events" class="px-4 py-2 rounded-xl text-xs font-bold transition bg-brand text-slate-950 shadow flex items-center gap-2"><i class="fa-solid fa-calendar-days"></i> Games</button>
-                    <button onclick="switchTab('friends')" id="nav-btn-friends" class="px-4 py-2 rounded-xl text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-2 relative">
+                    <button onclick="switchTab('friends')" id="nav-btn-friends" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2 relative">
                         <i class="fa-solid fa-user-group"></i> Friends 
                         <span id="friends-badge" class="hidden bg-brand text-slate-950 font-black text-[9px] px-1.5 py-0.2 rounded-full">0</span>
                     </button>
-                    <button onclick="switchTab('leaderboard')" id="nav-btn-leaderboard" class="px-4 py-2 rounded-xl text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-2"><i class="fa-solid fa-ranking-star"></i> Leaderboard</button>
-                    <button onclick="switchTab('chat')" id="nav-btn-chat" class="px-4 py-2 rounded-xl text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-2 relative">
+                    <button onclick="switchTab('hub')" id="nav-btn-hub" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2"><i class="fa-solid fa-shield"></i> Hub</button>
+                    <button onclick="switchTab('chat')" id="nav-btn-chat" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2 relative">
                         <i class="fa-solid fa-comments"></i> Chats 
                         <span id="chats-badge" class="hidden bg-brand text-slate-950 font-black text-[9px] px-1.5 py-0.2 rounded-full">0</span>
                     </button>
-                    <button onclick="switchTab('profile')" id="nav-btn-profile" class="px-4 py-2 rounded-xl text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-2">
-                        <img id="nav-avatar-icon" src="" class="w-5 h-5 rounded-full object-cover border border-slate-300"> Profile
+                    <button onclick="switchTab('profile')" id="nav-btn-profile" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2">
+                        <img id="nav-avatar-icon" src="" class="w-5 h-5 rounded-full object-cover border border-emerald-500/50"> Profile
                     </button>
                 </nav>
 
@@ -238,12 +240,12 @@
                 <!-- TAB 1: EVENTS & GAMES -->
                 <div id="tab-events" class="space-y-6">
                     <!-- Sleek Horizontal Date Pill Carousel Bar -->
-                    <div class="bg-white border border-slate-200 p-3 rounded-2xl shadow-sm overflow-x-auto flex items-center space-x-2 no-scrollbar" id="date-tabs-container"></div>
+                    <div class="bg-[#040E13]/90 border border-emerald-500/30 p-3 rounded-2xl shadow-xl backdrop-blur-md overflow-x-auto flex items-center space-x-2 no-scrollbar" id="date-tabs-container"></div>
 
                     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
-                            <h2 class="text-xl font-black text-slate-900" id="selected-date-title">Games for Today</h2>
-                            <p class="text-slate-500 text-xs mt-0.5">Click any game card to view full details, rosters, rules, and match stats.</p>
+                            <h2 class="text-xl font-black text-white" id="selected-date-title">Games for Today</h2>
+                            <p class="text-white/70 text-xs mt-0.5">Click any game card to view full details, rosters, rules, and match stats.</p>
                         </div>
                     </div>
 
@@ -255,120 +257,120 @@
                 <div id="tab-event-details-screen" class="hidden space-y-6"></div>
 
                 <!-- FULL SCREEN: CREATE GAME -->
-                <div id="tab-create-event" class="hidden max-w-2xl mx-auto bg-white border border-slate-200 rounded-3xl p-8 shadow-xl space-y-6">
-                    <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div id="tab-create-event" class="hidden max-w-2xl mx-auto bg-[#040E13]/95 border border-emerald-500/50 rounded-3xl p-8 shadow-2xl backdrop-blur-md space-y-6">
+                    <div class="flex items-center justify-between border-b border-white/10 pb-4">
                         <div>
-                            <h2 class="text-2xl font-black text-slate-900 flex items-center gap-2">⚽ Create New Soccer Game</h2>
-                            <p class="text-slate-500 text-xs mt-0.5">Fill out the details below to publish your match to the squad.</p>
+                            <h2 class="text-2xl font-black text-white flex items-center gap-2">⚽ Create New Soccer Game</h2>
+                            <p class="text-white/70 text-xs mt-0.5">Fill out the details below to publish your match to the squad.</p>
                         </div>
-                        <button onclick="switchTab('events')" class="text-slate-400 hover:text-slate-700 text-sm font-bold"><i class="fa-solid fa-xmark text-xl"></i></button>
+                        <button onclick="switchTab('events')" class="text-white/50 hover:text-white text-sm font-bold"><i class="fa-solid fa-xmark text-xl"></i></button>
                     </div>
 
                     <form onsubmit="handleCreateEvent(event)" class="space-y-5">
                         <div>
-                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🏷 Game / Event Title</label>
-                            <input type="text" id="ce-title" placeholder="e.g. Saturday Sunset 7v7" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
+                            <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">🏷 Game / Event Title</label>
+                            <input type="text" id="ce-title" placeholder="e.g. Saturday Sunset 7v7" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
                         </div>
 
                         <div>
-                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🔒 Game Visibility</label>
-                            <select id="ce-visibility" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
-                                <option value="Public">Public (Anyone can see and join)</option>
-                                <option value="Private">Squad Only (Invite only)</option>
+                            <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">🔒 Game Visibility</label>
+                            <select id="ce-visibility" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;">
+                                <option value="Public" class="bg-slate-900">Public (Anyone can see and join)</option>
+                                <option value="Private" class="bg-slate-900">Squad Only (Invite only)</option>
                             </select>
                         </div>
 
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">📅 Date</label>
-                                <input type="date" id="ce-date" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand cursor-pointer">
+                                <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">📅 Date</label>
+                                <input type="date" id="ce-date" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">⏰ Time</label>
-                                <input type="time" id="ce-time" value="20:00" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand cursor-pointer">
+                                <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">⏰ Time</label>
+                                <input type="time" id="ce-time" value="20:00" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
                             </div>
                         </div>
 
                         <!-- Park & Location Cloud Search Field with Inline oninput Handler -->
-                        <div class="space-y-2 bg-slate-50/70 p-4 rounded-2xl border border-slate-200">
-                            <label class="block text-xs font-semibold text-slate-700 uppercase">📍 Park & Location</label>
+                        <div class="space-y-2 bg-black/30 p-4 rounded-2xl border border-white/10">
+                            <label class="block text-xs font-semibold text-white/80 uppercase">📍 Park & Location</label>
                             <div class="relative">
-                                <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Type park name or search database..." class="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-2.5 text-slate-900 text-xs focus:outline-none focus:border-brand" autocomplete="off">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-xs"></i>
+                                <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Type park name or search database..." class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2.5 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-white/50 text-xs"></i>
                             </div>
                             <div class="grid grid-cols-3 gap-2 pt-2">
-                                <input type="text" id="ce-parkname" placeholder="Park Name" required class="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs">
-                                <input type="text" id="ce-city" placeholder="City" required class="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs">
-                                <input type="text" id="ce-state" placeholder="State" required class="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs">
+                                <input type="text" id="ce-parkname" placeholder="Park Name" required class="bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                <input type="text" id="ce-city" placeholder="City" required class="bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                <input type="text" id="ce-state" placeholder="State" required class="bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                             </div>
                         </div>
 
                         <div class="grid grid-cols-3 gap-3">
                             <div>
-                                <label class="block text-[10px] font-semibold text-slate-700 uppercase mb-1">👥 Teams Count</label>
-                                <select id="ce-teams-count" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
-                                    <option value="2">2 Teams</option>
-                                    <option value="3" selected>3 Teams</option>
-                                    <option value="4">4 Teams</option>
+                                <label class="block text-[10px] font-semibold text-white/80 uppercase mb-1">👥 Teams Count</label>
+                                <select id="ce-teams-count" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <option value="2" class="bg-slate-900">2 Teams</option>
+                                    <option value="3" selected class="bg-slate-900">3 Teams</option>
+                                    <option value="4" class="bg-slate-900">4 Teams</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-[10px] font-semibold text-slate-700 uppercase mb-1">⚽ Game Format</label>
-                                <select id="ce-format" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
-                                    <option value="3v3">3v3</option>
-                                    <option value="4v4">4v4</option>
-                                    <option value="5v5">5v5</option>
-                                    <option value="6v6">6v6</option>
-                                    <option value="7v7" selected>7v7</option>
-                                    <option value="8v8">8v8</option>
-                                    <option value="9v9">9v9</option>
-                                    <option value="10v10">10v10</option>
-                                    <option value="11v11">11v11</option>
-                                    <option value="12v12">12v12</option>
+                                <label class="block text-[10px] font-semibold text-white/80 uppercase mb-1">⚽ Game Format</label>
+                                <select id="ce-format" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    <option value="3v3" class="bg-slate-900">3v3</option>
+                                    <option value="4v4" class="bg-slate-900">4v4</option>
+                                    <option value="5v5" class="bg-slate-900">5v5</option>
+                                    <option value="6v6" class="bg-slate-900">6v6</option>
+                                    <option value="7v7" selected class="bg-slate-900">7v7</option>
+                                    <option value="8v8" class="bg-slate-900">8v8</option>
+                                    <option value="9v9" class="bg-slate-900">9v9</option>
+                                    <option value="10v10" class="bg-slate-900">10v10</option>
+                                    <option value="11v11" class="bg-slate-900">11v11</option>
+                                    <option value="12v12" class="bg-slate-900">12v12</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-[10px] font-semibold text-slate-700 uppercase mb-1">💵 Entry Fee</label>
-                                <input type="text" id="ce-fee" value="Free" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs">
+                                <label class="block text-[10px] font-semibold text-white/80 uppercase mb-1">💵 Entry Fee</label>
+                                <input type="text" id="ce-fee" value="Free" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                             </div>
                         </div>
 
                         <!-- COLLAPSIBLE ADVANCED SETTINGS SECTION -->
-                        <div class="border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
-                            <button type="button" onclick="toggleAdvancedSettings()" class="w-full p-4 flex items-center justify-between text-xs font-black text-slate-800 uppercase tracking-wider hover:bg-slate-100 transition">
-                                <span class="flex items-center gap-2"><i class="fa-solid fa-sliders text-brand"></i> ⚙️️ Advanced Settings</span>
-                                <i id="advanced-settings-chevron" class="fa-solid fa-chevron-down text-slate-500"></i>
+                        <div class="border border-white/10 rounded-2xl overflow-hidden bg-black/30">
+                            <button type="button" onclick="toggleAdvancedSettings()" class="w-full p-4 flex items-center justify-between text-xs font-black text-white uppercase tracking-wider hover:bg-white/5 transition">
+                                <span class="flex items-center gap-2"><i class="fa-solid fa-sliders text-brand"></i> ⚙️ Advanced Settings</span>
+                                <i id="advanced-settings-chevron" class="fa-solid fa-chevron-down text-white/50"></i>
                             </button>
                             
-                            <div id="advanced-settings-container" class="hidden p-4 space-y-4 border-t border-slate-200 bg-white">
+                            <div id="advanced-settings-container" class="hidden p-4 space-y-4 border-t border-white/10 bg-[#040E13]">
                                 <div>
-                                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">📝 Description & Overview</label>
-                                    <textarea id="ce-description" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="Friendly match, bring light/dark shirts..."></textarea>
+                                    <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">📝 Description & Overview</label>
+                                    <textarea id="ce-description" rows="2" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Friendly match, bring light/dark shirts..."></textarea>
                                 </div>
 
                                 <div>
-                                    <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">📜 Rules & Guidelines</label>
-                                    <textarea id="ce-rules" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="No sliding tackles, respect referee calls..."></textarea>
+                                    <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">📜 Rules & Guidelines</label>
+                                    <textarea id="ce-rules" rows="2" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="No sliding tackles, respect referee calls..."></textarea>
                                 </div>
 
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
-                                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">➕ Allow Plus Ones?</label>
-                                        <select id="ce-allow-plus-ones" onchange="togglePlusOneLimit(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
-                                            <option value="no" selected>No</option>
-                                            <option value="yes">Yes</option>
+                                        <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">➕ Allow Plus Ones?</label>
+                                        <select id="ce-allow-plus-ones" onchange="togglePlusOneLimit(this.value)" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="no" selected class="bg-slate-900">No</option>
+                                            <option value="yes" class="bg-slate-900">Yes</option>
                                         </select>
                                     </div>
                                     <div id="plus-one-limit-box" class="hidden">
-                                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🔢 Limit of Plus Ones per Player</label>
-                                        <select id="ce-plus-one-limit" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 text-xs">
-                                            <option value="1" selected>1 Guest</option>
-                                            <option value="2">2 Guests</option>
-                                            <option value="3">3 Guests</option>
-                                            <option value="4">4 Guests</option>
-                                            <option value="5">5 Guests</option>
-                                            <option value="6">6 Guests</option>
-                                            <option value="7">7 Guests</option>
+                                        <label class="block text-xs font-semibold text-white/80 uppercase mb-1.5">🔢 Limit of Plus Ones per Player</label>
+                                        <select id="ce-plus-one-limit" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="1" selected class="bg-slate-900">1 Guest</option>
+                                            <option value="2" class="bg-slate-900">2 Guests</option>
+                                            <option value="3" class="bg-slate-900">3 Guests</option>
+                                            <option value="4" class="bg-slate-900">4 Guests</option>
+                                            <option value="5" class="bg-slate-900">5 Guests</option>
+                                            <option value="6" class="bg-slate-900">6 Guests</option>
+                                            <option value="7" class="bg-slate-900">7 Guests</option>
                                         </select>
                                     </div>
                                 </div>
@@ -376,7 +378,7 @@
                         </div>
 
                         <div class="pt-4 flex gap-4">
-                            <button type="button" onclick="switchTab('events')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition text-xs uppercase">Cancel</button>
+                            <button type="button" onclick="switchTab('events')" class="flex-1 bg-white/10 hover:bg-white/20 text-white font-bold py-3.5 rounded-xl transition text-xs uppercase">Cancel</button>
                             <button type="submit" class="flex-1 bg-brand hover:bg-brand-dark text-slate-950 font-black py-3.5 rounded-xl transition text-xs uppercase shadow-md flex items-center justify-center gap-2">
                                 <i class="fa-solid fa-check"></i> Publish Game
                             </button>
@@ -386,85 +388,61 @@
 
                 <!-- TAB 2: FRIENDS & SQUAD -->
                 <div id="tab-friends" class="hidden space-y-6">
-                    <div class="bg-white border border-slate-200 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 relative shadow-sm">
+                    <div class="bg-[#040E13]/90 border border-emerald-500/30 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 relative shadow-xl backdrop-blur-md">
                         <div>
-                            <h2 class="text-xl font-black text-slate-900">Squad & Friends</h2>
-                            <p class="text-slate-500 text-xs mt-0.5">Search players by name or nickname to add to your squad.</p>
+                            <h2 class="text-xl font-black text-white">Squad & Friends</h2>
+                            <p class="text-white/70 text-xs mt-0.5">Search players by name or nickname to add to your squad.</p>
                         </div>
                         <div class="w-full sm:w-64 relative">
-                            <input type="text" id="friend-search-input" oninput="renderFriends()" autocomplete="off" class="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand" placeholder="Search by name or nickname...">
-                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
-                            <div id="search-dropdown" class="hidden absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100"></div>
+                            <input type="text" id="friend-search-input" oninput="renderFriends()" autocomplete="off" class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search by name or nickname...">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-white/50 text-xs"></i>
+                            <div id="search-dropdown" class="hidden absolute left-0 right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto divide-y divide-white/10"></div>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
-                            <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">My Squad (Friends)</h3>
+                        <div class="bg-[#040E13]/90 border border-emerald-500/30 rounded-2xl p-5 space-y-4 shadow-xl backdrop-blur-md">
+                            <h3 class="text-sm font-black text-white uppercase tracking-wider">My Squad (Friends)</h3>
                             <div id="my-friends-list" class="space-y-3"></div>
                         </div>
                     </div>
                 </div>
 
-                <!-- TAB 3: LEADERBOARD -->
-                <div id="tab-leaderboard" class="hidden space-y-6">
-                    <div class="bg-white border border-slate-200 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
-                        <div>
-                            <h2 class="text-xl font-black text-slate-900">FutNet Global Rankings</h2>
-                            <p class="text-slate-500 text-xs mt-0.5">Switch categories to view top goalscorers, match winners, and session champions.</p>
-                        </div>
-                        <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200 gap-1">
-                            <button onclick="switchLeaderboardCategory('goals')" id="l-btn-goals" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-brand text-slate-950 shadow-sm">Most Goals</button>
-                            <button onclick="switchLeaderboardCategory('wins')" id="l-btn-wins" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900">Most Games Won</button>
-                            <button onclick="switchLeaderboardCategory('sessions')" id="l-btn-sessions" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900">Most Sessions Won</button>
-                        </div>
-                    </div>
-
-                    <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="border-b border-slate-200 bg-slate-50 text-slate-500 text-[10px] uppercase font-black">
-                                        <th class="p-4">Rank</th>
-                                        <th class="p-4">Player</th>
-                                        <th class="p-4 text-center">Position</th>
-                                        <th class="p-4 text-center">Played</th>
-                                        <th id="leaderboard-metric-header" class="p-4 text-right">Goals</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="leaderboard-tbody" class="divide-y divide-slate-100 text-xs font-semibold text-slate-800"></tbody>
-                            </table>
-                        </div>
+                <!-- TAB 3: HUB (Communities & Hubs) -->
+                <div id="tab-hub" class="hidden space-y-6">
+                    <div class="bg-[#040E13]/90 border border-emerald-500/30 p-5 rounded-2xl shadow-xl backdrop-blur-md space-y-2">
+                        <h2 class="text-xl font-black text-white">Hubs & Communities</h2>
+                        <p class="text-white/70 text-xs">Explore community hubs, join groups, and organize matches with your circle.</p>
                     </div>
                 </div>
 
                 <!-- TAB 4: CHATS -->
                 <div id="tab-chat" class="hidden space-y-5">
-                    <div class="bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[75vh]">
-                        <div class="border-r border-slate-200 flex flex-col bg-slate-50/50 h-full overflow-hidden">
-                            <div class="p-4 border-b border-slate-200 shrink-0">
-                                <h2 class="text-sm font-black text-slate-900 uppercase tracking-wider">Chats</h2>
+                    <div class="bg-[#040E13]/90 border border-emerald-500/30 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[75vh] backdrop-blur-md">
+                        <div class="border-r border-white/10 flex flex-col bg-black/30 h-full overflow-hidden">
+                            <div class="p-4 border-b border-white/10 shrink-0">
+                                <h2 class="text-sm font-black text-white uppercase tracking-wider">Chats</h2>
                             </div>
                             <div class="p-3 shrink-0">
-                                <input type="text" id="chats-search-input" oninput="renderChatsList()" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand" placeholder="Search chats...">
+                                <input type="text" id="chats-search-input" oninput="renderChatsList()" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search chats...">
                             </div>
-                            <div id="chats-threads-container" class="flex-1 overflow-y-auto divide-y divide-slate-100"></div>
+                            <div id="chats-threads-container" class="flex-1 overflow-y-auto divide-y divide-white/10"></div>
                         </div>
-                        <div id="active-chat-pane" class="md:col-span-2 flex flex-col bg-white h-full overflow-hidden">
-                            <div id="no-chat-selected" class="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-2 p-6">
+                        <div id="active-chat-pane" class="md:col-span-2 flex flex-col bg-[#040E13] h-full overflow-hidden">
+                            <div id="no-chat-selected" class="flex-1 flex flex-col items-center justify-center text-white/40 space-y-2 p-6">
                                 <i class="fa-solid fa-comments text-4xl opacity-30"></i>
                                 <p class="text-xs font-semibold">Select a chat thread from the left to start messaging</p>
                             </div>
                             <div id="active-chat-box" class="hidden flex flex-col h-full overflow-hidden">
-                                <div class="p-4 border-b border-slate-200 flex items-center gap-3 bg-slate-50/50 shrink-0">
-                                    <img id="active-chat-avatar" src="" class="w-9 h-9 rounded-full object-cover">
+                                <div class="p-4 border-b border-white/10 flex items-center gap-3 bg-black/30 shrink-0">
+                                    <img id="active-chat-avatar" src="" class="w-9 h-9 rounded-full object-cover border border-emerald-500/50">
                                     <div>
-                                        <h3 id="active-chat-name" class="text-xs font-black text-slate-900"></h3>
-                                        <p id="active-chat-subtitle" class="text-[10px] text-emerald-600 font-semibold hidden"></p>
+                                        <h3 id="active-chat-name" class="text-xs font-black text-white"></h3>
+                                        <p id="active-chat-subtitle" class="text-[10px] text-emerald-400 font-semibold hidden"></p>
                                     </div>
                                 </div>
                                 <div id="active-chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3"></div>
-                                <form onsubmit="handleSendActiveChatMessage(event)" class="p-3 border-t border-slate-200 flex gap-2 bg-slate-50/50 shrink-0">
-                                    <input type="text" id="active-chat-input" oninput="handleChatInputKeypress()" required class="flex-1 bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-slate-900 text-sm focus:outline-none focus:border-brand" placeholder="Type a message...">
+                                <form onsubmit="handleSendActiveChatMessage(event)" class="p-3 border-t border-white/10 flex gap-2 bg-black/30 shrink-0">
+                                    <input type="text" id="active-chat-input" oninput="handleChatInputKeypress()" required class="flex-1 bg-black/50 border border-teal-500/60 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Type a message...">
                                     <button type="submit" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-5 py-2.5 rounded-xl transition text-xs">
                                         <i class="fa-solid fa-paper-plane"></i>
                                     </button>
@@ -474,31 +452,31 @@
                     </div>
                 </div>
 
-                <!-- TAB 5: PROFILE (Fully populated user details + Edit Profile & Logout) -->
+                <!-- TAB 5: PROFILE -->
                 <div id="tab-profile" class="hidden space-y-6 max-w-2xl mx-auto"></div>
 
             </main>
 
-            <!-- Mobile Bottom Nav with Profile Picture Icon -->
-            <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-2 flex justify-around items-center z-40 shadow-xl">
+            <!-- Mobile Bottom Nav with Hub -->
+            <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#040E13]/95 border-t border-emerald-500/30 p-2 flex justify-around items-center z-40 backdrop-blur-md shadow-2xl">
                 <button onclick="switchTab('events')" id="mob-nav-events" class="flex flex-col items-center p-2 text-brand font-bold">
                     <i class="fa-solid fa-calendar-days text-lg"></i>
                     <span class="text-[10px] mt-1">Games</span>
                 </button>
-                <button onclick="switchTab('friends')" id="mob-nav-friends" class="flex flex-col items-center p-2 text-slate-400 font-semibold">
+                <button onclick="switchTab('friends')" id="mob-nav-friends" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
                     <i class="fa-solid fa-user-group text-lg"></i>
                     <span class="text-[10px] mt-1">Friends</span>
                 </button>
-                <button onclick="switchTab('leaderboard')" id="mob-nav-leaderboard" class="flex flex-col items-center p-2 text-slate-400 font-semibold">
-                    <i class="fa-solid fa-ranking-star text-lg"></i>
-                    <span class="text-[10px] mt-1">Rankings</span>
+                <button onclick="switchTab('hub')" id="mob-nav-hub" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
+                    <i class="fa-solid fa-shield text-lg"></i>
+                    <span class="text-[10px] mt-1">Hub</span>
                 </button>
-                <button onclick="switchTab('chat')" id="mob-nav-chat" class="flex flex-col items-center p-2 text-slate-400 font-semibold">
+                <button onclick="switchTab('chat')" id="mob-nav-chat" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
                     <i class="fa-solid fa-comments text-lg"></i>
                     <span class="text-[10px] mt-1">Chats</span>
                 </button>
-                <button onclick="switchTab('profile')" id="mob-nav-profile" class="flex flex-col items-center p-2 text-slate-400 font-semibold">
-                    <img id="mob-nav-avatar-icon" src="" class="w-5 h-5 rounded-full object-cover border border-slate-300">
+                <button onclick="switchTab('profile')" id="mob-nav-profile" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
+                    <img id="mob-nav-avatar-icon" src="" class="w-5 h-5 rounded-full object-cover border border-emerald-500/50">
                     <span class="text-[10px] mt-1">Profile</span>
                 </button>
             </nav>
@@ -532,14 +510,14 @@
         window.showToast = function(message, type = 'success') {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
-            toast.className = `pointer-events-auto bg-white border ${type === 'success' ? 'border-brand text-emerald-600' : 'border-red-300 text-red-500'} px-4 py-3 rounded-xl shadow-lg text-xs font-semibold`;
+            toast.className = `pointer-events-auto bg-[#040E13] border ${type === 'success' ? 'border-brand text-emerald-400' : 'border-red-500/50 text-red-400'} px-4 py-3 rounded-xl shadow-2xl text-xs font-semibold backdrop-blur-md`;
             toast.innerHTML = `<span>${message}</span>`;
             container.appendChild(toast);
             setTimeout(() => toast.remove(), 4000);
         };
 
         window.switchTab = function(tabName) {
-            ['events', 'create-event', 'event-details-screen', 'friends', 'leaderboard', 'chat', 'profile'].forEach(t => {
+            ['events', 'create-event', 'event-details-screen', 'friends', 'hub', 'chat', 'profile'].forEach(t => {
                 const el = document.getElementById(`tab-${t}`);
                 if (el) el.classList.toggle('hidden', t !== tabName);
                 
@@ -547,14 +525,14 @@
                 if (btn) {
                     btn.className = t === tabName 
                         ? "px-4 py-2 rounded-xl text-xs font-bold transition bg-brand text-slate-950 shadow flex items-center gap-2" 
-                        : "px-4 py-2 rounded-xl text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-2 relative";
+                        : "px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2 relative";
                 }
 
                 const mobBtn = document.getElementById(`mob-nav-${t}`);
                 if (mobBtn) {
                     mobBtn.className = t === tabName 
                         ? "flex flex-col items-center p-2 text-brand font-bold" 
-                        : "flex flex-col items-center p-2 text-slate-400 font-semibold";
+                        : "flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white";
                 }
             });
 
@@ -568,9 +546,7 @@
             if (tabName === 'event-details-screen' && window.renderEventDetailModalContent) {
                 window.renderEventDetailModalContent();
             }
-            if (tabName === 'leaderboard' && window.renderLeaderboard) {
-                window.renderLeaderboard();
-            }
+            if (tabName === 'hub' && window.renderHomeScreen) window.renderHomeScreen();
             if (tabName === 'chat' && window.renderChatsList) window.renderChatsList();
             if (tabName === 'profile' && window.renderProfileTab) window.renderProfileTab();
         };
