@@ -101,8 +101,8 @@ window.renderEventDetailModalContent = function() {
 
     container.innerHTML = `
         <div class="max-w-4xl mx-auto space-y-6 pb-12 text-slate-900">
-            <!-- Sticky Top Navigation / Back Bar -->
-            <div class="sticky top-20 z-30 bg-white/95 backdrop-blur-md border border-slate-200 rounded-3xl p-6 shadow-md flex items-center justify-between">
+            <!-- Top Navigation / Back Bar (Not Sticky) -->
+            <div class="bg-white/95 backdrop-blur-md border border-slate-200 rounded-3xl p-6 shadow-md flex items-center justify-between">
                 <div class="flex items-center gap-4">
                     <button onclick="closeEventModal()" class="w-10 h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full flex items-center justify-center font-bold transition">
                         <i class="fa-solid fa-arrow-left"></i>
@@ -752,7 +752,7 @@ window.handleRSVPAction = async function(eventId, action) {
         if (!event.declinedList.some(d => String(d.uid) === String(window.currentUser.uid))) {
             const profile = window.userProfile || {};
             const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
-            event.declinedList.push({ uid: String(window.currentUser.uid), name: fullName });
+            event.declinedList.path({ uid: String(window.currentUser.uid), name: fullName });
         }
         window.showToast("You have left the game.");
         await updateEventInFirestore(event);

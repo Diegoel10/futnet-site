@@ -1,4 +1,4 @@
-// js/game-profile/admin-tab.js: Clean, modular admin tab implementation matching ended match reference layout
+// js/game-profile/admin-tab.js: Clean, modular admin tab implementation with working Edit/Copy, profile pictures, and match records
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -22,6 +22,21 @@ export function renderAdminTab(event) {
     const matches = Array.isArray(event.matches) ? event.matches : [];
     const states = window.adminAccordionState;
 
+    const resolvePlayerAvatar = (name) => {
+        if (!name) return 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+        const foundAtt = attendees.find(a => (a.name || '').toLowerCase() === name.toLowerCase());
+        if (foundAtt && (foundAtt.avatar || foundAtt.photoURL)) {
+            return foundAtt.avatar || foundAtt.photoURL;
+        }
+        if (window.directoryList) {
+            const foundDir = window.directoryList.find(u => (u.name || '').toLowerCase() === name.toLowerCase());
+            if (foundDir && (foundDir.avatar || foundDir.photoURL)) {
+                return foundDir.avatar || foundDir.photoURL;
+            }
+        }
+        return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
+    };
+
     let totalConfirmedPeople = attendees.length;
     attendees.forEach(att => {
         if (att.guests && Array.isArray(att.guests)) {
@@ -37,7 +52,6 @@ export function renderAdminTab(event) {
     const playersBodyClass = states.managePlayers ? 'space-y-4 pt-3 border-t border-white/10' : 'hidden';
     const matchesBodyClass = states.manageMatches ? 'space-y-3 pt-3 border-t border-white/10' : 'hidden';
 
-    // Pre-render attendees HTML
     const attendeesHtml = attendees.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-4">No players confirmed yet.</div>'
         : attendees.map(att => {
@@ -84,7 +98,6 @@ export function renderAdminTab(event) {
             `;
         }).join('');
 
-    // Pre-render waitlist HTML
     const waitlistHtml = waitingList.length > 0 ? `
         <div class="space-y-2 pt-2 border-t border-white/10">
             <h5 class="text-[10px] font-black text-amber-400 uppercase tracking-wider">⏳ Waitlist (${waitingList.length})</h5>
@@ -97,7 +110,6 @@ export function renderAdminTab(event) {
         </div>
     ` : '';
 
-    // Pre-render matches HTML matching ended match reference layout[cite: 18]
     const matchesListHtml = matches.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-3">No match results recorded yet.</div>'
         : matches.map((m, mIdx) => {
@@ -106,40 +118,41 @@ export function renderAdminTab(event) {
             const t1Goals = Array.isArray(m.team1Goals) ? m.team1Goals : [];
             const t2Goals = Array.isArray(m.team2Goals) ? m.team2Goals : [];
 
-            // Render scorers for Team 1
-            const t1ScorersHtml = t1Goals.map(scorer => `
-                <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-full border border-white/10 text-[11px]">
-                    <i class="fa-solid fa-futbol text-[#00F296] text-[10px]"></i>
-                    <span class="w-4 h-4 rounded-full bg-emerald-500/20 text-[#00F296] font-black text-[9px] flex items-center justify-center">${(scorer || 'P').charAt(0).toUpperCase()}</span>
-                    <span class="text-white font-bold">${scorer}</span>
-                </div>
-            `).join('');
+            const t1ScorersHtml = t1Goals.map(scorer => {
+                const avatar = resolvePlayerAvatar(scorer);
+                return `
+                    <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full border border-white/10 text-xs">
+                        <i class="fa-solid fa-futbol text-[#00F296] text-[10px]"></i>
+                        <img src="${avatar}" class="w-5 h-5 rounded-full object-cover border border-[#00F296]/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <span class="text-white font-bold">${scorer}</span>
+                    </div>
+                `;
+            }).join('');
 
-            // Render scorers for Team 2
-            const t2ScorersHtml = t2Goals.map(scorer => `
-                <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-full border border-white/10 text-[11px]">
-                    <i class="fa-solid fa-futbol text-red-400 text-[10px]"></i>
-                    <span class="w-4 h-4 rounded-full bg-red-500/20 text-red-400 font-black text-[9px] flex items-center justify-center">${(scorer || 'P').charAt(0).toUpperCase()}</span>
-                    <span class="text-white font-bold">${scorer}</span>
-                </div>
-            `).join('');
+            const t2ScorersHtml = t2Goals.map(scorer => {
+                const avatar = resolvePlayerAvatar(scorer);
+                return `
+                    <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full border border-white/10 text-xs">
+                        <i class="fa-solid fa-futbol text-red-400 text-[10px]"></i>
+                        <img src="${avatar}" class="w-5 h-5 rounded-full object-cover border border-red-400/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <span class="text-white font-bold">${scorer}</span>
+                    </div>
+                `;
+            }).join('');
 
             return `
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 shadow-md">
-                    <!-- Teams & Score Header Row -->
                     <div class="flex items-center justify-between text-xs font-black">
                         <span class="text-white">${teamA}</span>
-                        <span class="bg-[#00F296]/20 text-[#00F296] px-3 py-1 rounded-full border border-[#00F296]/40 text-xs tracking-wider font-mono">${t1Goals.length} - ${t2Goals.length}</span>
+                        <span class="bg-[#00F296]/20 text-[#00F296] px-3.5 py-1 rounded-full border border-[#00F296]/40 text-xs tracking-wider font-mono">${t1Goals.length} - ${t2Goals.length}</span>
                         <span class="text-white">${teamB}</span>
                     </div>
 
-                    <!-- Scorers Lists -->
                     <div class="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
                         <div class="space-y-1.5">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
                         <div class="space-y-1.5">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
                     </div>
 
-                    <!-- Action Buttons -->
                     <div class="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
                         <button onclick="openEditMatchModal('${event.id}', ${mIdx})" class="bg-black/60 hover:bg-black text-white font-bold py-2 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-1.5">
                             <i class="fa-solid fa-pen text-[10px]"></i> Edit Match
@@ -167,7 +180,7 @@ export function renderAdminTab(event) {
                 <div class="${eventBodyClass}">
                     <div class="flex flex-wrap gap-2">
                         <button onclick="openEditEventForm('${event.id}')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-md transition">Edit Game</button>
-                        <button onclick="openCopyGameModal('${event.id}')" class="bg-black/60 hover:bg-black text-white font-bold px-3.5 py-2 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5">
+                        <button onclick="copyEvent('${event.id}')" class="bg-black/60 hover:bg-black text-white font-bold px-3.5 py-2 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5">
                             <i class="fa-solid fa-copy text-[10px]"></i> Copy Event
                         </button>
                         <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-bold px-3 py-2 rounded-xl text-xs border border-red-500/40 transition">Cancel Game</button>
@@ -226,6 +239,109 @@ export function renderAdminTab(event) {
     `;
 };
 
+window.populateEventFormFields = function(event, isCopy = false) {
+    const titleEl = document.getElementById('ce-title');
+    const visibilityEl = document.getElementById('ce-visibility');
+    const dateEl = document.getElementById('ce-date');
+    const timeEl = document.getElementById('ce-time');
+    const parkSearchEl = document.getElementById('ce-park-search');
+    const parkNameEl = document.getElementById('ce-parkname');
+    const cityEl = document.getElementById('ce-city');
+    const stateEl = document.getElementById('ce-state');
+    const descEl = document.getElementById('ce-description');
+    const rulesEl = document.getElementById('ce-rules');
+    const teamsCountEl = document.getElementById('ce-teams-count');
+    const formatEl = document.getElementById('ce-format');
+    const feeEl = document.getElementById('ce-fee');
+    const plusOneLimitEl = document.getElementById('ce-plus-one-limit');
+
+    if (titleEl) titleEl.value = event.title || '';
+    if (visibilityEl) visibilityEl.value = event.visibility || 'Public';
+    if (dateEl) dateEl.value = isCopy ? '' : (event.date || '');
+    
+    if (event.time) {
+        let tVal = event.time;
+        if (tVal.includes('AM') || tVal.includes('PM')) {
+            const parts = tVal.split(' ');
+            const timeParts = parts[0].split(':');
+            let h = parseInt(timeParts[0], 10);
+            const m = timeParts[1];
+            if (parts[1] === 'PM' && h < 12) h += 12;
+            if (parts[1] === 'AM' && h === 12) h = 0;
+            tVal = `${String(h).padStart(2, '0')}:${m}`;
+        }
+        if (timeEl) timeEl.value = tVal;
+    }
+
+    const locParts = (event.location || "").match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
+    if (locParts) {
+        if (parkSearchEl) parkSearchEl.value = locParts[1];
+        if (parkNameEl) parkNameEl.value = locParts[1];
+        if (cityEl) cityEl.value = locParts[2];
+        if (stateEl) stateEl.value = locParts[3];
+    } else {
+        if (parkNameEl) parkNameEl.value = event.location || '';
+        if (parkSearchEl) parkSearchEl.value = event.location || '';
+    }
+
+    if (descEl) descEl.value = event.description || '';
+    if (rulesEl) rulesEl.value = event.rules || '';
+    if (teamsCountEl) teamsCountEl.value = event.teamsCount || 3;
+    if (formatEl) formatEl.value = event.format || '7v7';
+    if (feeEl) feeEl.value = event.fee !== undefined ? event.fee : 'Free';
+
+    const allowPlus = event.allowPlusOnes ? 'yes' : 'no';
+    if (typeof window.setPlusOnesOption === 'function') {
+        window.setPlusOnesOption(allowPlus);
+    }
+    if (plusOneLimitEl) plusOneLimitEl.value = event.plusOneLimit || 1;
+};
+
+window.openEditEventForm = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    if (typeof window.switchTab === 'function') {
+        window.switchTab('create-event');
+    }
+
+    setTimeout(() => {
+        window.populateEventFormFields(event, false);
+        const formEl = document.querySelector('#tab-create-event form') || document.querySelector('#create-event-form');
+        if (formEl) {
+            let hiddenId = document.getElementById('ce-edit-event-id');
+            if (!hiddenId) {
+                hiddenId = document.createElement('input');
+                hiddenId.type = 'hidden';
+                hiddenId.id = 'ce-edit-event-id';
+                formEl.appendChild(hiddenId);
+            }
+            hiddenId.value = event.id;
+        }
+    }, 150);
+};
+
+window.copyEvent = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    if (typeof window.switchTab === 'function') {
+        window.switchTab('create-event');
+    }
+
+    setTimeout(() => {
+        window.populateEventFormFields(event, true);
+        const formEl = document.querySelector('#tab-create-event form') || document.querySelector('#create-event-form');
+        if (formEl) {
+            const hiddenId = document.getElementById('ce-edit-event-id');
+            if (hiddenId) hiddenId.remove();
+        }
+        if (typeof window.showToast === 'function') {
+            window.showToast("Match details copied! Select a new date.", "info");
+        }
+    }, 150);
+};
+
 document.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
@@ -252,12 +368,6 @@ window.confirmCancelGame = async function(eventId) {
         } catch (err) {
             window.showToast("Failed to cancel game", "error");
         }
-    }
-};
-
-window.openCopyGameModal = function(eventId) {
-    if (typeof window.copyEvent === 'function') {
-        window.copyEvent(eventId);
     }
 };
 

@@ -1,4 +1,4 @@
-// js/game-profile/team-tool.js: Fast, optimized Team Builder & Tactical Lineup Tool
+// js/game-profile/team-tool.js: Full Team Builder & Tactical Lineup Tool with syntax error fixed
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -6,12 +6,16 @@ window.activeTeamTab = window.activeTeamTab !== undefined ? window.activeTeamTab
 window.teamAssignments = window.teamAssignments || {};
 window.teamFormations = window.teamFormations || {};
 window.teamNames = window.teamNames || {};
+window.teamColors = window.teamColors || {};
+window.teamCaptains = window.teamCaptains || {};
 
 async function updateTeamToolFirestore(event) {
     const docRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
     
     event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
     event.teamNames = window.teamNames[event.id] || event.teamNames || {};
+    event.teamColors = window.teamColors[event.id] || event.teamColors || {};
+    event.teamCaptains = window.teamCaptains[event.id] || event.teamCaptains || {};
     
     window.eventsList = (window.eventsList || []).map(ev => ev.id === event.id ? event : ev);
     
@@ -19,13 +23,13 @@ async function updateTeamToolFirestore(event) {
 
     if (cleanPayload.attendees) {
         cleanPayload.attendees.forEach(att => {
-            if (att.avatar && att.avatar.startsWith('data:')) {
+            if (!att.avatar || att.avatar.startsWith('data:')) {
                 att.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
             }
             if (att.guests) {
                 att.guests.forEach(g => {
-                    if (g.avatar && g.avatar.startsWith('data:')) {
-                        g.avatar = '';
+                    if (!g.avatar || g.avatar.startsWith('data:')) {
+                        g.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(g.name || 'Guest')}`;
                     }
                 });
             }
@@ -39,22 +43,24 @@ async function updateTeamToolFirestore(event) {
 function getFlattenedPlayersList(attendees) {
     const list = [];
     (attendees || []).forEach(att => {
+        const safeAvatar = (att && (att.avatar || att.photoURL)) ? String(att.avatar || att.photoURL) : `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att?.name || 'Player')}`;
         list.push({
-            uid: String(att.uid || 'usr_' + Math.random().toString(36).substring(2,7)),
-            name: String(att.name || att.firstName || 'Player'),
-            avatar: String(att.avatar || att.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'),
-            position: String(att.position || 'Player')
+            uid: String(att?.uid || 'usr_' + Math.random().toString(36).substring(2,7)),
+            name: String(att?.name || att?.firstName || 'Player'),
+            avatar: safeAvatar,
+            position: String(att?.position || 'Player')
         });
         
-        if (att.guests && Array.isArray(att.guests)) {
+        if (att?.guests && Array.isArray(att.guests)) {
             att.guests.forEach((g, gIdx) => {
+                const guestAvatar = (g && g.avatar) ? String(g.avatar) : safeAvatar;
                 list.push({
-                    uid: `${att.uid || 'usr'}_guest_${gIdx}`,
-                    name: String(g.name || 'Guest'),
-                    avatar: String(att.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'),
+                    uid: `${att?.uid || 'usr'}_guest_${gIdx}`,
+                    name: String(g?.name || 'Guest'),
+                    avatar: guestAvatar,
                     position: 'Guest',
                     isHostGuest: true,
-                    hostUid: String(att.uid || '')
+                    hostUid: String(att?.uid || '')
                 });
             });
         }
@@ -80,6 +86,8 @@ window.openTeamMakingModal = function(eventId) {
     window.currentTeamBuildingEvent = event;
     window.teamAssignments[event.id] = event.teamAssignments || {};
     window.teamNames[event.id] = event.teamNames || {};
+    window.teamColors[event.id] = event.teamColors || {};
+    window.teamCaptains[event.id] = event.teamCaptains || {};
     window.activeTeamTab = 0;
 
     try {
@@ -100,6 +108,27 @@ window.changeTeamFormation = function(eventId, teamIndex, formationKey) {
     window.teamFormations[eventId] = window.teamFormations[eventId] || {};
     window.teamFormations[eventId][teamIndex] = formationKey;
     renderTeamMakingContent();
+};
+
+window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
+    window.teamColors[eventId] = window.teamColors[eventId] || {};
+    window.teamColors[eventId][teamIndex] = colorHex;
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (event) {
+        await updateTeamToolFirestore(event);
+        renderTeamMakingContent();
+    }
+};
+
+window.setTeamCaptain = async function(eventId, teamIndex, captainUid) {
+    window.teamCaptains[eventId] = window.teamCaptains[eventId] || {};
+    window.teamCaptains[eventId][teamIndex] = captainUid;
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (event) {
+        await updateTeamToolFirestore(event);
+        if (typeof window.showToast === 'function') window.showToast("Captain updated!");
+        renderTeamMakingContent();
+    }
 };
 
 window.saveTeamNameModal = async function(eventId, teamIndex) {
@@ -176,6 +205,8 @@ window.renderTeamMakingContent = function() {
     const teamsCount = event.teamsCount || 3;
     const format = event.format || '7v7';
 
+    const defaultColors = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7'];
+
     const formationOptions = {
         '3v3': { '2-1': [2, 1], '1-2': [1, 2] },
         '4v4': { '2-1': [2, 1] },
@@ -191,18 +222,22 @@ window.renderTeamMakingContent = function() {
     const defaultFormatKey = Object.keys(availableFormations)[0];
 
     window.teamFormations[event.id] = window.teamFormations[event.id] || {};
-    const activeTab = window.activeTeamTab; // 0 = Summary, 1+ = Team Index
+    window.teamColors[event.id] = window.teamColors[event.id] || {};
+    window.teamCaptains[event.id] = window.teamCaptains[event.id] || {};
+    const activeTab = window.activeTeamTab;
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
     for (let i = 0; i < teamsCount; i++) {
         window.teamAssignments[event.id][i] = window.teamAssignments[event.id][i] || [];
     }
 
-    window.teamNames[event.id] = event.teamNames || {};
+    window.teamNames[event.id] = window.teamNames[event.id] || {};
 
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[event.id]).forEach(teamArr => {
-        teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
+        if (Array.isArray(teamArr)) {
+            teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
+        }
     });
 
     const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
@@ -216,9 +251,10 @@ window.renderTeamMakingContent = function() {
         const tIdx = i + 1;
         const isActive = activeTab === tIdx;
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
+        const tColor = window.teamColors[event.id][i] || defaultColors[i % defaultColors.length];
         tabsHtml += `
-            <button onclick="switchTeamTab(${tIdx})" class="px-3.5 py-2 rounded-xl text-xs font-black transition ${isActive ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/50 text-white/70 border border-white/10'}">
-                👕 ${tName}
+            <button onclick="switchTeamTab(${tIdx})" style="border-color: ${tColor} !important;" class="px-3.5 py-2 rounded-xl text-xs font-black transition border ${isActive ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/50 text-white/80'}">
+                <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background-color: ${tColor};"></span> ${tName}
             </button>
         `;
     }
@@ -229,38 +265,63 @@ window.renderTeamMakingContent = function() {
         let teamsSummaryHtml = '';
         for (let i = 0; i < teamsCount; i++) {
             const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
+            const tColor = window.teamColors[event.id][i] || defaultColors[i % defaultColors.length];
             const teamRoster = window.teamAssignments[event.id][i] || [];
+            const captainUid = window.teamCaptains[event.id][i];
+
+            const rosterPillsHtml = teamRoster.length === 0 
+                ? '<span class="text-xs text-white/40 italic">No players assigned yet. Click Add Player or Randomize.</span>'
+                : teamRoster.map(p => {
+                    const isCap = String(p?.uid) === String(captainUid);
+                    const pAvatar = p?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                    const pName = p?.name || 'Player';
+                    const pUid = p?.uid || '';
+                    return `
+                        <div class="flex items-center gap-2 bg-black/70 px-3 py-1.5 rounded-full border text-xs shadow-sm" style="border-color: ${tColor};">
+                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20">
+                            <span class="font-bold text-white">${pName} ${isCap ? '⭐' : ''}</span>
+                            <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${i}, '${pUid}')" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    `;
+                }).join('');
+
             teamsSummaryHtml += `
-                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
-                    <div class="flex items-center justify-between">
-                        <h4 class="text-xs font-black text-[#00F296] uppercase tracking-wider">${tName} (${teamRoster.length})</h4>
+                <div class="bg-black/40 border-2 rounded-2xl p-4 space-y-3 shadow-lg" style="border-color: ${tColor}66;">
+                    <div class="flex items-center justify-between border-b border-white/10 pb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full" style="background-color: ${tColor};"></span>
+                            <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
+                        </div>
+                        <button onclick="switchTeamTab(${i + 1})" class="text-[10px] font-bold text-white/60 hover:text-white bg-black/60 px-2.5 py-1 rounded-lg border border-white/10 flex items-center gap-1">
+                            <i class="fa-solid fa-plus text-[9px]"></i> Add Player
+                        </button>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        ${teamRoster.length === 0 ? '<span class="text-xs text-white/40 italic">No players assigned yet.</span>' : ''}
-                        ${teamRoster.map(p => `
-                            <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
-                                <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-5 h-5 rounded-full object-cover">
-                                <span class="font-bold text-white">${p.name}</span>
-                                <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${i}, '${p.uid}')" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
-                            </div>
-                        `).join('')}
+                        ${rosterPillsHtml}
                     </div>
                 </div>
             `;
         }
+
+        const freeAgentsPillsHtml = freeAgents.length === 0 
+            ? '<span class="text-xs text-white/40 italic">All players assigned!</span>'
+            : freeAgents.map(a => {
+                const aAvatar = a?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                const aName = a?.name || 'Player';
+                return `
+                    <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
+                        <img src="${aAvatar}" class="w-5 h-5 rounded-full object-cover">
+                        <span class="font-bold text-white">${aName}</span>
+                    </div>
+                `;
+            }).join('');
 
         contentHtml = `
             <div class="space-y-4">
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
                     <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">🆓 Free Agents (${freeAgents.length})</h4>
                     <div class="flex flex-wrap gap-2">
-                        ${freeAgents.length === 0 ? '<span class="text-xs text-white/40 italic">All players assigned!</span>' : ''}
-                        ${freeAgents.map(a => `
-                            <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
-                                <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-5 h-5 rounded-full object-cover">
-                                <span class="font-bold text-white">${a.name}</span>
-                            </div>
-                        `).join('')}
+                        ${freeAgentsPillsHtml}
                     </div>
                 </div>
                 ${teamsSummaryHtml}
@@ -269,7 +330,9 @@ window.renderTeamMakingContent = function() {
     } else {
         const teamIdx = activeTab - 1;
         const currentTeamName = window.teamNames[event.id][teamIdx] || `Team ${teamIdx + 1}`;
+        const currentTeamColor = window.teamColors[event.id][teamIdx] || defaultColors[teamIdx % defaultColors.length];
         const currentTeamPlayers = window.teamAssignments[event.id][teamIdx] || [];
+        const currentCaptainUid = window.teamCaptains[event.id][teamIdx] || "";
         
         window.teamFormations[event.id][teamIdx] = window.teamFormations[event.id][teamIdx] || defaultFormatKey;
         const currentFormationKey = window.teamFormations[event.id][teamIdx];
@@ -285,17 +348,17 @@ window.renderTeamMakingContent = function() {
                 const p = currentTeamPlayers[slotIdx];
                 if (p && p.name) {
                     rowSlots += `
-                        <div onclick="unassignPlayerFromSlot('${event.id}', ${teamIdx}, ${slotIdx})" class="w-16 h-16 bg-white border-2 border-emerald-400 rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                            <span class="text-[9px] font-black text-slate-900 truncate w-full">${p.name.split(' ')[0]}</span>
-                            <span class="absolute inset-0 bg-red-500/85 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
+                        <div onclick="unassignPlayerFromSlot('${event.id}', ${teamIdx}, ${slotIdx})" class="w-24 h-16 bg-white/95 border-2 border-emerald-400 rounded-2xl p-1 text-center cursor-pointer shadow-lg flex flex-col items-center justify-center relative group">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5 border border-slate-900">
+                            <span class="text-[9px] font-black text-slate-950 truncate w-full px-1">${p.name}</span>
+                            <span class="absolute inset-0 bg-red-500/90 text-white text-[10px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
                         </div>
                     `;
                 } else {
                     rowSlots += `
-                        <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${slotIdx})" class="w-16 h-16 border-2 border-dashed border-white/60 bg-emerald-950/25 rounded-2xl p-1 text-center cursor-pointer hover:bg-emerald-900/40 transition flex flex-col items-center justify-center text-white/80 shadow">
-                            <i class="fa-solid fa-shirt text-white/80 text-sm mb-0.5"></i>
-                            <span class="text-[9px] font-bold">Spot</span>
+                        <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${slotIdx})" class="w-24 h-16 border-2 border-dashed border-white/70 bg-emerald-950/40 rounded-2xl p-1 text-center cursor-pointer hover:bg-emerald-900/60 transition flex flex-col items-center justify-center text-white shadow">
+                            <i class="fa-solid fa-shirt text-white/90 text-sm mb-0.5"></i>
+                            <span class="text-[9px] font-bold uppercase tracking-wider">Spot</span>
                         </div>
                     `;
                 }
@@ -307,44 +370,99 @@ window.renderTeamMakingContent = function() {
         const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
         rowsHtml += `
             <div class="flex justify-center mt-2">
-                <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${goalieSlotIdx})" class="w-16 h-16 ${goaliePlayer && goaliePlayer.name ? 'bg-white border-2 border-emerald-400' : 'border-2 border-dashed border-white/60 bg-emerald-950/25'} rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
+                <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${goalieSlotIdx})" class="w-28 h-16 ${goaliePlayer && goaliePlayer.name ? 'bg-white/95 border-2 border-emerald-400' : 'border-2 border-dashed border-amber-400/80 bg-emerald-950/40'} rounded-2xl p-1 text-center cursor-pointer shadow-lg flex flex-col items-center justify-center relative group">
                     ${goaliePlayer && goaliePlayer.name ? `
-                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="text-[9px] font-black text-slate-900 truncate w-full">${goaliePlayer.name.split(' ')[0]}</span>
-                        <span class="absolute inset-0 bg-red-500/85 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
+                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5 border border-slate-900">
+                        <span class="text-[9px] font-black text-slate-950 truncate w-full px-1">${goaliePlayer.name}</span>
+                        <span class="absolute inset-0 bg-red-500/90 text-white text-[10px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
                     ` : `
-                        <i class="fa-solid fa-shirt text-amber-300 text-sm mb-0.5"></i>
-                        <span class="text-[9px] text-white font-bold">GK</span>
+                        <i class="fa-solid fa-hand text-amber-300 text-sm mb-0.5"></i>
+                        <span class="text-[10px] text-amber-300 font-black uppercase">GK Spot</span>
                     `}
                 </div>
             </div>
         `;
 
+        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>⭐ ${p.name}</option>`).join('');
+        const formationsOptionsHtml = Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('');
+
+        const squadMembersListHtml = currentTeamPlayers.length === 0 
+            ? '<span class="text-xs text-white/40 italic">No players assigned to this team yet.</span>'
+            : currentTeamPlayers.map(p => {
+                const isCap = String(p?.uid) === String(currentCaptainUid);
+                const pAvatar = p?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                const pName = p?.name || 'Player';
+                const pPos = p?.position || 'Player';
+                const pUid = p?.uid || '';
+                return `
+                    <div class="flex items-center justify-between p-2.5 bg-black/60 rounded-xl border border-white/10 text-xs">
+                        <div class="flex items-center gap-2.5">
+                            <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover border border-white/20">
+                            <div>
+                                <div class="font-bold text-white">${pName} ${isCap ? '⭐ (Captain)' : ''}</div>
+                                <div class="text-[10px] text-white/50">${pPos}</div>
+                            </div>
+                        </div>
+                        <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${teamIdx}, '${pUid}')" class="text-red-400 hover:text-red-300 font-bold px-2.5 py-1 rounded-lg text-xs bg-red-500/10 border border-red-500/30">Remove</button>
+                    </div>
+                `;
+            }).join('');
+
         contentHtml = `
             <div class="space-y-4">
-                <div class="flex items-center gap-3 bg-black/40 border border-white/10 p-3 rounded-2xl">
-                    <label class="text-xs font-bold text-white/70 uppercase">Team Name:</label>
-                    <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="flex-1 bg-black/60 border border-white/20 rounded-xl px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
-                    <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="bg-[#00F296] text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs shadow transition">Save</button>
+                <!-- Team Configuration Panel -->
+                <div class="bg-black/50 border border-white/10 p-4 rounded-2xl space-y-3">
+                    <h4 class="text-xs font-black text-white/70 uppercase tracking-wider">Team Configuration</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="space-y-1">
+                            <label class="block text-[10px] font-bold text-white/60 uppercase">Team Name</label>
+                            <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-[10px] font-bold text-white/60 uppercase">Team Color</label>
+                            <div class="flex items-center gap-2 pt-1">
+                                ${defaultColors.map(col => `
+                                    <button onclick="changeTeamColor('${event.id}', ${teamIdx}, '${col}')" class="w-6 h-6 rounded-full border-2 transition ${currentTeamColor === col ? 'border-white scale-110 shadow' : 'border-transparent'}" style="background-color: ${col};"></button>
+                                `).join('')}
+                            </div>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-[10px] font-bold text-white/60 uppercase">Captain</label>
+                            <select onchange="setTeamCaptain('${event.id}', ${teamIdx}, this.value)" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold text-white">
+                                <option value="">Select Captain</option>
+                                ${captainOptionsHtml}
+                            </select>
+                        </div>
+                    </div>
+                    <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="w-full bg-[#00F296] text-slate-950 font-black py-2.5 rounded-xl text-xs shadow transition mt-1">Save Team Name</button>
                 </div>
 
-                <div class="relative bg-gradient-to-b from-emerald-800 to-emerald-900 border-2 border-emerald-500/60 rounded-3xl p-5 shadow-inner overflow-hidden min-h-[360px] flex flex-col justify-between">
+                <!-- Tactical Lineup Soccer Pitch -->
+                <div class="relative bg-gradient-to-b from-emerald-800 to-emerald-950 border-2 rounded-3xl p-5 shadow-inner overflow-hidden min-h-[400px] flex flex-col justify-between" style="border-color: ${currentTeamColor};">
                     <div class="absolute inset-x-0 top-1/2 h-0.5 bg-white/30 pointer-events-none"></div>
-                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-white/30 rounded-full pointer-events-none"></div>
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 border-2 border-white/30 rounded-full pointer-events-none"></div>
 
                     <div class="flex justify-between items-center relative z-10">
-                        <span class="bg-black/80 text-white font-black text-xs px-3.5 py-1.5 rounded-full uppercase tracking-wider">${currentTeamName}</span>
-                        <select onchange="changeTeamFormation('${event.id}', ${teamIdx}, this.value)" class="bg-black/80 text-white font-bold text-xs px-3 py-1.5 rounded-xl border border-white/20">
-                            ${Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('')}
+                        <span class="text-white font-black text-xs px-3.5 py-1.5 rounded-full uppercase tracking-wider shadow" style="background-color: ${currentTeamColor};">${currentTeamName}</span>
+                        <select onchange="changeTeamFormation('${event.id}', ${teamIdx}, this.value)" class="bg-black/90 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl border border-white/20">
+                            ${formationsOptionsHtml}
                         </select>
                     </div>
 
-                    <div class="relative z-10 my-3 flex flex-col items-center justify-center">
+                    <div class="relative z-10 my-4 flex flex-col items-center justify-center">
                         ${rowsHtml}
                     </div>
 
-                    <div class="text-center relative z-10 text-[10px] text-white/60 font-semibold">
-                        Click any slot on the pitch to assign or remove players
+                    <div class="text-center relative z-10 text-[10px] text-white/70 font-semibold">
+                        Tap any slot on the pitch to assign or remove players
+                    </div>
+                </div>
+
+                <!-- Squad Members List under Team -->
+                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <h4 class="text-xs font-black text-white/80 uppercase tracking-wider">Squad Members (${currentTeamPlayers.length})</h4>
+                    <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        ${squadMembersListHtml}
                     </div>
                 </div>
             </div>
@@ -355,8 +473,8 @@ window.renderTeamMakingContent = function() {
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-2xl w-full p-6 text-white shadow-2xl space-y-5 relative max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
                 <div>
-                    <h3 class="text-base font-black uppercase text-white">🏆 Team Builder Tool</h3>
-                    <p class="text-[10px] text-white/50">Format: ${format} • Teams: ${teamsCount}</p>
+                    <h3 class="text-base font-black uppercase text-white">🏆 Team Builder & Lineups</h3>
+                    <p class="text-[10px] text-white/50">Format: ${format} • Build your squad</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="randomizeTeamsTool('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow flex items-center gap-1">
@@ -389,7 +507,9 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     window.teamAssignments[eventId] = event.teamAssignments || {};
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[eventId]).forEach(teamArr => {
-        teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
+        if (Array.isArray(teamArr)) {
+            teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
+        }
     });
 
     const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
@@ -406,6 +526,18 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         document.body.appendChild(picker);
     }
 
+    const freeAgentsListHtml = freeAgents.map(a => {
+        const aAvatar = a?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+        const aName = a?.name || 'Player';
+        const aUid = a?.uid || '';
+        return `
+            <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex}, '${aUid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover">
+                <span class="text-xs font-bold text-white">${aName}</span>
+            </div>
+        `;
+    }).join('');
+
     picker.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
@@ -413,12 +545,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                 <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                ${freeAgents.map(a => `
-                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="text-xs font-bold text-white">${a.name}</span>
-                    </div>
-                `).join('')}
+                ${freeAgentsListHtml}
             </div>
             <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
