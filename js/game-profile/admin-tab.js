@@ -1,4 +1,4 @@
-// js/game-profile/admin-tab.js: Clean, modular admin tab implementation with working Edit/Copy, profile pictures, and match records
+// js/game-profile/admin-tab.js: Clean admin tab implementation with match deletion confirmation and score/goalscorer editing
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -117,6 +117,7 @@ export function renderAdminTab(event) {
             const teamB = m.teamB || "Team 2";
             const t1Goals = Array.isArray(m.team1Goals) ? m.team1Goals : [];
             const t2Goals = Array.isArray(m.team2Goals) ? m.team2Goals : [];
+            const isFinished = m.isFinished !== undefined ? m.isFinished : true;
 
             const t1ScorersHtml = t1Goals.map(scorer => {
                 const avatar = resolvePlayerAvatar(scorer);
@@ -144,7 +145,10 @@ export function renderAdminTab(event) {
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 shadow-md">
                     <div class="flex items-center justify-between text-xs font-black">
                         <span class="text-white">${teamA}</span>
-                        <span class="bg-[#00F296]/20 text-[#00F296] px-3.5 py-1 rounded-full border border-[#00F296]/40 text-xs tracking-wider font-mono">${t1Goals.length} - ${t2Goals.length}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="bg-[#00F296]/20 text-[#00F296] px-3.5 py-1 rounded-full border border-[#00F296]/40 text-xs tracking-wider font-mono">${t1Goals.length} - ${t2Goals.length}</span>
+                            <span class="text-[9px] px-2 py-0.5 rounded font-bold ${isFinished ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">${isFinished ? 'Ended' : 'Pending'}</span>
+                        </div>
                         <span class="text-white">${teamB}</span>
                     </div>
 
@@ -372,7 +376,188 @@ window.confirmCancelGame = async function(eventId) {
 };
 
 window.openEditMatchModal = function(eventId, matchIndex) {
-    window.showToast("Edit match modal coming online!");
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+    const match = event.matches[matchIndex];
+    if (!match) return;
+
+    const teamA = match.teamA || "Team 1";
+    const teamB = match.teamB || "Team 2";
+    const t1Goals = Array.isArray(match.team1Goals) ? [...match.team1Goals] : [];
+    const t2Goals = Array.isArray(match.team2Goals) ? [...match.team2Goals] : [];
+    const isFinished = match.isFinished !== undefined ? match.isFinished : true;
+
+    // Helper to get players assigned to teamName from teamAssignments
+    const getTeamPlayers = (teamName) => {
+        let tIdx = -1;
+        if (event.teamNames) {
+            tIdx = Object.keys(event.teamNames).find(k => event.teamNames[k] === teamName);
+        }
+        if (tIdx !== undefined && tIdx !== -1 && event.teamAssignments && event.teamAssignments[tIdx]) {
+            return event.teamAssignments[tIdx].filter(p => p && p.name);
+        }
+        // Fallback to attendees if team assignment not mapped
+        return (event.attendees || []).map(a => ({ name: a.name || 'Player', avatar: a.avatar || a.photoURL }));
+    };
+
+    const t1Players = getTeamPlayers(teamA);
+    const t2Players = getTeamPlayers(teamB);
+
+    let modal = document.getElementById('edit-match-admin-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'edit-match-admin-modal';
+        modal.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 text-white shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 class="text-sm font-black uppercase text-white">✏️ Edit Match Result</h3>
+                <button onclick="document.getElementById('edit-match-admin-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Match Status Toggle -->
+            <div class="flex items-center justify-between bg-black/50 p-3 rounded-2xl border border-white/10">
+                <span class="text-xs font-bold text-white/80">Match Status for Stats:</span>
+                <button type="button" onclick="window._editMatchIsFinished = !window._editMatchIsFinished; this.innerText = window._editMatchIsFinished ? 'Ended' : 'Pending'; this.className = window._editMatchIsFinished ? 'px-3 py-1 rounded-xl text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'px-3 py-1 rounded-xl text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/40';" class="px-3 py-1 rounded-xl text-xs font-black ${isFinished ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">${isFinished ? 'Ended' : 'Pending'}</button>
+            </div>
+
+            <!-- Team A Section -->
+            <div class="bg-black/40 border border-emerald-500/30 rounded-2xl p-4 space-y-3">
+                <div class="flex justify-between items-center text-xs font-black text-[#00F296]">
+                    <span>${teamA} Goals (${t1Goals.length})</span>
+                    <select id="edit-match-add-scorer-A" class="bg-black text-white text-xs px-2.5 py-1 rounded-xl border border-white/20 font-bold">
+                        <option value="">+ Add Goal Scorer</option>
+                        ${t1Players.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="flex justify-end">
+                    <button onclick="window.addGoalToEditMatch('${eventId}', 'A')" class="bg-[#00F296]/20 text-[#00F296] border border-[#00F296]/40 font-bold px-3 py-1 rounded-xl text-[10px]">Add Goal</button>
+                </div>
+                <div id="edit-match-scorers-list-A" class="space-y-1.5">
+                    ${t1Goals.map((scorer, idx) => `
+                        <div class="flex items-center justify-between text-xs bg-black/60 px-3 py-1.5 rounded-xl border border-white/10">
+                            <span class="font-bold text-white">⚽ ${scorer}</span>
+                            <button onclick="window.removeGoalFromEditMatch('${eventId}', 'A',${idx})" class="text-red-400 hover:text-red-300 font-bold text-xs"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- Team B Section -->
+            <div class="bg-black/40 border border-red-500/30 rounded-2xl p-4 space-y-3">
+                <div class="flex justify-between items-center text-xs font-black text-red-400">
+                    <span>${teamB} Goals (${t2Goals.length})</span>
+                    <select id="edit-match-add-scorer-B" class="bg-black text-white text-xs px-2.5 py-1 rounded-xl border border-white/20 font-bold">
+                        <option value="">+ Add Goal Scorer</option>
+                        ${t2Players.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="flex justify-end">
+                    <button onclick="window.addGoalToEditMatch('${eventId}', 'B')" class="bg-red-500/20 text-red-300 border border-red-500/40 font-bold px-3 py-1 rounded-xl text-[10px]">Add Goal</button>
+                </div>
+                <div id="edit-match-scorers-list-B" class="space-y-1.5">
+                    ${t2Goals.map((scorer, idx) => `
+                        <div class="flex items-center justify-between text-xs bg-black/60 px-3 py-1.5 rounded-xl border border-white/10">
+                            <span class="font-bold text-white">⚽ ${scorer}</span>
+                            <button onclick="window.removeGoalFromEditMatch('${eventId}', 'B',${idx})" class="text-red-400 hover:text-red-300 font-bold text-xs"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button onclick="document.getElementById('edit-match-admin-modal').remove()" class="flex-1 bg-black/60 hover:bg-black text-white py-3 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
+                <button onclick="window.saveEditedMatch('${eventId}', ${matchIndex})" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider shadow">Save Match</button>
+            </div>
+        </div>
+    `;
+
+    window._editMatchState = {
+        team1Goals: t1Goals,
+        team2Goals: t2Goals,
+        isFinished: isFinished
+    };
+    window._editMatchCurrentPlayers = { A: t1Players, B: t2Players };
+};
+
+window._editMatchState = { team1Goals: [], team2Goals: [], isFinished: true };
+window._editMatchCurrentPlayers = { A: [], B: [] };
+
+window.addGoalToEditMatch = function(eventId, teamKey) {
+    const selectEl = document.getElementById(`edit-match-add-scorer-${teamKey}`);
+    if (!selectEl) return;
+    const scorerName = selectEl.value;
+    if (!scorerName) {
+        window.showToast("Please select a player.", "error");
+        return;
+    }
+
+    if (teamKey === 'A') {
+        window._editMatchState.team1Goals.push(scorerName);
+    } else {
+        window._editMatchState.team2Goals.push(scorerName);
+    }
+    
+    // Re-render modal inner lists
+    refreshEditMatchModalUI(eventId);
+};
+
+window.removeGoalFromEditMatch = function(eventId, teamKey, gIdx) {
+    if (teamKey === 'A') {
+        window._editMatchState.team1Goals.splice(gIdx, 1);
+    } else {
+        window._editMatchState.team2Goals.splice(gIdx, 1);
+    }
+    refreshEditMatchModalUI(eventId);
+};
+
+function refreshEditMatchModalUI(eventId) {
+    const t1Goals = window._editMatchState.team1Goals;
+    const t2Goals = window._editMatchState.team2Goals;
+    const t1Players = window._editMatchCurrentPlayers.A;
+    const t2Players = window._editMatchCurrentPlayers.B;
+
+    const listA = document.getElementById('edit-match-scorers-list-A');
+    const listB = document.getElementById('edit-match-scorers-list-B');
+
+    if (listA) {
+        listA.innerHTML = t1Goals.map((scorer, idx) => `
+            <div class="flex items-center justify-between text-xs bg-black/60 px-3 py-1.5 rounded-xl border border-white/10">
+                <span class="font-bold text-white">⚽ ${scorer}</span>
+                <button onclick="window.removeGoalFromEditMatch('${eventId}', 'A', ${idx})" class="text-red-400 hover:text-red-300 font-bold text-xs"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+        `).join('');
+    }
+
+    if (listB) {
+        listB.innerHTML = t2Goals.map((scorer, idx) => `
+            <div class="flex items-center justify-between text-xs bg-black/60 px-3 py-1.5 rounded-xl border border-white/10">
+                <span class="font-bold text-white">⚽ ${scorer}</span>
+                <button onclick="window.removeGoalFromEditMatch('${eventId}', 'B', ${idx})" class="text-red-400 hover:text-red-300 font-bold text-xs"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+        `).join('');
+    }
+}
+
+window.saveEditedMatch = async function(eventId, matchIndex) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event || !event.matches || !event.matches[matchIndex]) return;
+
+    event.matches[matchIndex].team1Goals = window._editMatchState.team1Goals;
+    event.matches[matchIndex].team2Goals = window._editMatchState.team2Goals;
+    event.matches[matchIndex].isFinished = window._editMatchState.isFinished !== undefined ? window._editMatchState.isFinished : true;
+
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { matches: event.matches }, { merge: true });
+        window.showToast("Match updated successfully!");
+        const modal = document.getElementById('edit-match-admin-modal');
+        if (modal) modal.remove();
+    } catch (e) {
+        window.showToast("Failed to update match", "error");
+    }
 };
 
 window.toggleSessionEnded = async function(eventId) {
@@ -388,6 +573,7 @@ window.toggleSessionEnded = async function(eventId) {
 };
 
 window.deleteMatchRecord = async function(eventId, matchIndex) {
+    if (!confirm("Are you sure you want to delete this match record?")) return;
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
     let matches = Array.isArray(event.matches) ? [...event.matches] : [];
