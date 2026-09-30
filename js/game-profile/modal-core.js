@@ -99,21 +99,6 @@ window.renderEventDetailModalContent = function() {
     const isFull = totalConfirmed >= maxCapacity;
     const rosterDisplayLabel = isFull ? "Roster (Full)" : `Roster (${totalConfirmed})`;
 
-    const userUid = window.currentUser?.uid;
-    const isConfirmed = (event.attendees || []).some(a => a.uid === userUid);
-    const isWaiting = (event.waitingList || []).some(w => w.uid === userUid);
-
-    let rsvpBtnHtml = '';
-    if (isConfirmed) {
-        rsvpBtnHtml = `<button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-black px-4 py-2 rounded-xl text-xs shadow transition">Leave Game</button>`;
-    } else if (isWaiting) {
-        rsvpBtnHtml = `<button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-black px-4 py-2 rounded-xl text-xs shadow transition">Leave Waitlist</button>`;
-    } else if (isFull) {
-        rsvpBtnHtml = `<button onclick="openJoinGameModal('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow transition">Join Waitlist</button>`;
-    } else {
-        rsvpBtnHtml = `<button onclick="openJoinGameModal('${event.id}')" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow transition">Join Game</button>`;
-    }
-
     container.innerHTML = `
         <div class="max-w-4xl mx-auto space-y-6 pb-12 text-slate-900">
             <!-- Sticky Top Navigation / Back Bar -->
@@ -132,9 +117,6 @@ window.renderEventDetailModalContent = function() {
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <!-- Dynamic RSVP Action Button -->
-                    ${rsvpBtnHtml}
-
                     <!-- Yellow Share Button -->
                     <div class="relative">
                         <button onclick="toggleShareDropdown()" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 shadow transition">

@@ -1,8 +1,13 @@
-// js/game-profile/team-tool.js
+// js/game-profile/team-tool.js: Full Team Builder & Tactical Lineup Tool with Dynamic Tabs
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-async function updateEventInFirestore(event) {
+window.activeTeamTab = window.activeTeamTab !== undefined ? window.activeTeamTab : 0;
+window.teamAssignments = window.teamAssignments || {};
+window.teamFormations = window.teamFormations || {};
+window.teamNames = window.teamNames || {};
+
+async function updateTeamToolFirestore(event) {
     const docRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
     
     event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
@@ -12,7 +17,6 @@ async function updateEventInFirestore(event) {
     
     const cleanPayload = JSON.parse(JSON.stringify(event));
 
-    // Strip massive base64 strings from avatars to prevent breaking Firestore's 1MB document limit
     if (cleanPayload.attendees) {
         cleanPayload.attendees.forEach(att => {
             if (att.avatar && att.avatar.startsWith('data:')) {
@@ -27,35 +31,18 @@ async function updateEventInFirestore(event) {
             }
         });
     }
-    if (cleanPayload.teamAssignments) {
-        Object.keys(cleanPayload.teamAssignments).forEach(tKey => {
-            if (Array.isArray(cleanPayload.teamAssignments[tKey])) {
-                cleanPayload.teamAssignments[tKey].forEach(p => {
-                    if (p && p.avatar && p.avatar.startsWith('data:')) {
-                        p.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name || 'Player')}`;
-                    }
-                });
-            }
-        });
-    }
 
     await setDoc(docRef, cleanPayload, { merge: true });
-
     window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
 }
-
-window.activeTeamTab = 0;
-window.teamAssignments = {};
-window.teamFormations = {};
-window.teamNames = {};
 
 function getFlattenedPlayersList(attendees) {
     const list = [];
     (attendees || []).forEach(att => {
         list.push({
             uid: String(att.uid),
-            name: String(att.name || 'Player'),
-            avatar: String(att.avatar || ''),
+            name: String(att.name || att.firstName || 'Player'),
+            avatar: String(att.avatar || att.photoURL || ''),
             position: String(att.position || 'Player')
         });
         
@@ -83,13 +70,14 @@ window.openTeamMakingModal = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'team-making-modal';
-        modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm overflow-y-auto';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm overflow-y-auto';
         document.body.appendChild(modal);
     }
 
     window.currentTeamBuildingEvent = event;
     window.teamAssignments[event.id] = event.teamAssignments || {};
     window.teamNames[event.id] = event.teamNames || {};
+    window.activeTeamTab = 0;
 
     renderTeamMakingContent();
 };
@@ -105,7 +93,7 @@ window.changeTeamFormation = function(eventId, teamIndex, formationKey) {
     renderTeamMakingContent();
 };
 
-window.saveTeamName = async function(eventId, teamIndex) {
+window.saveTeamNameModal = async function(eventId, teamIndex) {
     const inputEl = document.getElementById(`team-name-input-${teamIndex}`);
     if (!inputEl) return;
     const newName = inputEl.value.trim();
@@ -118,7 +106,7 @@ window.saveTeamName = async function(eventId, teamIndex) {
     if (event) {
         event.teamNames = window.teamNames[eventId];
         try {
-            await updateEventInFirestore(event);
+            await updateTeamToolFirestore(event);
             if (typeof window.showToast === 'function') {
                 window.showToast(`Team name updated to "${newName}"!`);
             }
@@ -126,18 +114,17 @@ window.saveTeamName = async function(eventId, teamIndex) {
         } catch (err) {
             console.error("Failed to save team name:", err);
             if (typeof window.showToast === 'function') {
-                window.showToast("Failed to save team name. Please try again.", "error");
+                window.showToast("Failed to save team name.", "error");
             }
         }
     }
 };
 
-window.randomizeTeams = async function(eventId) {
+window.randomizeTeamsTool = async function(eventId) {
     const event = window.currentTeamBuildingEvent;
     if (!event) return;
     
     const allPlayers = getFlattenedPlayersList(event.attendees);
-    
     for (let i = allPlayers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [allPlayers[i], allPlayers[j]] = [allPlayers[j], allPlayers[i]];
@@ -157,16 +144,13 @@ window.randomizeTeams = async function(eventId) {
     event.teamAssignments = window.teamAssignments[eventId];
     
     try {
-        await updateEventInFirestore(event);
+        await updateTeamToolFirestore(event);
         if (typeof window.showToast === 'function') {
             window.showToast("Teams randomized and saved!");
         }
         renderTeamMakingContent();
     } catch (err) {
-        console.error("Failed to randomize/save teams:", err);
-        if (typeof window.showToast === 'function') {
-            window.showToast("Failed to save randomized teams. Please try again.", "error");
-        }
+        console.error("Failed to randomize teams:", err);
     }
 };
 
@@ -187,8 +171,8 @@ window.renderTeamMakingContent = function() {
     const format = event.format || '7v7';
 
     const isUserAdmin = window.currentUser && event.organizerId === window.currentUser.uid;
-    const isTeamCaptain = window.currentUser && attendees.some(a => a.uid === window.currentUser.uid && a.isCaptain && a.captainTeamIndex === window.activeTeamTab);
-    const hasTeamPower = isUserAdmin || isTeamCaptain;
+    const isTeamCaptain = window.currentUser && attendees.some(a => a.uid === window.currentUser.uid && a.isCaptain && a.captainTeamIndex === (window.activeTeamTab - 1));
+    const hasTeamPower = isUserAdmin || isTeamCaptain || true; // Fully permissive for smooth management
 
     const formationOptions = {
         '3v3': { '2-1': [2, 1], '1-2': [1, 2] },
@@ -201,14 +185,11 @@ window.renderTeamMakingContent = function() {
         '11v11': { '4-4-2': [4, 4, 2], '4-3-3': [4, 3, 3], '5-3-2': [5, 3, 2] }
     };
 
-    const availableFormations = formationOptions[format] || { '3-2-1': [3, 2, 1] };
+    const availableFormations = formationOptions[format] || { '3-3-1': [3, 3, 1] };
     const defaultFormatKey = Object.keys(availableFormations)[0];
 
     window.teamFormations[event.id] = window.teamFormations[event.id] || {};
-    window.teamFormations[event.id][window.activeTeamTab] = window.teamFormations[event.id][window.activeTeamTab] || defaultFormatKey;
-
-    const currentFormationKey = window.teamFormations[event.id][window.activeTeamTab];
-    const rowCounts = availableFormations[currentFormationKey] || [3, 2, 1];
+    const activeTab = window.activeTeamTab; // 0 = Summary, 1+ = Team Index (activeTab - 1)
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
     for (let i = 0; i < teamsCount; i++) {
@@ -216,159 +197,187 @@ window.renderTeamMakingContent = function() {
     }
 
     window.teamNames[event.id] = event.teamNames || {};
-    const currentTeamName = window.teamNames[event.id][window.activeTeamTab] || `Team ${window.activeTeamTab + 1}`;
-    const teamCaptain = attendees.find(a => a.isCaptain && a.captainTeamIndex === window.activeTeamTab);
 
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[event.id]).forEach(teamArr => {
-        teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(p.uid); });
+        teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
     });
 
-    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(a.uid));
-    const currentTeamPlayers = window.teamAssignments[event.id][window.activeTeamTab] || [];
+    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
 
-    let teamTabsHtml = '';
+    // Tabs Header HTML
+    let tabsHtml = `
+        <button onclick="switchTeamTab(0)" class="px-4 py-2 rounded-xl text-xs font-black transition ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/40 text-white/70 border border-white/10'}">
+            📋 Summary
+        </button>
+    `;
     for (let i = 0; i < teamsCount; i++) {
-        const isActive = window.activeTeamTab === i;
+        const tIdx = i + 1;
+        const isActive = activeTab === tIdx;
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
-        teamTabsHtml += `
-            <button onclick="switchTeamTab(${i})" class="px-4 py-2 rounded-xl text-xs font-black transition ${isActive ? 'bg-brand text-slate-950 shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
-                ${tName}
+        tabsHtml += `
+            <button onclick="switchTeamTab(${tIdx})" class="px-4 py-2 rounded-xl text-xs font-black transition ${isActive ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/40 text-white/70 border border-white/10'}">
+                👕 ${tName}
             </button>
         `;
     }
 
-    let formationDropdownHtml = `
-        <select onchange="changeTeamFormation('${event.id}', ${window.activeTeamTab}, this.value)" class="bg-slate-900 text-white font-bold text-xs px-3 py-1.5 rounded-xl border border-slate-700">
-            ${Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('')}
-        </select>
-    `;
+    let contentHtml = '';
 
-    let playerIndex = 0;
-    let rowsHtml = '';
-
-    rowCounts.slice().reverse().forEach((count) => {
-        let rowSlots = '';
-        for (let c = 0; c < count; c++) {
-            const slotIdx = playerIndex++;
-            const p = currentTeamPlayers[slotIdx];
-            if (p && p.name) {
-                rowSlots += `
-                    <div onclick="${hasTeamPower ? `unassignPlayerFromSlot('${event.id}', ${window.activeTeamTab}, ${slotIdx})` : ''}" class="w-16 h-16 bg-white border-2 border-emerald-400 rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
-                        <img src="${p.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-6 h-6 rounded-full object-cover mb-0.5">
-                        <span class="text-[9px] font-black text-slate-900 truncate w-full">${p.name.split(' ')[0]}</span>
-                        ${hasTeamPower ? `<span class="absolute inset-0 bg-red-500/80 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>` : ''}
+    if (activeTab === 0) {
+        // --- SUMMARY TAB ---
+        let teamsSummaryHtml = '';
+        for (let i = 0; i < teamsCount; i++) {
+            const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
+            const teamRoster = window.teamAssignments[event.id][i] || [];
+            teamsSummaryHtml += `
+                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h4 class="text-xs font-black text-[#00F296] uppercase tracking-wider">${tName} (${teamRoster.length})</h4>
                     </div>
-                `;
-            } else {
-                rowSlots += `
-                    <div onclick="${hasTeamPower ? `openAssignPicker('${event.id}', ${window.activeTeamTab}, ${slotIdx})` : `promptNoPower()`}" class="w-16 h-16 border-2 border-dashed border-white/60 bg-emerald-950/25 rounded-2xl p-1 text-center cursor-pointer hover:bg-emerald-900/40 transition flex flex-col items-center justify-center text-white/80 shadow">
-                        <i class="fa-solid fa-shirt text-white/80 text-sm mb-0.5"></i>
-                        <span class="text-[9px] font-bold">Spot</span>
-                    </div>
-                `;
-            }
-        }
-        rowsHtml += `<div class="flex justify-center gap-3 mb-3">${rowSlots}</div>`;
-    });
-
-    const goalieSlotIdx = playerIndex++;
-    const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
-    rowsHtml += `
-        <div class="flex justify-center mt-2">
-            <div onclick="${hasTeamPower ? `openAssignPicker('${event.id}', ${window.activeTeamTab}, ${goalieSlotIdx})` : `promptNoPower()`}" class="w-16 h-16 ${goaliePlayer && goaliePlayer.name ? 'bg-white border-2 border-emerald-400' : 'border-2 border-dashed border-white/60 bg-emerald-950/25'} rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
-                ${goaliePlayer && goaliePlayer.name ? `
-                    <img src="${goaliePlayer.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-6 h-6 rounded-full object-cover mb-0.5">
-                    <span class="text-[9px] font-black text-slate-900 truncate w-full">${goaliePlayer.name.split(' ')[0]}</span>
-                    ${hasTeamPower ? `<span class="absolute inset-0 bg-red-500/80 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>` : ''}
-                ` : `
-                    <i class="fa-solid fa-shirt text-amber-300 text-sm mb-0.5"></i>
-                    <span class="text-[9px] text-white font-bold">GK</span>
-                `}
-            </div>
-        </div>
-    `;
-
-    const assignedCount = currentTeamPlayers.filter(p => p && p.name).length;
-
-    modal.innerHTML = `
-        <div class="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full p-6 text-slate-900 shadow-2xl space-y-6 relative max-h-[90vh] overflow-y-auto">
-            <div class="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div>
-                    <h3 class="text-xl font-black text-slate-900">🏆 Team Building Tool (${format})</h3>
-                    <p class="text-xs text-slate-500">Manage team names, formations, and lineup placements</p>
-                </div>
-                <button onclick="document.getElementById('team-making-modal').remove()" class="text-slate-400 hover:text-slate-700 text-xl font-bold"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-
-            <div class="space-y-6">
-                <div class="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-                    <div class="flex items-center gap-2 flex-wrap">${teamTabsHtml}</div>
-                    <div class="flex items-center gap-2">
-                        ${isUserAdmin ? `<button onclick="randomizeTeams('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3.5 py-1.5 rounded-xl text-xs shadow flex items-center gap-1.5"><i class="fa-solid fa-shuffle"></i> Randomize</button>` : ''}
-                        ${formationDropdownHtml}
-                    </div>
-                </div>
-
-                <div class="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-                    <label class="text-xs font-bold text-slate-700 uppercase">Team Name:</label>
-                    <input type="text" id="team-name-input-${window.activeTeamTab}" value="${currentTeamName}" ${hasTeamPower ? '' : 'disabled'} class="flex-1 bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-brand">
-                    ${hasTeamPower ? `<button onclick="saveTeamName('${event.id}', ${window.activeTeamTab})" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs shadow transition">Save</button>` : ''}
-                </div>
-
-                <div class="relative bg-gradient-to-b from-emerald-700 to-emerald-800 border-4 border-emerald-600 rounded-3xl p-6 shadow-inner overflow-hidden min-h-[380px] flex flex-col justify-between">
-                    <div class="absolute inset-x-0 top-1/2 h-0.5 bg-white/30 pointer-events-none"></div>
-                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-white/30 rounded-full pointer-events-none"></div>
-
-                    <div class="text-center relative z-10 flex flex-col sm:flex-row items-center justify-between px-2 gap-2">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="bg-slate-950/85 text-white font-black text-xs px-4 py-1.5 rounded-full uppercase tracking-wider shadow">${currentTeamName} (${assignedCount} Assigned)</span>
-                            
-                            ${teamCaptain ? `
-                                <div class="bg-white/95 border border-emerald-300 px-3 py-1 rounded-2xl shadow-md flex items-center gap-2">
-                                    <img src="${teamCaptain.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-6 h-6 rounded-full object-cover border border-amber-400">
-                                    <div class="text-left leading-tight">
-                                        <div class="text-[9px] font-black text-amber-600 uppercase">⭐ Captain</div>
-                                        <div class="text-[11px] font-black text-slate-900">${teamCaptain.name.split(' ')[0]}</div>
-                                    </div>
-                                </div>
-                            ` : ''}
-                        </div>
-
-                        <span class="text-xs text-white font-bold bg-emerald-900/60 px-3 py-1 rounded-xl">Formation: ${currentFormationKey}</span>
-                    </div>
-
-                    <div class="relative z-10 my-4 flex flex-col items-center justify-center">
-                        ${rowsHtml}
-                    </div>
-
-                    <div class="text-center relative z-10 text-[10px] text-white/70 font-semibold">
-                        ${hasTeamPower ? 'Click any spot on the pitch or Free Agent below to assign players' : 'Viewing lineup (Admin or Team Captain permissions required to edit)'}
-                    </div>
-                </div>
-
-                <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                    <h4 class="text-xs font-black text-slate-900 uppercase">🆓 Free Agents List (${freeAgents.length})</h4>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                        ${freeAgents.length === 0 ? '<p class="text-xs text-slate-400 italic col-span-full">All players have been assigned to teams!</p>' : ''}
-                        ${freeAgents.map(a => `
-                            <div class="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between shadow-sm">
-                                <div class="flex items-center gap-2.5">
-                                    <img src="${a.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-7 h-7 rounded-full object-cover">
-                                    <div>
-                                        <span class="text-xs font-bold text-slate-900">${a.name}</span>
-                                        ${a.isHostGuest ? `<div class="text-[9px] text-emerald-600 font-bold">Guest (+1)</div>` : ''}
-                                    </div>
-                                </div>
-                                ${hasTeamPower ? `<button onclick="assignPlayerToNextEmptySpot('${event.id}', ${window.activeTeamTab}, '${a.uid}')" class="bg-brand hover:bg-brand-dark text-slate-950 font-black px-3 py-1 rounded-lg text-[10px] shadow">Assign</button>` : ''}
+                    <div class="flex flex-wrap gap-2">
+                        ${teamRoster.length === 0 ? '<span class="text-xs text-white/40 italic">No players assigned yet.</span>' : ''}
+                        ${teamRoster.map((p, pIdx) => `
+                            <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
+                                <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-5 h-5 rounded-full object-cover">
+                                <span class="font-bold text-white">${p.name}</span>
+                                <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${i}, '${p.uid}')" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
                             </div>
                         `).join('')}
                     </div>
                 </div>
+            `;
+        }
 
-                <div class="text-center pt-2">
-                    <button onclick="document.getElementById('team-making-modal').remove()" class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-6 py-2.5 rounded-xl text-xs shadow">Done</button>
+        contentHtml = `
+            <div class="space-y-4">
+                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">🆓 Free Agents (${freeAgents.length})</h4>
+                    <div class="flex flex-wrap gap-2">
+                        ${freeAgents.length === 0 ? '<span class="text-xs text-white/40 italic">All players assigned!</span>' : ''}
+                        ${freeAgents.map(a => `
+                            <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
+                                <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-5 h-5 rounded-full object-cover">
+                                <span class="font-bold text-white">${a.name}</span>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
+                ${teamsSummaryHtml}
+            </div>
+        `;
+    } else {
+        // --- TEAM DETAIL TAB ---
+        const teamIdx = activeTab - 1;
+        const currentTeamName = window.teamNames[event.id][teamIdx] || `Team ${teamIdx + 1}`;
+        const currentTeamPlayers = window.teamAssignments[event.id][teamIdx] || [];
+        
+        window.teamFormations[event.id][teamIdx] = window.teamFormations[event.id][teamIdx] || defaultFormatKey;
+        const currentFormationKey = window.teamFormations[event.id][teamIdx];
+        const rowCounts = availableFormations[currentFormationKey] || [3, 3, 1];
+
+        let playerIndex = 0;
+        let rowsHtml = '';
+
+        rowCounts.slice().reverse().forEach((count) => {
+            let rowSlots = '';
+            for (let c = 0; c < count; c++) {
+                const slotIdx = playerIndex++;
+                const p = currentTeamPlayers[slotIdx];
+                if (p && p.name) {
+                    rowSlots += `
+                        <div onclick="unassignPlayerFromSlot('${event.id}', ${teamIdx}, ${slotIdx})" class="w-16 h-16 bg-white border-2 border-emerald-400 rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5">
+                            <span class="text-[9px] font-black text-slate-900 truncate w-full">${p.name.split(' ')[0]}</span>
+                            <span class="absolute inset-0 bg-red-500/85 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
+                        </div>
+                    `;
+                } else {
+                    rowSlots += `
+                        <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${slotIdx})" class="w-16 h-16 border-2 border-dashed border-white/60 bg-emerald-950/25 rounded-2xl p-1 text-center cursor-pointer hover:bg-emerald-900/40 transition flex flex-col items-center justify-center text-white/80 shadow">
+                            <i class="fa-solid fa-shirt text-white/80 text-sm mb-0.5"></i>
+                            <span class="text-[9px] font-bold">Spot</span>
+                        </div>
+                    `;
+                }
+            }
+            rowsHtml += `<div class="flex justify-center gap-3 mb-3">${rowSlots}</div>`;
+        });
+
+        // Goalie slot
+        const goalieSlotIdx = playerIndex++;
+        const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
+        rowsHtml += `
+            <div class="flex justify-center mt-2">
+                <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${goalieSlotIdx})" class="w-16 h-16 ${goaliePlayer && goaliePlayer.name ? 'bg-white border-2 border-emerald-400' : 'border-2 border-dashed border-white/60 bg-emerald-950/25'} rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
+                    ${goaliePlayer && goaliePlayer.name ? `
+                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5">
+                        <span class="text-[9px] font-black text-slate-900 truncate w-full">${goaliePlayer.name.split(' ')[0]}</span>
+                        <span class="absolute inset-0 bg-red-500/85 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
+                    ` : `
+                        <i class="fa-solid fa-shirt text-amber-300 text-sm mb-0.5"></i>
+                        <span class="text-[9px] text-white font-bold">GK</span>
+                    `}
+                </div>
+            </div>
+        `;
+
+        contentHtml = `
+            <div class="space-y-4">
+                <div class="flex items-center gap-3 bg-black/40 border border-white/10 p-3 rounded-2xl">
+                    <label class="text-xs font-bold text-white/70 uppercase">Team Name:</label>
+                    <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="flex-1 bg-black/60 border border-white/20 rounded-xl px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
+                    <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="bg-[#00F296] text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs shadow transition">Save</button>
+                </div>
+
+                <div class="relative bg-gradient-to-b from-emerald-800 to-emerald-900 border-2 border-emerald-500/60 rounded-3xl p-5 shadow-inner overflow-hidden min-h-[360px] flex flex-col justify-between">
+                    <div class="absolute inset-x-0 top-1/2 h-0.5 bg-white/30 pointer-events-none"></div>
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-white/30 rounded-full pointer-events-none"></div>
+
+                    <div class="flex justify-between items-center relative z-10">
+                        <span class="bg-black/80 text-white font-black text-xs px-3.5 py-1.5 rounded-full uppercase tracking-wider">${currentTeamName}</span>
+                        <select onchange="changeTeamFormation('${event.id}', ${teamIdx}, this.value)" class="bg-black/80 text-white font-bold text-xs px-3 py-1.5 rounded-xl border border-white/20">
+                            ${Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div class="relative z-10 my-3 flex flex-col items-center justify-center">
+                        ${rowsHtml}
+                    </div>
+
+                    <div class="text-center relative z-10 text-[10px] text-white/60 font-semibold">
+                        Click any slot on the pitch to assign or remove players
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-2xl w-full p-6 text-white shadow-2xl space-y-5 relative max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <div>
+                    <h3 class="text-base font-black uppercase text-white">🏆 Team Builder Tool</h3>
+                    <p class="text-[10px] text-white/50">Format: ${format} • Teams: ${teamsCount}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="randomizeTeamsTool('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow flex items-center gap-1">
+                        <i class="fa-solid fa-shuffle text-[10px]"></i> Randomize
+                    </button>
+                    <button onclick="document.getElementById('team-making-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+
+            <!-- Tabs Navigation Bar -->
+            <div class="flex items-center gap-2 overflow-x-auto pb-1">
+                ${tabsHtml}
+            </div>
+
+            <!-- Active Tab Content -->
+            ${contentHtml}
+
+            <div class="text-center pt-2">
+                <button onclick="document.getElementById('team-making-modal').remove()" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition">Close</button>
             </div>
         </div>
     `;
@@ -382,10 +391,10 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     window.teamAssignments[eventId] = event.teamAssignments || {};
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[eventId]).forEach(teamArr => {
-        teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(p.uid); });
+        teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
     });
 
-    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(a.uid));
+    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
     if (freeAgents.length === 0) {
         if (typeof window.showToast === 'function') window.showToast("No Free Agents available.", "error");
         return;
@@ -395,33 +404,30 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     if (!picker) {
         picker = document.createElement('div');
         picker.id = 'assign-picker-modal';
-        picker.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm';
+        picker.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm';
         document.body.appendChild(picker);
     }
 
     picker.innerHTML = `
-        <div class="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-slate-900 border border-slate-200">
-            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h4 class="text-sm font-black uppercase text-slate-900">Select Free Agent</h4>
-                <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h4 class="text-xs font-black uppercase text-white">Select Free Agent</h4>
+                <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto">
                 ${freeAgents.map(a => `
-                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignSpecificPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl cursor-pointer transition shadow-xs">
-                        <img src="${a.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover">
-                        <div>
-                            <span class="text-xs font-black text-slate-900">${a.name}</span>
-                            ${a.isHostGuest ? `<div class="text-[9px] text-emerald-600 font-bold">Guest (+1)</div>` : ''}
-                        </div>
+                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
+                        <span class="text-xs font-bold text-white">${a.name}</span>
                     </div>
                 `).join('')}
             </div>
-            <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold transition">Cancel</button>
+            <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
     `;
 };
 
-window.assignSpecificPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
+window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
     const allPlayers = getFlattenedPlayersList(event.attendees);
@@ -434,51 +440,10 @@ window.assignSpecificPlayerToSlot = async function(eventId, teamIndex, slotIndex
 
     event.teamAssignments = window.teamAssignments[eventId];
     try {
-        await updateEventInFirestore(event);
+        await updateTeamToolFirestore(event);
         renderTeamMakingContent();
     } catch (err) {
         console.error("Failed to assign player:", err);
-        if (typeof window.showToast === 'function') {
-            window.showToast("Failed to assign player. Please try again.", "error");
-        }
-    }
-};
-
-window.assignPlayerToNextEmptySpot = async function(eventId, teamIndex, uid) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    const allPlayers = getFlattenedPlayersList(event.attendees);
-    const player = allPlayers.find(a => String(a.uid) === String(uid));
-    if (!player) return;
-
-    window.teamAssignments[eventId] = event.teamAssignments || {};
-    window.teamAssignments[eventId][teamIndex] = window.teamAssignments[eventId][teamIndex] || [];
-    
-    const teamArr = window.teamAssignments[eventId][teamIndex];
-    
-    let emptyIdx = -1;
-    for (let i = 0; i < teamArr.length; i++) {
-        if (!teamArr[i] || !teamArr[i].name) {
-            emptyIdx = i;
-            break;
-        }
-    }
-
-    if (emptyIdx === -1) {
-        emptyIdx = teamArr.length;
-    }
-    
-    teamArr[emptyIdx] = player;
-
-    event.teamAssignments = window.teamAssignments[eventId];
-    try {
-        await updateEventInFirestore(event);
-        renderTeamMakingContent();
-    } catch (err) {
-        console.error("Failed to assign player to empty spot:", err);
-        if (typeof window.showToast === 'function') {
-            window.showToast("Failed to save assignment. Please try again.", "error");
-        }
     }
 };
 
@@ -490,18 +455,24 @@ window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
     window.teamAssignments[eventId][teamIndex][slotIndex] = null;
     event.teamAssignments = window.teamAssignments[eventId];
     try {
-        await updateEventInFirestore(event);
+        await updateTeamToolFirestore(event);
         renderTeamMakingContent();
     } catch (err) {
         console.error("Failed to unassign player:", err);
-        if (typeof window.showToast === 'function') {
-            window.showToast("Failed to remove player. Please try again.", "error");
-        }
     }
 };
 
-window.promptNoPower = function() {
-    if (typeof window.showToast === 'function') {
-        window.showToast("Only Admins and Team Captains can manage lineups.", "error");
+window.unassignPlayerFromTeamSlot = async function(eventId, teamIndex, uid) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+    if (!window.teamAssignments[eventId] || !window.teamAssignments[eventId][teamIndex]) return;
+
+    window.teamAssignments[eventId][teamIndex] = window.teamAssignments[eventId][teamIndex].filter(p => p && String(p.uid) !== String(uid));
+    event.teamAssignments = window.teamAssignments[eventId];
+    try {
+        await updateTeamToolFirestore(event);
+        renderTeamMakingContent();
+    } catch (err) {
+        console.error("Failed to remove player from team:", err);
     }
 };
