@@ -47,6 +47,7 @@ window.initEventsLiveListener = function() {
         const list = [];
         snapshot.forEach(docSnap => {
             const evData = docSnap.data();
+            if (!evData.id) evData.id = docSnap.id;
             if (!evData.attendees) evData.attendees = [];
             if (!evData.waitingList) evData.waitingList = [];
             if (!evData.declinedList) evData.declinedList = [];
@@ -95,7 +96,7 @@ window.renderDateTabs = function() {
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const todayObj = new Date();
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 6; i++) {
         const d = new Date();
         d.setDate(todayObj.getDate() + i);
 
@@ -115,7 +116,7 @@ window.renderDateTabs = function() {
     }
 
     container.innerHTML = dates.map(d => `
-        <button onclick="selectDateTab('${d.date}')" class="px-5 py-2.5 rounded-full text-xs font-bold shrink-0 transition ${window.selectedDateStr === d.date ? 'bg-brand text-slate-950 shadow-md' : 'bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200'}">
+        <button onclick="selectDateTab('${d.date}')" class="px-4 py-2 rounded-full text-xs font-bold shrink-0 transition ${window.selectedDateStr === d.date ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'bg-black/30 text-white hover:text-white/90 border border-white/20'}">
             ${d.label}
         </button>
     `).join('');
@@ -146,29 +147,7 @@ window.copyEvent = function(eventId) {
 
     if (typeof window.switchTab === 'function') {
         window.switchTab('create-event');
-        const createTabEl = document.getElementById('tab-create-event') || document.getElementById('tab-create-game');
-        if (!createTabEl) {
-            window.switchTab('create-game');
-        }
     }
-
-    if (typeof window.renderCreateEventScreen === 'function') {
-        window.renderCreateEventScreen();
-    }
-
-    setTimeout(() => {
-        if (typeof window.populateCreateFormFromCopy === 'function') {
-            window.populateCreateFormFromCopy();
-        } else {
-            const titleEl = document.getElementById('ce-title');
-            const dateEl = document.getElementById('ce-date');
-            if (titleEl) titleEl.value = `${event.title} (Copy)`;
-            if (dateEl) {
-                dateEl.value = '';
-                dateEl.focus();
-            }
-        }
-    }, 200);
 
     if (typeof window.showToast === 'function') {
         window.showToast("Game details copied! Please select a future date.");
@@ -180,18 +159,21 @@ window.renderEvents = function() {
     if (!grid) return;
 
     const filtered = (window.eventsList || [])
-        .filter(ev => ev.date === window.selectedDateStr)
+        .filter(ev => {
+            const evDateClean = (ev.date || "").substring(0, 10);
+            return evDateClean === window.selectedDateStr;
+        })
         .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
 
     if (filtered.length === 0) {
         grid.innerHTML = `
-            <div class="col-span-full bg-white border border-slate-200 rounded-3xl p-10 text-center space-y-3 shadow-sm">
-                <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400 text-2xl">
-                    <i class="fa-solid fa-futbol"></i>
+            <div class="col-span-full bg-[#040E13]/80 border border-emerald-500/30 rounded-3xl p-10 text-center space-y-3 shadow-xl backdrop-blur-md">
+                <div class="w-16 h-16 bg-black/40 rounded-full flex items-center justify-center mx-auto text-white/50 text-2xl border border-white/10">
+                    <i class="fa-solid fa-sportscourt"></i>
                 </div>
-                <h3 class="text-base font-black text-slate-900">No games scheduled for this date</h3>
-                <p class="text-slate-500 text-xs">Be the first to organize a match for this day!</p>
-                <button onclick="if(window.resetCreateGameForm) window.resetCreateGameForm(); switchTab('create-event')" class="mt-2 inline-flex items-center gap-2 bg-brand text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs shadow">
+                <h3 class="text-base font-black text-white">No games scheduled for this date</h3>
+                <p class="text-white/70 text-xs">Be the first to organize a match for this day!</p>
+                <button onclick="if(window.resetCreateGameForm) window.resetCreateGameForm(); switchTab('create-event')" class="mt-2 inline-flex items-center gap-2 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs shadow-md">
                     <i class="fa-solid fa-plus"></i> Create Game
                 </button>
             </div>
@@ -199,9 +181,12 @@ window.renderEvents = function() {
         return;
     }
 
+    const futGreen = '#00F296';
+    const futTeal = '#00B4AE';
+
     grid.innerHTML = filtered.map(ev => {
         const formatMatch = (ev.format || "").match(/(\d+)/);
-        const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
+        const perSide = formatMatch ? parseInt(formatMatch[1], 10) : 5;
 
         let teamsCountNum = 3;
         if (typeof ev.teamsCount === 'number') {
@@ -210,45 +195,99 @@ window.renderEvents = function() {
             const parsed = parseInt(ev.teamsCount.match(/(\d+)/)?.[1], 10);
             if (!isNaN(parsed)) teamsCountNum = parsed;
         }
-        const maxCapacity = playersPerTeam * teamsCountNum;
+        const maxCapacity = perSide * teamsCountNum;
 
         let currentGoing = 0;
         const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
         attendeesArr.forEach(a => {
-            const guestArr = Array.isArray(a.guests) ? a.guests : [];
-            currentGoing += 1 + guestArr.length;
+            const guestArr = Array.isArray(a.guests) ? a.guests : (Array.isArray(a.plusOnesList) ? a.plusOnesList : []);
+            const plusOneInt = typeof a.plusOnes === 'number' ? a.plusOnes : 0;
+            currentGoing += 1 + Math.max(guestArr.length, plusOneInt);
         });
         if (currentGoing === 0 && attendeesArr.length === 0) currentGoing = 1;
 
-        const rawFee = ev.fee !== undefined ? ev.fee : "Free";
-        const feeDisplay = (rawFee === "Free" || rawFee === "0" || rawFee === 0 || rawFee === "0.00" || rawFee === "") ? "Free" : `$${parseFloat(rawFee).toFixed(2)}`;
+        const isFull = currentGoing >= maxCapacity;
+
+        let rawPrice = 0.0;
+        if (ev.price !== undefined && ev.price !== null) {
+            rawPrice = parseFloat(ev.price) || 0.0;
+        } else if (ev.fee !== undefined && ev.fee !== null) {
+            const cleaned = String(ev.fee).replace('$', '').trim();
+            rawPrice = parseFloat(cleaned) || 0.0;
+        }
+        const displayPrice = rawPrice > 0 ? `$${rawPrice.toFixed(2)}` : "Free";
         const formattedTime = formatTimeTo12Hour(ev.time);
 
+        const communityName = ev.communityName || "";
+        const communityThumbnail = ev.communityThumbnail || "";
+
         return `
-            <div onclick="openEventDetails('${ev.id}')" class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:border-brand transition flex flex-col cursor-pointer">
-                <div class="bg-brand px-6 py-4 text-slate-950">
-                    <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider mb-1 opacity-90">
-                        <span>${ev.format} • ${ev.teamsCount} Teams</span>
-                        <span class="text-sm font-black bg-slate-950 text-white px-3 py-1 rounded-lg shadow-sm">${feeDisplay}</span>
+            <div onclick="openEventDetails('${ev.id}')" class="relative bg-[#010A0F]/90 rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-emerald-500/60 hover:border-emerald-400 transition cursor-pointer p-4 space-y-3">
+                
+                ${communityThumbnail ? `
+                    <div class="absolute inset-0 z-0 opacity-20">
+                        <img src="${communityThumbnail}" class="w-full h-full object-cover">
                     </div>
-                    <h3 class="text-lg font-black tracking-tight">${ev.title}</h3>
-                </div>
+                ` : ''}
 
-                <div class="p-6 space-y-4 flex-1 flex flex-col justify-between">
-                    <div class="space-y-2 text-xs text-slate-600">
-                        <div class="flex items-center gap-2.5"><i class="fa-solid fa-clock text-brand w-4"></i> <span class="font-bold text-slate-800">${formattedTime}</span></div>
-                        <div class="flex items-center gap-2.5"><i class="fa-solid fa-location-dot text-brand w-4"></i> <span class="truncate">${ev.location}</span></div>
-                    </div>
-
-                    <div class="pt-4 border-t border-slate-100 flex items-center justify-between">
-                        <div onclick="event.stopPropagation(); window.switchTab('profile');" class="flex items-center gap-2.5 cursor-pointer group">
-                            <img src="${ev.organizerAvatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover border border-slate-200 shadow-sm group-hover:border-brand transition">
-                            <div>
-                                <div class="text-[10px] font-bold text-slate-400 uppercase leading-none">By</div>
-                                <div class="text-xs font-black text-slate-900 group-hover:text-brand transition mt-0.5">${ev.organizer || 'Organizer'}</div>
+                <div class="relative z-10 space-y-3">
+                    <!-- Optional Community Badge Header -->
+                    ${communityName ? `
+                        <div class="flex justify-center">
+                            <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-[#00F296]/50 text-[#00F296] text-[10px] font-black">
+                                <i class="fa-solid fa-shield"></i>
+                                <span>${communityName} Community</span>
                             </div>
                         </div>
-                        <span class="text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-xl">${currentGoing} / ${maxCapacity} Going</span>
+                    ` : ''}
+
+                    <!-- Top Tags Row -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-1.5 bg-black/50 px-2.5 py-1 rounded-xl border border-[#00B4AE]/80 text-white text-[10px] font-bold">
+                            <i class="fa-solid fa-users text-[10px]"></i>
+                            <span>${ev.format || '7v7'} • ${teamsCountNum} Teams</span>
+                        </div>
+
+                        <div class="flex items-center space-x-1 bg-black/50 px-2.5 py-1 rounded-xl border ${displayPrice === 'Free' ? 'border-[#00B4AE]/80' : 'border-[#00F296]/80'} text-white text-[10px] font-bold">
+                            <i class="fa-solid ${displayPrice === 'Free' ? 'fa-tag' : 'fa-circle-dollar-to-slot'} text-[10px]"></i>
+                            <span>${displayPrice}</span>
+                        </div>
+                    </div>
+
+                    <!-- Game Title -->
+                    ${ev.title ? `<h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${ev.title}</h3>` : ''}
+
+                    <!-- Date, Time, Location -->
+                    <div class="space-y-1.5 text-[11px] font-medium text-white/90">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-calendar text-[#00F296] w-3.5"></i>
+                            <span>${ev.date || ''}</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-clock text-[#00F296] w-3.5"></i>
+                            <span>${formattedTime}</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-location-dot text-[#00F296] w-3.5"></i>
+                            <span class="truncate">${ev.location || ''}</span>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-white/10 pt-2.5 flex items-center justify-between">
+                        <!-- Host Info -->
+                        <div onclick="event.stopPropagation(); window.switchTab('profile');" class="flex items-center space-x-2 cursor-pointer group">
+                            <img src="${ev.organizerAvatar || ev.hostAvatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover border border-[#00F296]/60 shadow-sm">
+                            <div>
+                                <div class="text-[7px] font-bold text-white/60 uppercase leading-none">BY</div>
+                                <div class="text-[10px] font-bold text-white group-hover:text-[#00F296] transition">${ev.organizer || ev.hostName || 'Organizer'}</div>
+                            </div>
+                        </div>
+
+                        <!-- Going Counter Badge -->
+                        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${isFull ? 'bg-red-500/30 border-red-500 text-red-200' : 'bg-[#00F296]/30 border-[#00F296] text-white'}">
+                            <i class="fa-solid ${isFull ? 'fa-user-xmark' : 'fa-user-check'}"></i>
+                            <span>${isFull ? 'Full' : `${currentGoing} /${maxCapacity} Going`}</span>
+                        </div>
                     </div>
                 </div>
             </div>
