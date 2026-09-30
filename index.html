@@ -52,123 +52,146 @@
         </div>
 
         <!-- AUTH & UNIFIED SIGN-UP CONTAINER -->
-        <div id="auth-container" class="hidden flex-1 flex flex-col items-center justify-center p-4 bg-slate-50">
+        <div id="auth-container" class="hidden fixed inset-0 flex flex-col items-center justify-center p-4 sm:p-6 bg-slate-950 overflow-y-auto" style="background: #040E13 url('img/Background_Login.jpg') center/cover no-repeat;">
+            <!-- Dark Gradient Overlay matching iOS App -->
+            <div class="absolute inset-0 bg-gradient-to-b from-black/50 via-black/60 to-black/90 pointer-events-none"></div>
+
             <!-- Login View -->
-            <div id="view-login" class="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
-                <div class="text-center">
-                    <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-slate-50 border border-slate-200 rounded-xl mb-2">
-                        <span class="text-xl font-black tracking-tight text-slate-900 italic">FUT<span class="text-slate-400">NET</span></span>
+            <div id="view-login" class="relative z-10 w-full max-w-[420px] sm:max-w-[460px] bg-[#040E13]/95 border border-emerald-500/50 rounded-[28px] p-6 sm:p-8 shadow-2xl space-y-5 backdrop-blur-md my-auto">
+                <div class="text-center space-y-2">
+                    <div class="flex justify-center">
+                        <img src="img/FutNetLogo.png" alt="FutNet Logo" class="w-[110px] h-[110px] object-contain drop-shadow-[0_10px_12px_rgba(0,224,143,0.45)]">
                     </div>
-                    <h1 class="text-xl font-black tracking-tight text-slate-900">WELCOME TO FUTNET</h1>
-                    <p class="text-slate-500 text-xs mt-1">Organize matches, log sub-match scores & goalscorers, and climb the live leaderboard!</p>
+                    <h1 class="text-xl sm:text-2xl font-black tracking-[0.2px] text-white">WELCOME TO <span class="text-[#00E08F]">FUTNET</span></h1>
+                    <p class="text-xs sm:text-sm font-medium text-white/80 leading-relaxed px-2">Organize matches, log sub-match scores & goalscorers, and climb the live leaderboard!</p>
                 </div>
 
-                <div class="space-y-3">
-                    <button onclick="handleSocialAuth('google')" class="w-full flex items-center justify-center space-x-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold py-3 px-4 rounded-xl transition shadow-sm text-xs">
-                        <i class="fa-brands fa-google text-red-500 text-base"></i>
-                        <span>Sign in with Google</span>
+                <div class="space-y-3.5 pt-1">
+                    <button onclick="handleSocialAuth('google')" class="w-full flex items-center justify-center space-x-3 bg-white hover:bg-slate-100 text-slate-800 font-bold h-[52px] px-5 rounded-[26px] transition shadow-lg text-[15px]">
+                        <span class="text-lg font-bold bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 to-blue-500 bg-clip-text text-transparent">G</span>
+                        <span>Continue with Google</span>
                     </button>
-                    <button onclick="handleSocialAuth('facebook')" class="w-full flex items-center justify-center space-x-3 bg-[#3b5998] hover:bg-[#324d81] text-white font-semibold py-3 px-4 rounded-xl transition shadow text-xs">
-                        <i class="fa-brands fa-facebook text-base"></i>
-                        <span>Connect with Facebook</span>
+                    <button onclick="handleSocialAuth('facebook')" class="w-full flex items-center justify-center space-x-2 bg-black hover:bg-slate-900 text-white font-medium h-[52px] px-5 rounded-[26px] transition shadow-lg text-[15px] border border-white/10">
+                        <i class="fa-brands fa-apple text-lg"></i>
+                        <span>Sign in with Apple</span>
                     </button>
                 </div>
 
-                <div class="relative flex items-center justify-center">
-                    <div class="border-t border-slate-200 absolute w-full"></div>
-                    <span class="bg-white px-3 text-xs text-slate-400 relative uppercase font-semibold">Or sign in with email</span>
+                <div class="flex items-center space-x-3 py-1">
+                    <div class="flex-1 h-[1px] bg-white/20"></div>
+                    <span class="text-[10px] font-bold text-white/60 tracking-wider">OR</span>
+                    <div class="flex-1 h-[1px] bg-white/20"></div>
                 </div>
 
-                <form onsubmit="handleEmailAuth(event)" class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Email Address</label>
-                        <input type="email" id="auth-email" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
+                <form onsubmit="handleEmailAuth(event)" class="space-y-3.5">
+                    <div class="space-y-1">
+                        <label class="block text-[11px] font-bold text-white/70 tracking-[0.3px] uppercase">Email Address</label>
+                        <div class="flex items-center space-x-3 h-[52px] px-4 bg-black rounded-2xl border border-teal-500/85">
+                            <i class="fa-solid fa-envelope text-[#8DCDD2] text-[15px] w-5"></i>
+                            <input type="email" id="auth-email" placeholder="name@example.com" required class="w-full bg-black text-white text-[15px] font-medium focus:outline-none placeholder:text-white/30">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Password</label>
-                        <input type="password" id="auth-password" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
+                    <div class="space-y-1">
+                        <label class="block text-[11px] font-bold text-white/70 tracking-[0.3px] uppercase">Password</label>
+                        <div class="flex items-center space-x-3 h-[52px] px-4 bg-black rounded-2xl border border-sky-400/90">
+                            <i class="fa-solid fa-lock text-[#8DCDD2] text-[15px] w-5"></i>
+                            <input type="password" id="auth-password" placeholder="Password" required class="w-full bg-black text-white text-[15px] font-medium focus:outline-none placeholder:text-white/30">
+                        </div>
                     </div>
-                    <div id="login-error-msg" class="hidden text-xs text-red-500 font-bold bg-red-50 border border-red-200 p-2.5 rounded-xl text-center">Wrong email or password</div>
+                    <div id="login-error-msg" class="hidden text-xs font-semibold text-red-400 text-center bg-red-950/40 p-2 rounded-xl border border-red-500/30"></div>
                     
-                    <div class="pt-2 flex gap-3">
-                        <button type="submit" name="action" value="signin" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-xl transition text-sm">Sign In</button>
-                        <button type="button" onclick="showSignupScreen()" class="flex-1 bg-brand hover:bg-brand-dark text-slate-950 font-black py-3 rounded-xl transition text-sm">Sign Up</button>
-                    </div>
+                    <button type="submit" class="w-full h-[52px] bg-black/60 hover:bg-black text-white font-bold rounded-[26px] border border-white/72 transition text-[16px] shadow-lg flex items-center justify-center">
+                        Sign In
+                    </button>
+                    <button type="button" onclick="showSignupScreen()" class="w-full h-[52px] bg-gradient-to-r from-[#00E08F] to-[#00B89E] hover:opacity-95 text-slate-950 font-bold rounded-[26px] transition text-[16px] shadow-[0_4px_15px_rgba(0,224,143,0.35)] flex items-center justify-center space-x-2">
+                        <span>Sign Up</span>
+                        <i class="fa-solid fa-arrow-right text-[14px]"></i>
+                    </button>
                 </form>
+
+                <div class="flex items-center justify-center space-x-2.5 pt-3 text-[11px] font-medium text-white/70">
+                    <div class="w-10 h-[1px] bg-white/30"></div>
+                    <span>Play</span>
+                    <div class="w-1 h-1 rounded-full bg-white/55"></div>
+                    <span>Connect</span>
+                    <div class="w-1 h-1 rounded-full bg-white/55"></div>
+                    <span>Compete</span>
+                    <div class="w-10 h-[1px] bg-white/30"></div>
+                </div>
             </div>
 
             <!-- Unified Sign Up & Full Profile Creation View -->
-            <div id="view-signup" class="hidden w-full max-w-md bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div id="view-signup" class="hidden relative z-10 w-full max-w-[420px] sm:max-w-[460px] bg-[#040E13]/95 border border-emerald-500/50 rounded-[28px] p-6 sm:p-8 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto backdrop-blur-md my-auto">
                 <div class="text-center">
-                    <h2 class="text-xl font-black text-slate-900">Create Your FutNet Account</h2>
-                    <p class="text-slate-500 text-xs mt-1">Set up your credentials and complete player profile.</p>
+                    <h2 class="text-lg font-black text-white">Create Your FutNet Account</h2>
+                    <p class="text-white/70 text-xs mt-1">Set up your credentials and complete player profile.</p>
                 </div>
 
-                <form onsubmit="handleUnifiedRegistration(event)" class="space-y-3">
+                <form onsubmit="handleUnifiedRegistration(event)" class="space-y-3.5">
                     <input type="hidden" id="unified-avatar" value="">
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">First Name</label>
-                            <input type="text" id="reg-firstname" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
+                            <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">First Name</label>
+                            <input type="text" id="reg-firstname" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
                         </div>
                         <div>
-                            <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Last Name</label>
-                            <input type="text" id="reg-lastname" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
+                            <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Last Name</label>
+                            <input type="text" id="reg-lastname" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Nickname (Optional)</label>
-                        <input type="text" id="reg-nickname" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand" placeholder="e.g. R10, El Mago">
+                        <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Nickname (Optional)</label>
+                        <input type="text" id="reg-nickname" class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand" placeholder="e.g. R10, El Mago">
                     </div>
 
                     <div>
-                        <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Email Address</label>
-                        <input type="email" id="reg-email" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
+                        <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Email Address</label>
+                        <input type="email" id="reg-email" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Password</label>
-                            <input type="password" id="reg-password" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
+                            <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Password</label>
+                            <input type="password" id="reg-password" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
                         </div>
                         <div>
-                            <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Confirm Password</label>
-                            <input type="password" id="reg-confirm" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
+                            <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Confirm Password</label>
+                            <input type="password" id="reg-confirm" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Gender</label>
-                            <select id="reg-gender" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                                <option value="Other">Other</option>
+                            <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Gender</label>
+                            <select id="reg-gender" class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
+                                <option value="Male" class="bg-slate-900">Male</option>
+                                <option value="Female" class="bg-slate-900">Female</option>
+                                <option value="Other" class="bg-slate-900">Other</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Birthday</label>
-                            <input type="date" id="reg-dob" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand cursor-pointer">
+                            <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Birthday</label>
+                            <input type="date" id="reg-dob" required class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand cursor-pointer">
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-[10px] font-semibold text-slate-600 uppercase mb-1">Favorite Position</label>
-                        <select id="reg-position" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand">
-                            <option value="Forward">Forward (ST / LW / RW)</option>
-                            <option value="Midfielder">Midfielder (CM / CAM / CDM)</option>
-                            <option value="Defender">Defender (CB / LB / RB)</option>
-                            <option value="Goalkeeper">Goalkeeper (GK)</option>
+                        <label class="block text-[11px] font-semibold text-white/70 uppercase mb-1">Favorite Position</label>
+                        <select id="reg-position" class="w-full bg-black border border-teal-500/60 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-brand">
+                            <option value="Forward" class="bg-slate-900">Forward (ST / LW / RW)</option>
+                            <option value="Midfielder" class="bg-slate-900">Midfielder (CM / CAM / CDM)</option>
+                            <option value="Defender" class="bg-slate-900">Defender (CB / LB / RB)</option>
+                            <option value="Goalkeeper" class="bg-slate-900">Goalkeeper (GK)</option>
                         </select>
                     </div>
 
-                    <div id="signup-error-msg" class="hidden text-xs text-red-500 font-bold bg-red-50 border border-red-200 p-2.5 rounded-xl text-center"></div>
+                    <div id="signup-error-msg" class="hidden text-xs text-red-400 font-bold bg-red-950/50 border border-red-500/50 p-2.5 rounded-xl text-center"></div>
 
                     <div class="pt-2 flex gap-3">
-                        <button type="button" onclick="showLoginScreen()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2.5 rounded-xl transition text-xs">Back</button>
-                        <button type="submit" class="flex-1 bg-brand hover:bg-brand-dark text-slate-950 font-black py-2.5 rounded-xl transition text-xs uppercase tracking-wider">Create Account</button>
+                        <button type="button" onclick="showLoginScreen()" class="flex-1 bg-black/40 hover:bg-black/60 text-white font-bold py-3 rounded-xl transition text-xs border border-white/20">Back</button>
+                        <button type="submit" class="flex-1 bg-gradient-to-r from-[#00E08F] to-[#00B89E] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl transition text-xs uppercase tracking-wider shadow-md">Create Account</button>
                     </div>
                 </form>
             </div>
@@ -243,7 +266,7 @@
 
                     <form onsubmit="handleCreateEvent(event)" class="space-y-5">
                         <div>
-                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🏷️ Game / Event Title</label>
+                            <label class="block text-xs font-semibold text-slate-700 uppercase mb-1.5">🏷 Game / Event Title</label>
                             <input type="text" id="ce-title" placeholder="e.g. Saturday Sunset 7v7" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-sm focus:outline-none focus:border-brand">
                         </div>
 
