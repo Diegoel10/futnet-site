@@ -1,4 +1,4 @@
-// js/game-profile/add-players-modal.js: Dedicated screen for adding players to the roster
+// js/game-profile/add-players-modal.js: Dedicated screen with smart sorting and full-row click targets
 import { db, appId } from '../firebase-config.js';
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -9,14 +9,6 @@ window.openAddPlayersScreen = async function(eventId) {
         modal.id = 'add-players-screen-modal';
         modal.className = 'fixed inset-0 z-[130] flex flex-col justify-end bg-black/70 backdrop-blur-sm animate-in fade-in duration-200';
         document.body.appendChild(modal);
-    }
-
-    let directory = window.directoryList || [];
-    if (directory.length === 0) {
-        try {
-            const snap = await getDoc(doc(db, 'artifacts', appId, 'directory', 'data')); // or fetch collection
-            // fallback handled by global directory listener
-        } catch(e) {}
     }
 
     modal.innerHTML = `
@@ -55,14 +47,50 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     const attendees = event?.attendees || [];
     const existingUids = new Set(attendees.map(a => a.uid));
 
+    // Calculate frequency map of who attends past games to power our ranking algorithm
+    const attendanceFrequency = {};
+    (window.eventsList || []).forEach(ev => {
+        (ev.attendees || []).forEach(att => {
+            if (att.uid) {
+                attendanceFrequency[att.uid] = (attendanceFrequency[att.uid] || 0) + 1;
+            }
+        });
+    });
+
+    const friendUids = new Set((window.friendsList || []).map(f => f.uid));
+
     const pool = [
         ...(window.directoryList || []),
         ...(window.friendsList || [])
     ];
 
-    const filtered = pool.filter(p => {
+    // Remove duplicates by UID
+    const uniquePoolMap = new Map();
+    pool.forEach(p => {
+        if (p && p.uid && !existingUids.has(p.uid)) {
+            uniquePoolMap.set(p.uid, p);
+        }
+    });
+
+    let poolArray = Array.from(uniquePoolMap.values());
+
+    // 🧠 Smart Algorithm Scoring: Friends get high priority, frequent attendees get weighted score
+    poolArray.sort((a, b) => {
+        let scoreA = 0;
+        let scoreB = 0;
+
+        if (friendUids.has(a.uid)) scoreA += 50;
+        if (friendUids.has(b.uid)) scoreB += 50;
+
+        scoreA += (attendanceFrequency[a.uid] || 0) * 10;
+        scoreB += (attendanceFrequency[b.uid] || 0) * 10;
+
+        return scoreB - scoreA; // Highest score first
+    });
+
+    const filtered = poolArray.filter(p => {
         const name = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim();
-        if (!name || existingUids.has(p.uid)) return false;
+        if (!name) return false;
         if (!queryStr) return true;
         return name.toLowerCase().includes(queryStr.toLowerCase());
     });
@@ -75,13 +103,28 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     container.innerHTML = filtered.map(u => {
         const name = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim();
         const avatar = u.avatar || u.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+        const isFriend = friendUids.has(u.uid);
+        const freqCount = attendanceFrequency[u.uid] || 0;
+
+        let badgeText = '';
+        if (isFriend) {
+            badgeText = '<span class="text-[9px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Friend</span>';
+        } else if (freqCount > 1) {
+            badgeText = '<span class="text-[9px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded font-bold border border-teal-500/40">Frequent</span>';
+        }
+
         return `
-            <div class="flex items-center justify-between py-2.5 px-2 hover:bg-black/40 rounded-xl cursor-pointer" onclick="toggleAddPlayerSelection(this, '${u.uid}')">
+            <div class="flex items-center justify-between py-3 px-3 hover:bg-black/50 rounded-xl cursor-pointer transition select-none" onclick="toggleAddPlayerSelection(this, '${u.uid}')">
                 <div class="flex items-center gap-3">
-                    <img src="${avatar}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40">
-                    <span class="text-xs font-bold text-white">${name}</span>
+                    <img src="${avatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40">
+                    <div>
+                        <div class="text-xs font-bold text-white flex items-center gap-2">
+                            ${name}
+                            ${badgeText}
+                        </div>
+                    </div>
                 </div>
-                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
+                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" class="add-player-checkbox w-5 h-5 accent-brand cursor-pointer pointer-events-none">
             </div>
         `;
     }).join('');
@@ -96,6 +139,11 @@ window.toggleAddPlayerSelection = function(rowEl, uid) {
     const checkbox = rowEl.querySelector('input[type="checkbox"]');
     if (checkbox) {
         checkbox.checked = !checkbox.checked;
+        if (checkbox.checked) {
+            rowEl.classList.add('bg-emerald-950/30', 'border', 'border-emerald-500/30');
+        } else {
+            rowEl.classList.remove('bg-emerald-950/30', 'border', 'border-emerald-500/30');
+        }
     }
 };
 

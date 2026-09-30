@@ -1,4 +1,4 @@
-// js/game-profile/admin-tab.js: Clean, modular admin tab implementation
+// js/game-profile/admin-tab.js: Clean, modular admin tab implementation matching ended match reference layout
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -37,7 +37,7 @@ export function renderAdminTab(event) {
     const playersBodyClass = states.managePlayers ? 'space-y-4 pt-3 border-t border-white/10' : 'hidden';
     const matchesBodyClass = states.manageMatches ? 'space-y-3 pt-3 border-t border-white/10' : 'hidden';
 
-    // Pre-render attendees HTML to avoid nesting syntax errors
+    // Pre-render attendees HTML
     const attendeesHtml = attendees.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-4">No players confirmed yet.</div>'
         : attendees.map(att => {
@@ -97,24 +97,56 @@ export function renderAdminTab(event) {
         </div>
     ` : '';
 
-    // Pre-render matches HTML
+    // Pre-render matches HTML matching ended match reference layout[cite: 18]
     const matchesListHtml = matches.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-3">No match results recorded yet.</div>'
         : matches.map((m, mIdx) => {
             const teamA = m.teamA || "Team 1";
             const teamB = m.teamB || "Team 2";
-            const t1Goals = (m.team1Goals || []);
-            const t2Goals = (m.team2Goals || []);
+            const t1Goals = Array.isArray(m.team1Goals) ? m.team1Goals : [];
+            const t2Goals = Array.isArray(m.team2Goals) ? m.team2Goals : [];
+
+            // Render scorers for Team 1
+            const t1ScorersHtml = t1Goals.map(scorer => `
+                <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-full border border-white/10 text-[11px]">
+                    <i class="fa-solid fa-futbol text-[#00F296] text-[10px]"></i>
+                    <span class="w-4 h-4 rounded-full bg-emerald-500/20 text-[#00F296] font-black text-[9px] flex items-center justify-center">${(scorer || 'P').charAt(0).toUpperCase()}</span>
+                    <span class="text-white font-bold">${scorer}</span>
+                </div>
+            `).join('');
+
+            // Render scorers for Team 2
+            const t2ScorersHtml = t2Goals.map(scorer => `
+                <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-full border border-white/10 text-[11px]">
+                    <i class="fa-solid fa-futbol text-red-400 text-[10px]"></i>
+                    <span class="w-4 h-4 rounded-full bg-red-500/20 text-red-400 font-black text-[9px] flex items-center justify-center">${(scorer || 'P').charAt(0).toUpperCase()}</span>
+                    <span class="text-white font-bold">${scorer}</span>
+                </div>
+            `).join('');
 
             return `
-                <div class="bg-black/40 border border-white/10 rounded-xl p-3 space-y-2">
+                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 shadow-md">
+                    <!-- Teams & Score Header Row -->
                     <div class="flex items-center justify-between text-xs font-black">
-                        <span class="text-[#00F296]">${teamA} vs ${teamB}</span>
-                        <span class="bg-emerald-500/20 text-[#00F296] px-2.5 py-0.5 rounded border border-emerald-500/40">${t1Goals.length} - ${t2Goals.length}</span>
+                        <span class="text-white">${teamA}</span>
+                        <span class="bg-[#00F296]/20 text-[#00F296] px-3 py-1 rounded-full border border-[#00F296]/40 text-xs tracking-wider font-mono">${t1Goals.length} - ${t2Goals.length}</span>
+                        <span class="text-white">${teamB}</span>
                     </div>
-                    <div class="flex justify-end gap-2 pt-1">
-                        <button onclick="openEditMatchModal('${event.id}', ${mIdx})" class="bg-black/60 hover:bg-black text-white font-bold px-3 py-1 rounded-xl text-[10px] border border-white/15">Edit Match</button>
-                        <button onclick="deleteMatchRecord('${event.id}', ${mIdx})" class="bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold px-3 py-1 rounded-xl text-[10px] border border-red-500/40">Delete</button>
+
+                    <!-- Scorers Lists -->
+                    <div class="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
+                        <div class="space-y-1.5">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
+                        <div class="space-y-1.5">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
+                        <button onclick="openEditMatchModal('${event.id}', ${mIdx})" class="bg-black/60 hover:bg-black text-white font-bold py-2 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-pen text-[10px]"></i> Edit Match
+                        </button>
+                        <button onclick="deleteMatchRecord('${event.id}', ${mIdx})" class="bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold py-2 rounded-xl text-xs border border-red-500/40 transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-trash text-[10px]"></i> Delete Match
+                        </button>
                     </div>
                 </div>
             `;
@@ -134,7 +166,7 @@ export function renderAdminTab(event) {
 
                 <div class="${eventBodyClass}">
                     <div class="flex flex-wrap gap-2">
-                        <button onclick="openEditGameModal('${event.id}')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-md transition">Edit Game</button>
+                        <button onclick="openEditEventForm('${event.id}')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-md transition">Edit Game</button>
                         <button onclick="openCopyGameModal('${event.id}')" class="bg-black/60 hover:bg-black text-white font-bold px-3.5 py-2 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5">
                             <i class="fa-solid fa-copy text-[10px]"></i> Copy Event
                         </button>
@@ -185,7 +217,7 @@ export function renderAdminTab(event) {
                         <i class="fa-solid fa-play"></i> Start Match
                     </button>
 
-                    <div class="space-y-3">
+                    <div class="space-y-3 pt-1">
                         ${matchesListHtml}
                     </div>
                 </div>
@@ -221,10 +253,6 @@ window.confirmCancelGame = async function(eventId) {
             window.showToast("Failed to cancel game", "error");
         }
     }
-};
-
-window.openEditGameModal = function(eventId) {
-    window.showToast("Edit game modal coming online!");
 };
 
 window.openCopyGameModal = function(eventId) {

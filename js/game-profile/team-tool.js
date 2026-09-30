@@ -1,4 +1,4 @@
-// js/game-profile/team-tool.js: Full Team Builder & Tactical Lineup Tool with Dynamic Tabs
+// js/game-profile/team-tool.js: Fast, optimized Team Builder & Tactical Lineup Tool
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -40,21 +40,21 @@ function getFlattenedPlayersList(attendees) {
     const list = [];
     (attendees || []).forEach(att => {
         list.push({
-            uid: String(att.uid),
+            uid: String(att.uid || 'usr_' + Math.random().toString(36).substring(2,7)),
             name: String(att.name || att.firstName || 'Player'),
-            avatar: String(att.avatar || att.photoURL || ''),
+            avatar: String(att.avatar || att.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'),
             position: String(att.position || 'Player')
         });
         
         if (att.guests && Array.isArray(att.guests)) {
             att.guests.forEach((g, gIdx) => {
                 list.push({
-                    uid: `${att.uid}_guest_${gIdx}`,
+                    uid: `${att.uid || 'usr'}_guest_${gIdx}`,
                     name: String(g.name || 'Guest'),
-                    avatar: String(att.avatar || ''),
+                    avatar: String(att.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'),
                     position: 'Guest',
                     isHostGuest: true,
-                    hostUid: String(att.uid)
+                    hostUid: String(att.uid || '')
                 });
             });
         }
@@ -64,13 +64,16 @@ function getFlattenedPlayersList(attendees) {
 
 window.openTeamMakingModal = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
+    if (!event) {
+        if (typeof window.showToast === 'function') window.showToast("Event data not found.", "error");
+        return;
+    }
 
     let modal = document.getElementById('team-making-modal');
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'team-making-modal';
-        modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm overflow-y-auto';
+        modal.className = 'fixed inset-0 z-[150] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200';
         document.body.appendChild(modal);
     }
 
@@ -79,7 +82,13 @@ window.openTeamMakingModal = function(eventId) {
     window.teamNames[event.id] = event.teamNames || {};
     window.activeTeamTab = 0;
 
-    renderTeamMakingContent();
+    try {
+        renderTeamMakingContent();
+    } catch (e) {
+        console.error("Error rendering team maker:", e);
+        if (typeof window.showToast === 'function') window.showToast("Failed to open Team Builder.", "error");
+        modal.remove();
+    }
 };
 
 window.switchTeamTab = function(teamIndex) {
@@ -113,9 +122,6 @@ window.saveTeamNameModal = async function(eventId, teamIndex) {
             renderTeamMakingContent();
         } catch (err) {
             console.error("Failed to save team name:", err);
-            if (typeof window.showToast === 'function') {
-                window.showToast("Failed to save team name.", "error");
-            }
         }
     }
 };
@@ -170,10 +176,6 @@ window.renderTeamMakingContent = function() {
     const teamsCount = event.teamsCount || 3;
     const format = event.format || '7v7';
 
-    const isUserAdmin = window.currentUser && event.organizerId === window.currentUser.uid;
-    const isTeamCaptain = window.currentUser && attendees.some(a => a.uid === window.currentUser.uid && a.isCaptain && a.captainTeamIndex === (window.activeTeamTab - 1));
-    const hasTeamPower = isUserAdmin || isTeamCaptain || true; // Fully permissive for smooth management
-
     const formationOptions = {
         '3v3': { '2-1': [2, 1], '1-2': [1, 2] },
         '4v4': { '2-1': [2, 1] },
@@ -189,7 +191,7 @@ window.renderTeamMakingContent = function() {
     const defaultFormatKey = Object.keys(availableFormations)[0];
 
     window.teamFormations[event.id] = window.teamFormations[event.id] || {};
-    const activeTab = window.activeTeamTab; // 0 = Summary, 1+ = Team Index (activeTab - 1)
+    const activeTab = window.activeTeamTab; // 0 = Summary, 1+ = Team Index
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
     for (let i = 0; i < teamsCount; i++) {
@@ -205,9 +207,8 @@ window.renderTeamMakingContent = function() {
 
     const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
 
-    // Tabs Header HTML
     let tabsHtml = `
-        <button onclick="switchTeamTab(0)" class="px-4 py-2 rounded-xl text-xs font-black transition ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/40 text-white/70 border border-white/10'}">
+        <button onclick="switchTeamTab(0)" class="px-3.5 py-2 rounded-xl text-xs font-black transition ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/50 text-white/70 border border-white/10'}">
             📋 Summary
         </button>
     `;
@@ -216,7 +217,7 @@ window.renderTeamMakingContent = function() {
         const isActive = activeTab === tIdx;
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
         tabsHtml += `
-            <button onclick="switchTeamTab(${tIdx})" class="px-4 py-2 rounded-xl text-xs font-black transition ${isActive ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/40 text-white/70 border border-white/10'}">
+            <button onclick="switchTeamTab(${tIdx})" class="px-3.5 py-2 rounded-xl text-xs font-black transition ${isActive ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/50 text-white/70 border border-white/10'}">
                 👕 ${tName}
             </button>
         `;
@@ -225,7 +226,6 @@ window.renderTeamMakingContent = function() {
     let contentHtml = '';
 
     if (activeTab === 0) {
-        // --- SUMMARY TAB ---
         let teamsSummaryHtml = '';
         for (let i = 0; i < teamsCount; i++) {
             const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
@@ -237,7 +237,7 @@ window.renderTeamMakingContent = function() {
                     </div>
                     <div class="flex flex-wrap gap-2">
                         ${teamRoster.length === 0 ? '<span class="text-xs text-white/40 italic">No players assigned yet.</span>' : ''}
-                        ${teamRoster.map((p, pIdx) => `
+                        ${teamRoster.map(p => `
                             <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
                                 <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-5 h-5 rounded-full object-cover">
                                 <span class="font-bold text-white">${p.name}</span>
@@ -267,7 +267,6 @@ window.renderTeamMakingContent = function() {
             </div>
         `;
     } else {
-        // --- TEAM DETAIL TAB ---
         const teamIdx = activeTab - 1;
         const currentTeamName = window.teamNames[event.id][teamIdx] || `Team ${teamIdx + 1}`;
         const currentTeamPlayers = window.teamAssignments[event.id][teamIdx] || [];
@@ -287,7 +286,7 @@ window.renderTeamMakingContent = function() {
                 if (p && p.name) {
                     rowSlots += `
                         <div onclick="unassignPlayerFromSlot('${event.id}', ${teamIdx}, ${slotIdx})" class="w-16 h-16 bg-white border-2 border-emerald-400 rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <span class="text-[9px] font-black text-slate-900 truncate w-full">${p.name.split(' ')[0]}</span>
                             <span class="absolute inset-0 bg-red-500/85 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
                         </div>
@@ -304,14 +303,13 @@ window.renderTeamMakingContent = function() {
             rowsHtml += `<div class="flex justify-center gap-3 mb-3">${rowSlots}</div>`;
         });
 
-        // Goalie slot
         const goalieSlotIdx = playerIndex++;
         const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
         rowsHtml += `
             <div class="flex justify-center mt-2">
                 <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${goalieSlotIdx})" class="w-16 h-16 ${goaliePlayer && goaliePlayer.name ? 'bg-white border-2 border-emerald-400' : 'border-2 border-dashed border-white/60 bg-emerald-950/25'} rounded-2xl p-1 text-center cursor-pointer shadow flex flex-col items-center justify-center relative group">
                     ${goaliePlayer && goaliePlayer.name ? `
-                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5">
+                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="text-[9px] font-black text-slate-900 truncate w-full">${goaliePlayer.name.split(' ')[0]}</span>
                         <span class="absolute inset-0 bg-red-500/85 text-white text-[9px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
                     ` : `
@@ -404,7 +402,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     if (!picker) {
         picker = document.createElement('div');
         picker.id = 'assign-picker-modal';
-        picker.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm';
+        picker.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
         document.body.appendChild(picker);
     }
 
@@ -414,10 +412,10 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                 <h4 class="text-xs font-black uppercase text-white">Select Free Agent</h4>
                 <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="space-y-2 max-h-60 overflow-y-auto">
+            <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${freeAgents.map(a => `
                     <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
+                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="text-xs font-bold text-white">${a.name}</span>
                     </div>
                 `).join('')}

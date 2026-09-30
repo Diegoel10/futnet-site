@@ -1,4 +1,4 @@
-// js/game-creation.js: Handles 2-step game creation matching the iOS app
+// js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll
 import { db, appId } from './firebase-config.js';
 import { collection, doc, setDoc, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -35,6 +35,15 @@ async function preloadParks() {
     }
 }
 preloadParks();
+
+// Automatically scroll focused inputs into view when mobile keyboards pop up
+document.addEventListener('focusin', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+        setTimeout(() => {
+            e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+    }
+});
 
 window.handleParkSearchInput = async function(val) {
     await preloadParks();
