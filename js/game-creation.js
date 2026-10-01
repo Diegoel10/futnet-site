@@ -221,11 +221,12 @@ window.handleCreateEvent = async function(e) {
     const locationStr = `${parkname} (${city || 'Park'}, ${state || 'FL'})`;
     let eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-    const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim() || 'Player';
+    const organizerName = `${window.userProfile?.firstName || ''} ${window.userProfile?.lastName || ''}`.trim() || 'Player';
     const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     
-    // Restored full support for custom profile picture (base64 or URL)
-    const organizerAvatar = window.userProfile.avatar || window.currentUser?.photoURL || defaultAvatar;
+    // Dynamically look up avatar from directory list or profile, with reliable fallbacks
+    const directoryEntry = (window.directoryList || []).find(u => String(u.uid) === String(window.currentUser.uid));
+    const organizerAvatar = directoryEntry?.avatar || window.userProfile?.avatar || window.currentUser?.photoURL || defaultAvatar;
 
     let attendees = [{
         uid: window.currentUser.uid,
