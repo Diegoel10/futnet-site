@@ -7,6 +7,7 @@ import {
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     signInWithRedirect,
+    signInWithPopup,
     getRedirectResult,
     GoogleAuthProvider, 
     FacebookAuthProvider, 
@@ -180,55 +181,73 @@ window.handleSocialAuth = async function(providerName) {
     }
 
     try {
-        await signInWithRedirect(auth, provider);
+        // Popup is the most reliable option: signInWithRedirect is blocked by modern browsers
+        // when the site (futnet.site) and the Firebase auth domain (firebaseapp.com) are different.
+        await signInWithPopup(auth, provider);
+        // onAuthStateChanged takes it from here (creates the profile if needed and opens the app)
     } catch (err) {
-        console.error("Social auth error:", err);
+        console.error("Social auth error:", err.code, err.message);
+        if (err.code === 'auth/popup-blocked') {
+            try { await signInWithRedirect(auth, provider); return; } catch (e2) { err = e2; }
+        }
+        if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') return;
+        if (err.code === 'auth/account-exists-with-different-credential') {
+            if (typeof window.showToast === 'function') window.showToast("This email already has an account with a different sign-in method. Use that method instead.", "error");
+            return;
+        }
+        if (err.code === 'auth/unauthorized-domain') {
+            if (typeof window.showToast === 'function') window.showToast("This website address is not authorized in Firebase (Authentication > Settings > Authorized domains).", "error");
+            return;
+        }
         if (typeof window.showToast === 'function') window.showToast(err.message || "Social sign-in failed", "error");
     }
 };
 
-// Handle result when the page redirects back from Google or Apple
-getRedirectResult(auth).then(async (result) => {
-    if (result && result.user) {
-        const user = result.user;
+// Creates the profile + directory entry the first time a social user signs in (works for popup AND redirect)
+const profilePromises = new Map();
+window.ensureUserProfile = function(user) {
+    if (profilePromises.has(user.uid)) return profilePromises.get(user.uid);
+    const promise = (async () => {
         const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
         const docSnap = await getDoc(profileRef);
+        if (docSnap.exists()) return docSnap.data();
 
-        if (!docSnap.exists()) {
-            const nameParts = (user.displayName || "Player").split(" ");
-            const firstName = nameParts[0] || "Player";
-            const lastName = nameParts.slice(1).join(" ") || "";
+        // Email/password sign-ups save their own profile in handleUnifiedRegistration
+        if (user.providerData?.[0]?.providerId === 'password') return null;
 
-            const profileData = {
-                uid: user.uid,
-                firstName,
-                lastName,
-                nickname: "",
-                email: user.email || "",
-                gender: "Male",
-                dob: "1995-01-01",
-                position: "Forward",
-                avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
-                termsAccepted: false,
-                createdAt: new Date().toISOString()
-            };
+        const nameParts = (user.displayName || "Player").split(" ");
+        const firstName = nameParts[0] || "Player";
+        const lastName = nameParts.slice(1).join(" ") || "";
+        const profileData = {
+            uid: user.uid,
+            firstName,
+            lastName,
+            nickname: "",
+            email: user.email || "",
+            gender: "Male",
+            dob: "1995-01-01",
+            position: "Forward",
+            avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+            termsAccepted: false,
+            createdAt: new Date().toISOString()
+        };
+        await setDoc(profileRef, profileData);
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
+            uid: user.uid,
+            name: `${firstName} ${lastName}`.trim(),
+            avatar: profileData.avatar,
+            position: "Forward"
+        }, { merge: true });
+        return profileData;
+    })();
+    profilePromises.set(user.uid, promise);
+    promise.catch(() => profilePromises.delete(user.uid));
+    return promise;
+};
 
-            await setDoc(profileRef, profileData);
-            await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
-                uid: user.uid,
-                name: `${firstName} ${lastName}`.trim(),
-                avatar: profileData.avatar,
-                position: "Forward"
-            }, { merge: true });
-        }
-
-        if (typeof window.showToast === 'function') window.showToast("Signed in successfully!");
-        if (typeof window.checkAndShowLegalModal === 'function') {
-            window.checkAndShowLegalModal();
-        }
-    }
-}).catch((error) => {
-    console.error("Redirect result error:", error);
+// Only needed for the redirect fallback: report errors (profile creation happens in onAuthStateChanged)
+getRedirectResult(auth).catch((error) => {
+    console.error("Redirect result error:", error.code, error.message);
     if (typeof window.showToast === 'function') {
         window.showToast("Sign-in incomplete or cancelled.", "error");
     }
@@ -252,11 +271,8 @@ onAuthStateChanged(auth, async (user) => {
     if (user) {
         window.currentUser = user;
         try {
-            const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
-            const docSnap = await getDoc(profileRef);
-            if (docSnap.exists()) {
-                window.userProfile = docSnap.data();
-            }
+            const profile = await window.ensureUserProfile(user);
+            if (profile) window.userProfile = profile;
         } catch (e) {
             console.warn("Profile fetch deferred or offline:", e.message);
         }

@@ -588,7 +588,6 @@
  <!-- MAIN SCRIPT CONTROLLER -->
     <script type="module">
         import { auth, db, appId } from './js/firebase-config.js';
-        import { OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import './js/auth.js';
         import './js/home.js';
         import './js/games.js';
@@ -679,51 +678,18 @@
             window.switchTab(targetTab, false);
         });
 
-        window.handleSocialAuth = async function(providerName) {
-            let provider;
-            if (providerName === 'google') {
-                const { GoogleAuthProvider } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                provider = new GoogleAuthProvider();
-            } else if (providerName === 'apple') {
-                provider = new OAuthProvider('apple.com');
-                provider.addScope('email');
-                provider.addScope('name');
-            } else {
-                return;
-            }
-
-            try {
-                if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-                    await signInWithRedirect(auth, provider);
-                } else {
-                    try {
-                        await signInWithPopup(auth, provider);
-                    } catch (popupErr) {
-                        if (popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/popup-closed-by-user') {
-                            await signInWithRedirect(auth, provider);
-                        } else {
-                            throw popupErr;
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error("Auth error:", err);
-                window.showToast(`Sign in error: ${err.message}`, "error");
-            }
-        };
-
-        getRedirectResult(auth).catch((error) => {
-            console.error("Redirect auth error:", error);
-        });
-
         onAuthStateChanged(auth, async (user) => {
             window.currentUser = user;
             if (user) {
                 try {
-                    const docSnap = await getDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'));
-                    if (docSnap.exists()) {
-                        window.userProfile = docSnap.data();
+                    const savedProfile = await window.ensureUserProfile(user);
+                    if (savedProfile) {
+                        window.userProfile = savedProfile;
                     } else {
+                        const docSnap = await getDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'));
+                        if (docSnap.exists()) window.userProfile = docSnap.data();
+                    }
+                    if (!window.userProfile || window.userProfile.uid !== user.uid) {
                         window.userProfile = {
                             uid: user.uid,
                             firstName: user.displayName || "Player",
