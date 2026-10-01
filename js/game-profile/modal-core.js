@@ -1,4 +1,4 @@
-// js/game-profile/modal-core.js
+// js/game-profile/modal-core.js: Updated with Teams removed from top tabs and opened via Roster Build Teams button
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderAdminTab } from './admin-tab.js';
@@ -6,6 +6,7 @@ import { renderInfoTab } from './info-tab.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
 import { renderCommentsTab } from './comments-tab.js';
+import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
 
 window.openEventDetails = function(eventId) {
@@ -14,7 +15,6 @@ window.openEventDetails = function(eventId) {
 
     window.activeModalEventId = eventId;
     
-    // PRE-SYNC: Immediately load saved team names and assignments into global window caches so tabs like Stats & Leaderboards instantly see them
     window.teamNames = window.teamNames || {};
     window.teamNames[event.id] = event.teamNames || {};
     
@@ -26,10 +26,25 @@ window.openEventDetails = function(eventId) {
     window.adminManagePlayersExpanded = false;
     window.adminMatchResultsExpanded = false;
     window.activeStatsSubTab = 'matches';
+    window.activeTeamTab = 0;
     window.expandedLeaderboardTeams = window.expandedLeaderboardTeams || {};
     window.expandedMatchCards = window.expandedMatchCards || {};
 
-    // 🚀 Switch to the full screen view AND immediately render its content
+    if (typeof window.switchTab === 'function') {
+        window.switchTab('event-details-screen');
+    }
+    window.renderEventDetailModalContent();
+};
+
+window.openTeamMakingModal = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    window.activeModalEventId = eventId;
+    window.activeModalTab = 'teams';
+    window.activeTeamTab = 0;
+    window.currentTeamBuildingEvent = event;
+
     if (typeof window.switchTab === 'function') {
         window.switchTab('event-details-screen');
     }
@@ -38,6 +53,11 @@ window.openEventDetails = function(eventId) {
 
 window.switchModalTab = function(tabName) {
     window.activeModalTab = tabName;
+    window.renderEventDetailModalContent();
+};
+
+window.switchTeamTab = function(teamIndex) {
+    window.activeTeamTab = teamIndex;
     window.renderEventDetailModalContent();
 };
 
@@ -73,11 +93,11 @@ window.renderEventDetailModalContent = function() {
     const event = (window.eventsList || []).find(ev => ev.id === window.activeModalEventId);
     if (!event) return;
 
+    window.currentTeamBuildingEvent = event;
     const isCreator = window.currentUser && event.organizerId === window.currentUser.uid;
     const tab = window.activeModalTab;
     const commentsCount = event.comments?.length || 0;
 
-    // 🛡️ Calculate max capacity & check current user RSVP state (including guests)
     const formatMatch = (event.format || "").match(/(\d+)/);
     const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
     
@@ -90,7 +110,6 @@ window.renderEventDetailModalContent = function() {
     }
     const maxCapacity = playersPerTeam * teamsCountNum;
     
-    // Count total confirmed heads (attendees + guests)
     let totalConfirmed = 0;
     (event.attendees || []).forEach(a => {
         totalConfirmed += 1 + (a.guests ? a.guests.length : 0);
@@ -103,10 +122,19 @@ window.renderEventDetailModalContent = function() {
     const safeDate = (event.date || '').replace(/'/g, "\\'");
     const safeLocation = (event.location || '').replace(/'/g, "\\'");
 
+    const teamsHeaderNav = tab === 'teams' ? `
+        <div class="bg-black/50 border border-[#00F296]/40 p-3 rounded-2xl flex items-center justify-between mb-2">
+            <button onclick="switchModalTab('roster')" class="bg-black/60 hover:bg-black text-white font-bold px-3 py-1.5 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-chevron-left text-[10px]"></i> Back to Roster
+            </button>
+            <span class="text-xs font-black uppercase text-[#00F296]">Team Builder View</span>
+        </div>
+    ` : '';
+
     container.innerHTML = `
-        <div class="space-y-4 text-white">
-            <!-- Compact Top Bar -->
-            <div class="bg-[#040E13]/80 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between">
+        <div class="space-y-4 text-white relative">
+            <!-- Compact Top Bar with high stacking context -->
+            <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between relative z-30">
                 <div class="flex items-center gap-3 overflow-hidden">
                     <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
                         <i class="fa-solid fa-chevron-left text-xs"></i>
@@ -121,12 +149,12 @@ window.renderEventDetailModalContent = function() {
                 </div>
 
                 <div class="flex items-center gap-2 shrink-0">
-                    <!-- Share Button & Dropdown -->
-                    <div class="relative">
+                    <!-- Share Button & Dropdown with absolute topmost z-index -->
+                    <div class="relative z-50">
                         <button onclick="toggleShareDropdown()" class="w-8 h-8 bg-black/60 hover:bg-black text-[#00F296] rounded-full flex items-center justify-center font-bold border border-[#00F296]/40 transition shadow-[0_0_10px_rgba(0,242,150,0.2)]" title="Share Game">
                             <i class="fa-solid fa-share-nodes text-xs"></i>
                         </button>
-                        <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-50 w-48 py-2 divide-y divide-white/10 text-xs">
+                        <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-[9999] w-48 py-2 divide-y divide-white/10 text-xs">
                             <button onclick="shareToWhatsApp('${safeTitle}', '${safeLocation}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
                                 <i class="fa-brands fa-whatsapp text-emerald-400 text-base"></i> WhatsApp
                             </button>
@@ -141,20 +169,23 @@ window.renderEventDetailModalContent = function() {
                 </div>
             </div>
 
-            <!-- Navigation Tabs Bar -->
+            <!-- Navigation Tabs Bar (Teams excluded) -->
             <div class="bg-black/40 border border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
-                <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
+                <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' || tab === 'teams' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
                 <button onclick="switchModalTab('stats')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'stats' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Stats</button>
                 <button onclick="switchModalTab('comments')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'comments' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Comments (${commentsCount})</button>
             </div>
+
+            ${teamsHeaderNav}
 
             <!-- Tab Content Routing Container -->
             <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
                 ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
                 ${tab === 'info' ? renderInfoTab(event) : ''}
                 ${tab === 'roster' ? renderRosterTab(event) : ''}
+                ${tab === 'teams' ? renderTeamToolTab(event) : ''}
                 ${tab === 'stats' ? renderStatsTab(event) : ''}
                 ${tab === 'comments' ? renderCommentsTab(event) : ''}
             </div>

@@ -17,7 +17,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// Global Avatar State for Sign Up (using a clean default silhouette vector)
+// Global Avatar State for Sign Up (using a clean default silhouette vector)[cite: 26]
 window.selectedSignupAvatarUrl = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
 window.handleSignupAvatarSelection = function(event) {
@@ -119,10 +119,10 @@ window.handleUnifiedRegistration = async function(event) {
             createdAt: new Date().toISOString()
         };
 
-        // Save profile to user private doc
+        // Save profile to user private doc[cite: 26]
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), profileData);
 
-        // Save/merge into global directory for app-wide player lookups
+        // Save/merge into global directory for app-wide player lookups[cite: 26]
         await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
             uid: user.uid,
             name: `${firstName} ${lastName}`.trim(),
@@ -134,7 +134,7 @@ window.handleUnifiedRegistration = async function(event) {
         window.userProfile = profileData;
         window.showToast("Account created successfully!");
         
-        // Hide signup and show main events view smoothly without hard reload
+        // Hide signup and show main events view smoothly without hard reload[cite: 26]
         if (typeof window.switchTab === 'function') {
             window.switchTab('events');
         }
@@ -205,7 +205,7 @@ window.handleSocialAuth = async function(providerName) {
     }
 };
 
-// Global Logout Handler mapped securely in the main entry point
+// Global Logout Handler mapped securely in the main entry point[cite: 26]
 window.handleLogout = async function() {
     try {
         const activeAuth = auth || getAuth();
@@ -220,7 +220,7 @@ window.handleLogout = async function() {
     }
 };
 
-// Listen for authentication state changes and boot up live listeners & legal checks instantly on login
+// Listen for authentication state changes and boot up live listeners & legal checks instantly on login[cite: 26]
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         window.currentUser = user;
@@ -231,15 +231,16 @@ onAuthStateChanged(auth, async (user) => {
                 window.userProfile = docSnap.data();
             }
         } catch (e) {
-            console.error("Error loading profile on auth state change:", e);
+            // Gracefully catch offline or initial connection timing drops
+            console.warn("Profile fetch deferred or offline:", e.message);
         }
 
-        // Boot up live games listener immediately so games show up
+        // Boot up live games listener immediately so games show up[cite: 26]
         if (typeof window.initEventsLiveListener === 'function') {
             window.initEventsLiveListener();
         }
 
-        // Check if terms have been accepted
+        // Check if terms have been accepted[cite: 26]
         if (typeof window.checkAndShowLegalModal === 'function') {
             window.checkAndShowLegalModal();
         }

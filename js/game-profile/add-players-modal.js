@@ -1,4 +1,4 @@
-// js/game-profile/add-players-modal.js: Dedicated screen with smart sorting and full-row click targets
+// js/game-profile/add-players-modal.js: Dedicated screen with smart sorting and manual fallback for private/incognito users
 import { db, appId } from '../firebase-config.js';
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -25,8 +25,17 @@ window.openAddPlayersScreen = async function(eventId) {
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-emerald-400 text-xs"></i>
             </div>
 
+            <!-- Manual Add Section for Private/Incognito Users -->
+            <div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+                <span class="text-[10px] font-bold text-white/60 uppercase">Add Private / Unlisted Player</span>
+                <div class="flex gap-2">
+                    <input type="text" id="manual-add-player-name" placeholder="Enter player's full name..." class="flex-1 bg-black/80 border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00F296]">
+                    <button onclick="submitManualAddPlayer('${eventId}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black px-4 py-2 rounded-xl text-xs border border-[#00F296]/50 transition">Add</button>
+                </div>
+            </div>
+
             <!-- Users Selection List Container -->
-            <div id="add-players-list-container" class="space-y-2 max-h-60 overflow-y-auto pr-1 divide-y divide-white/10">
+            <div id="add-players-list-container" class="space-y-2 max-h-50 overflow-y-auto pr-1 divide-y divide-white/10">
                 <!-- Rendered dynamically -->
             </div>
 
@@ -47,7 +56,6 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     const attendees = event?.attendees || [];
     const existingUids = new Set(attendees.map(a => a.uid));
 
-    // Calculate frequency map of who attends past games to power our ranking algorithm
     const attendanceFrequency = {};
     (window.eventsList || []).forEach(ev => {
         (ev.attendees || []).forEach(att => {
@@ -64,7 +72,6 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         ...(window.friendsList || [])
     ];
 
-    // Remove duplicates by UID
     const uniquePoolMap = new Map();
     pool.forEach(p => {
         if (p && p.uid && !existingUids.has(p.uid)) {
@@ -74,7 +81,6 @@ window.renderAddPlayersList = function(eventId, queryStr) {
 
     let poolArray = Array.from(uniquePoolMap.values());
 
-    // 🧠 Smart Algorithm Scoring: Friends get high priority, frequent attendees get weighted score
     poolArray.sort((a, b) => {
         let scoreA = 0;
         let scoreB = 0;
@@ -85,7 +91,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         scoreA += (attendanceFrequency[a.uid] || 0) * 10;
         scoreB += (attendanceFrequency[b.uid] || 0) * 10;
 
-        return scoreB - scoreA; // Highest score first
+        return scoreB - scoreA;
     });
 
     const filtered = poolArray.filter(p => {
@@ -96,7 +102,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     });
 
     if (filtered.length === 0) {
-        container.innerHTML = `<div class="text-center text-xs text-white/50 py-6">No available users found.</div>`;
+        container.innerHTML = `<div class="text-center text-xs text-white/50 py-4">No other directory users found. Use manual add above.</div>`;
         return;
     }
 
@@ -114,9 +120,9 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         }
 
         return `
-            <div class="flex items-center justify-between py-3 px-3 hover:bg-black/50 rounded-xl cursor-pointer transition select-none" onclick="toggleAddPlayerSelection(this, '${u.uid}')">
+            <div class="flex items-center justify-between py-2.5 px-3 hover:bg-black/50 rounded-xl cursor-pointer transition select-none" onclick="toggleAddPlayerSelection(this, '${u.uid}')">
                 <div class="flex items-center gap-3">
-                    <img src="${avatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40">
+                    <img src="${avatar}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                     <div>
                         <div class="text-xs font-bold text-white flex items-center gap-2">
                             ${name}
@@ -124,7 +130,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
                         </div>
                     </div>
                 </div>
-                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" class="add-player-checkbox w-5 h-5 accent-brand cursor-pointer pointer-events-none">
+                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer pointer-events-none">
             </div>
         `;
     }).join('');
@@ -147,6 +153,41 @@ window.toggleAddPlayerSelection = function(rowEl, uid) {
     }
 };
 
+window.submitManualAddPlayer = async function(eventId) {
+    const inputEl = document.getElementById('manual-add-player-name');
+    if (!inputEl) return;
+    const name = inputEl.value.trim();
+    if (!name) {
+        window.showToast("Please enter a player name.", "error");
+        return;
+    }
+
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    let attendees = Array.isArray(event.attendees) ? event.attendees : [];
+    const newUid = 'usr_manual_' + Math.random().toString(36).substring(2, 9);
+    
+    attendees.push({
+        uid: newUid,
+        name: name,
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,
+        role: 'Player',
+        status: 'confirmed',
+        paid: 'Unpaid',
+        guests: []
+    });
+
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { attendees }, { merge: true });
+        window.showToast(`Added ${name} successfully!`);
+        inputEl.value = '';
+        renderAddPlayersList(eventId, document.getElementById('add-players-search')?.value || '');
+    } catch (e) {
+        window.showToast("Failed to add player", "error");
+    }
+};
+
 window.submitBatchAddPlayers = async function(eventId) {
     const checkboxes = document.querySelectorAll('.add-player-checkbox:checked');
     if (checkboxes.length === 0) {
@@ -157,7 +198,7 @@ window.submitBatchAddPlayers = async function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    let attendees = event.attendees || [];
+    let attendees = Array.isArray(event.attendees) ? event.attendees : [];
     checkboxes.forEach(cb => {
         attendees.push({
             uid: cb.value,

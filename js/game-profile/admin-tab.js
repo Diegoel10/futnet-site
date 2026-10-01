@@ -1,6 +1,6 @@
-// js/game-profile/admin-tab.js: Updated admin tab with 3 clear pill sections (Manage Event, Manage Players, Manage Matches)
+// js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and add players screen
 import { db, appId } from '../firebase-config.js';
-import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, setDoc, deleteDoc, addDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 window.activeGameProfileTab = window.activeGameProfileTab || 'manage-event';
 
@@ -12,6 +12,7 @@ window.switchGameProfileTab = function(tabKey) {
 };
 
 export function renderAdminTab(event) {
+    if (!event) return '';
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
     const waitingList = Array.isArray(event.waitingList) ? event.waitingList : [];
     const matches = Array.isArray(event.matches) ? event.matches : [];
@@ -32,17 +33,20 @@ export function renderAdminTab(event) {
         return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
     };
 
-    let totalConfirmedPeople = attendees.length;
-    attendees.forEach(att => {
-        if (att.guests && Array.isArray(att.guests)) {
-            totalConfirmedPeople += att.guests.length;
-        }
-    });
-
     const attendeesHtml = attendees.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-4">No players confirmed yet.</div>'
         : attendees.map(att => {
-            let attAvatar = att.avatar || att.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+            const isGeneratedAvatar = (url) => typeof url === 'string' && url.includes('api.dicebear.com');
+            const dirByUid = window.directoryList?.find(u => String(u.uid) === String(att.uid));
+            const dirByName = window.directoryList?.find(u => u.name && att.name && u.name.toLowerCase() === att.name.toLowerCase());
+            const attOwn = att.avatar || att.photoURL;
+            let attAvatar =
+                dirByUid?.avatar || dirByUid?.photoURL ||
+                (attOwn && !isGeneratedAvatar(attOwn) ? attOwn : null) ||
+                dirByName?.avatar || dirByName?.photoURL ||
+                attOwn ||
+                `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
+
             const isOrg = att.uid === event.organizerId;
             const paidStatus = att.paid || 'Unpaid';
             const safeName = (att.name || 'Player').replace(/'/g, "\\'");
@@ -66,7 +70,7 @@ export function renderAdminTab(event) {
                 <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-3 overflow-hidden">
-                            <img src="${attAvatar}" class="w-8 h-8 rounded-full object-cover bg-black border border-white/20 shrink-0">
+                            <img src="${attAvatar}" class="w-8 h-8 rounded-full object-cover bg-black border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate">
                                 <div class="flex items-center gap-1.5 flex-wrap">
                                     <span class="text-xs font-bold text-white truncate">${att.name || 'Player'}</span>
@@ -94,6 +98,43 @@ export function renderAdminTab(event) {
                     <button onclick="removePlayerFromEvent('${event.id}', '${w.uid}')" class="text-red-400 hover:text-red-300 font-bold text-[11px]">Remove</button>
                 </div>
             `).join('')}
+        </div>
+    ` : '';
+
+    const liveActive = event.liveMatchActive;
+    let liveTimerText = "00:00";
+    let t1GoalCount = 0;
+    let t2GoalCount = 0;
+
+    if (liveActive) {
+        t1GoalCount = Array.isArray(liveActive.team1Goals) ? liveActive.team1Goals.length : 0;
+        t2GoalCount = Array.isArray(liveActive.team2Goals) ? liveActive.team2Goals.length : 0;
+
+        if (typeof window.calculateCurrentLiveSeconds === 'function') {
+            const currentSecs = window.calculateCurrentLiveSeconds(liveActive);
+            const m = Math.floor(currentSecs / 60);
+            const s = currentSecs % 60;
+            liveTimerText = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+    }
+
+    const liveBannerHtml = liveActive ? `
+        <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 space-y-3 shadow-xl animate-pulse">
+            <div class="flex items-center justify-between">
+                <span class="bg-[#00F296] text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">🔴 LIVE MATCH</span>
+                <span class="text-xs font-mono font-black text-[#00F296]">
+                    ${liveTimerText}
+                </span>
+            </div>
+            <div class="flex items-center justify-between text-sm font-black text-white">
+                <span>${liveActive.teamA || 'Team 1'}</span>
+                <span class="text-[#00F296] font-mono text-base">${t1GoalCount} - ${t2GoalCount}</span>
+                <span>${liveActive.teamB || 'Team 2'}</span>
+            </div>
+            <div class="flex gap-2 pt-1">
+                <button onclick="openStartMatchScreen('${event.id}')" class="flex-1 bg-[#00F296] text-slate-950 font-black py-2 rounded-xl text-xs shadow">Resume / Manage</button>
+                <button onclick="discardLiveMatch('${event.id}')" class="bg-red-500/20 text-red-300 border border-red-500/40 font-bold px-3 py-2 rounded-xl text-xs">Discard</button>
+            </div>
         </div>
     ` : '';
 
@@ -156,17 +197,16 @@ export function renderAdminTab(event) {
             `;
         }).join('');
 
-    // 3 Clear Pill Navigation Tabs
     const pillsNavHtml = `
-        <div class="flex items-center gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10 overflow-x-auto no-scrollbar">
-            <button onclick="switchGameProfileTab('manage-event')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition whitespace-nowrap ${currentTab === 'manage-event' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">
+        <div class="grid grid-cols-3 gap-2 bg-black/40 p-1.5 rounded-xl border border-white/10">
+            <button onclick="switchGameProfileTab('manage-event')" class="py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition whitespace-nowrap text-center ${currentTab === 'manage-event' ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
                 Manage Event
             </button>
-            <button onclick="switchGameProfileTab('manage-players')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition whitespace-nowrap ${currentTab === 'manage-players' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">
-                Manage Players (${totalConfirmedPeople})
+            <button onclick="switchGameProfileTab('manage-players')" class="py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition whitespace-nowrap text-center ${currentTab === 'manage-players' ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
+                Manage Players
             </button>
-            <button onclick="switchGameProfileTab('manage-matches')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition whitespace-nowrap ${currentTab === 'manage-matches' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">
-                Manage Matches (${matches.length})
+            <button onclick="switchGameProfileTab('manage-matches')" class="py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition whitespace-nowrap text-center ${currentTab === 'manage-matches' ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
+                Manage Matches
             </button>
         </div>
     `;
@@ -179,8 +219,8 @@ export function renderAdminTab(event) {
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
                     <h5 class="text-xs font-black uppercase text-[#00F296]">Event Controls</h5>
                     <div class="flex flex-wrap gap-2">
-                        <button onclick="openEditEventForm('${event.id}')" class="bg-[#00F296] text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow">Edit Game</button>
-                        <button onclick="copyEvent('${event.id}')" class="bg-black/60 text-white font-bold px-4 py-2.5 rounded-xl text-xs border border-white/20">Copy Event</button>
+                        <button onclick="openTwoPageGameWizard('${event.id}', 'edit')" class="bg-[#00F296] text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow">Edit Game</button>
+                        <button onclick="openTwoPageGameWizard('${event.id}', 'copy')" class="bg-black/60 text-white font-bold px-4 py-2.5 rounded-xl text-xs border border-white/20">Copy Event</button>
                         <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl text-xs border border-red-500/40">Cancel Game</button>
                     </div>
                 </div>
@@ -189,7 +229,7 @@ export function renderAdminTab(event) {
     } else if (currentTab === 'manage-players') {
         activeTabContentHtml = `
             <div class="space-y-4">
-                <button onclick="openAddPlayersScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
+                <button onclick="openAddPlayersScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-user-plus"></i> Add Players
                 </button>
                 <div class="space-y-2.5">
@@ -203,12 +243,13 @@ export function renderAdminTab(event) {
         activeTabContentHtml = `
             <div class="space-y-4">
                 <div class="flex items-center justify-between gap-2">
-                    <button onclick="openStartMatchScreen('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
+                    <button onclick="checkAndOpenStartMatch('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
                         <i class="fa-solid fa-play"></i> Start Match
                     </button>
                     <button onclick="toggleSessionEnded('${event.id}')" class="px-3 py-2.5 rounded-xl text-xs font-black ${isSessionEnded ? 'bg-amber-400 text-slate-950 shadow' : 'bg-black/60 text-white/70 border border-white/15'}">${isSessionEnded ? 'Session Ended' : 'End Session'}</button>
                 </div>
                 <div class="space-y-3">
+                    ${liveBannerHtml}
                     ${matchesListHtml}
                 </div>
             </div>
@@ -223,127 +264,333 @@ export function renderAdminTab(event) {
             </div>
         </div>
     `;
-};
+}
 
-window.populateEventFormFields = function(event, isCopy = false) {
-    const titleEl = document.getElementById('ce-title');
-    const visibilityEl = document.getElementById('ce-visibility');
-    const dateEl = document.getElementById('ce-date');
-    const timeEl = document.getElementById('ce-time');
-    const parkSearchEl = document.getElementById('ce-park-search');
-    const parkNameEl = document.getElementById('ce-parkname');
-    const cityEl = document.getElementById('ce-city');
-    const stateEl = document.getElementById('ce-state');
-    const descEl = document.getElementById('ce-description');
-    const rulesEl = document.getElementById('ce-rules');
-    const teamsCountEl = document.getElementById('ce-teams-count');
-    const formatEl = document.getElementById('ce-format');
-    const feeEl = document.getElementById('ce-fee');
-    const plusOneLimitEl = document.getElementById('ce-plus-one-limit');
+// Add Players Modal Screen
+window.openAddPlayersScreen = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
 
-    if (titleEl) titleEl.value = event.title || '';
-    if (visibilityEl) visibilityEl.value = event.visibility || 'Public';
-    if (dateEl) dateEl.value = isCopy ? '' : (event.date || '');
-    
-    if (event.time) {
-        let tVal = event.time;
-        if (tVal.includes('AM') || tVal.includes('PM')) {
-            const parts = tVal.split(' ');
-            const timeParts = parts[0].split(':');
-            let h = parseInt(timeParts[0], 10);
-            const m = timeParts[1];
-            if (parts[1] === 'PM' && h < 12) h += 12;
-            if (parts[1] === 'AM' && h === 12) h = 0;
-            tVal = `${String(h).padStart(2, '0')}:${m}`;
-        }
-        if (timeEl) timeEl.value = tVal;
+    let modal = document.getElementById('admin-add-players-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'admin-add-players-modal';
+        modal.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md';
+        document.body.appendChild(modal);
     }
 
-    const locParts = (event.location || "").match(/^(.*?)\s*\((.*?),\s*(.*?)\)$/);
-    if (locParts) {
-        if (parkSearchEl) parkSearchEl.value = locParts[1];
-        if (parkNameEl) parkNameEl.value = locParts[1];
-        if (cityEl) cityEl.value = locParts[2];
-        if (stateEl) stateEl.value = locParts[3];
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 text-white shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 class="text-sm font-black uppercase text-white">➕ Add Player to Roster</h3>
+                <button onclick="document.getElementById('admin-add-players-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-white/60 mb-1">Player Name</label>
+                    <input type="text" id="admin-add-player-name" placeholder="Enter player name..." class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-[#00F296]">
+                </div>
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button onclick="document.getElementById('admin-add-players-modal').remove()" class="flex-1 bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
+                <button onclick="submitAdminAddPlayer('${eventId}')" class="flex-1 bg-[#00F296] text-slate-950 font-black py-2.5 rounded-xl text-xs shadow">Add Player</button>
+            </div>
+        </div>
+    `;
+};
+
+window.submitAdminAddPlayer = async function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+    const input = document.getElementById('admin-add-player-name');
+    const nameVal = input ? input.value.trim() : '';
+    if (!nameVal) {
+        window.showToast("Please enter a player name", "error");
+        return;
+    }
+
+    event.attendees = event.attendees || [];
+    event.attendees.push({
+        uid: 'usr_' + Math.random().toString(36).substring(2, 9),
+        name: nameVal,
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(nameVal)}`,
+        role: 'Player',
+        status: 'confirmed',
+        paid: 'Unpaid',
+        guests: []
+    });
+
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { attendees: event.attendees }, { merge: true });
+        window.showToast(`${nameVal} added to roster!`);
+        document.getElementById('admin-add-players-modal')?.remove();
+    } catch (e) {
+        window.showToast("Failed to add player", "error");
+    }
+};
+
+window.checkAndOpenStartMatch = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (event && event.liveMatchActive) {
+        if (!confirm("There is a game going, would you like to start a second match?")) {
+            return;
+        }
+    }
+    if (typeof window.openStartMatchScreen === 'function') {
+        window.openStartMatchScreen(eventId);
+    }
+};
+
+window.openTwoPageGameWizard = function(eventId, mode) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    window._wizardData = {
+        mode: mode,
+        eventId: eventId,
+        title: event.title || '',
+        visibility: event.visibility || 'Public',
+        date: mode === 'copy' ? '' : (event.date || ''),
+        time: event.time || '20:00',
+        location: event.location || '',
+        teamsCount: event.teamsCount || 3,
+        format: event.format || '7v7',
+        fee: event.fee !== undefined ? event.fee : 'Free',
+        description: event.description || '',
+        rules: event.rules || '',
+        allowPlusOnes: event.allowPlusOnes !== undefined ? event.allowPlusOnes : true,
+        plusOneLimit: event.plusOneLimit !== undefined ? event.plusOneLimit : 1
+    };
+
+    renderWizardPage1();
+};
+
+window.renderWizardPage1 = function() {
+    let modal = document.getElementById('two-page-game-wizard-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'two-page-game-wizard-modal';
+        modal.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto';
+        document.body.appendChild(modal);
+    }
+
+    const d = window._wizardData;
+    const isPublic = d.visibility === 'Public';
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-[32px] p-6 space-y-4 max-w-md w-full text-white shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 class="text-sm font-black uppercase text-white">${d.mode === 'copy' ? '📋 Copy Game (1/2)' : '✏ Edit Game (1/2)'}</h3>
+                <button onclick="document.getElementById('two-page-game-wizard-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4 text-xs">
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">🏆 Game / Event Title</label>
+                    <input type="text" id="wiz-title" value="${d.title}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]" placeholder="Soccer pick-up (default)">
+                </div>
+
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">👁 Game Visibility</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button type="button" onclick="window._wizardData.visibility='Public'; renderWizardPage1()" class="p-3 rounded-2xl border text-left transition ${isPublic ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black border-transparent shadow' : 'bg-black/60 text-white/70 border-white/10'}">
+                            <div class="font-black text-xs">Public</div>
+                            <div class="text-[9px] opacity-80">Anyone can see and join</div>
+                        </button>
+                        <button type="button" onclick="window._wizardData.visibility='Private'; renderWizardPage1()" class="p-3 rounded-2xl border text-left transition ${!isPublic ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black border-transparent shadow' : 'bg-black/60 text-white/70 border-white/10'}">
+                            <div class="font-black text-xs">Private</div>
+                            <div class="text-[9px] opacity-80">Invite only</div>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">📅 Date</label>
+                        <input type="date" id="wiz-date" value="${d.date}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]">
+                    </div>
+                    <div>
+                        <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">⏰ Time</label>
+                        <input type="time" id="wiz-time" value="${d.time}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">📍 Park & Location *</label>
+                    <input type="text" id="wiz-location" value="${d.location}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]" placeholder="Enter park name...">
+                </div>
+
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="block font-black uppercase text-[9px] tracking-wider text-[#00F296] mb-1">Teams</label>
+                        <select id="wiz-teams" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2.5 font-bold text-white">
+                            <option value="2" ${d.teamsCount == 2 ? 'selected' : ''}>2 Teams</option>
+                            <option value="3" ${d.teamsCount == 3 ? 'selected' : ''}>3 Teams</option>
+                            <option value="4" ${d.teamsCount == 4 ? 'selected' : ''}>4 Teams</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-black uppercase text-[9px] tracking-wider text-[#00F296] mb-1">Format</label>
+                        <select id="wiz-format" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2.5 font-bold text-white">
+                            <option value="5v5" ${d.format === '5v5' ? 'selected' : ''}>5v5</option>
+                            <option value="7v7" ${d.format === '7v7' ? 'selected' : ''}>7v7</option>
+                            <option value="8v8" ${d.format === '8v8' ? 'selected' : ''}>8v8</option>
+                            <option value="11v11" ${d.format === '11v11' ? 'selected' : ''}>11v11</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-black uppercase text-[9px] tracking-wider text-[#00F296] mb-1">Fee</label>
+                        <input type="text" id="wiz-fee" value="${d.fee}" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2.5 font-bold text-white text-center">
+                    </div>
+                </div>
+
+                <button onclick="window.goToWizardPage2()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-md transition flex items-center justify-center gap-2 mt-4">
+                    Next: Description & Rules <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    `;
+};
+
+window.goToWizardPage2 = function() {
+    const d = window._wizardData;
+    d.title = document.getElementById('wiz-title')?.value.trim() || '';
+    d.date = document.getElementById('wiz-date')?.value || '';
+    d.time = document.getElementById('wiz-time')?.value || '';
+    d.location = document.getElementById('wiz-location')?.value.trim() || '';
+    d.teamsCount = parseInt(document.getElementById('wiz-teams')?.value, 10) || 3;
+    d.format = document.getElementById('wiz-format')?.value || '7v7';
+    d.fee = document.getElementById('wiz-fee')?.value.trim() || 'Free';
+
+    renderWizardPage2();
+};
+
+window.renderWizardPage2 = function() {
+    const modal = document.getElementById('two-page-game-wizard-modal');
+    if (!modal) return;
+
+    const d = window._wizardData;
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-[32px] p-6 space-y-4 max-w-md w-full text-white shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 class="text-sm font-black uppercase text-white">${d.mode === 'copy' ? '📋 Copy Game (2/2)' : '✏ Edit Game (2/2)'}</h3>
+                <button onclick="document.getElementById('two-page-game-wizard-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4 text-xs">
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">📝 Description</label>
+                    <textarea id="wiz-desc" rows="3" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]" placeholder="Friendly match...">${d.description}</textarea>
+                </div>
+
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">📜 Rules</label>
+                    <textarea id="wiz-rules" rows="3" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]" placeholder="No sliding tackles...">${d.rules}</textarea>
+                </div>
+
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">➕ Allow Plus Ones?</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button type="button" onclick="window._wizardData.allowPlusOnes=false; renderWizardPage2()" class="p-3 rounded-2xl border text-center transition ${!d.allowPlusOnes ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black border-transparent shadow' : 'bg-black/60 text-white/70 border-white/10'}">
+                            No
+                        </button>
+                        <button type="button" onclick="window._wizardData.allowPlusOnes=true; renderWizardPage2()" class="p-3 rounded-2xl border text-center transition ${d.allowPlusOnes ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black border-transparent shadow' : 'bg-black/60 text-white/70 border-white/10'}">
+                            Yes
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">Max Plus Ones Limit:</label>
+                    <select id="wiz-plus-limit" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
+                        <option value="1" ${d.plusOneLimit == 1 ? 'selected' : ''}>1</option>
+                        <option value="2" ${d.plusOneLimit == 2 ? 'selected' : ''}>2</option>
+                        <option value="3" ${d.plusOneLimit == 3 ? 'selected' : ''}>3</option>
+                        <option value="4" ${d.plusOneLimit == 4 ? 'selected' : ''}>4</option>
+                        <option value="5" ${d.plusOneLimit == 5 ? 'selected' : ''}>5</option>
+                        <option value="6" ${d.plusOneLimit == 6 ? 'selected' : ''}>6</option>
+                    </select>
+                </div>
+
+                <div class="flex gap-2 pt-3">
+                    <button onclick="window.renderWizardPage1()" class="w-1/3 bg-black/60 text-white py-3.5 rounded-xl font-bold border border-white/20 flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-arrow-left"></i> Back
+                    </button>
+                    <button onclick="window.submitTwoPageGameWizard()" class="w-2/3 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-xl uppercase tracking-wider shadow">
+                        ${d.mode === 'copy' ? '🚀 Publish Game' : '💾 Save Changes'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+window.submitTwoPageGameWizard = async function() {
+    const d = window._wizardData;
+    d.description = document.getElementById('wiz-desc')?.value.trim() || '';
+    d.rules = document.getElementById('wiz-rules')?.value.trim() || '';
+    d.plusOneLimit = parseInt(document.getElementById('wiz-plus-limit')?.value, 10) || 1;
+
+    if (!d.date || !d.location) {
+        window.showToast("Please fill in Date and Location.", "error");
+        return;
+    }
+
+    if (d.mode === 'copy') {
+        const originalEvent = (window.eventsList || []).find(ev => ev.id === d.eventId);
+        const newEventPayload = {
+            ...(originalEvent || {}),
+            title: d.title || 'Soccer Pick-up',
+            visibility: d.visibility,
+            date: d.date,
+            time: d.time,
+            location: d.location,
+            teamsCount: d.teamsCount,
+            format: d.format,
+            fee: d.fee,
+            description: d.description,
+            rules: d.rules,
+            allowPlusOnes: d.allowPlusOnes,
+            plusOneLimit: d.plusOneLimit,
+            attendees: [],
+            waitingList: [],
+            matches: [],
+            createdAt: new Date().toISOString()
+        };
+        delete newEventPayload.id;
+
+        try {
+            await addDoc(collection(db, 'artifacts', appId, 'eventsList'), newEventPayload);
+            window.showToast("Game copied and published successfully!");
+            document.getElementById('two-page-game-wizard-modal')?.remove();
+        } catch (e) {
+            window.showToast("Failed to copy game", "error");
+        }
     } else {
-        if (parkNameEl) parkNameEl.value = event.location || '';
-        if (parkSearchEl) parkSearchEl.value = event.location || '';
-    }
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'eventsList', d.eventId), {
+                title: d.title || 'Soccer Pick-up',
+                visibility: d.visibility,
+                date: d.date,
+                time: d.time,
+                location: d.location,
+                teamsCount: d.teamsCount,
+                format: d.format,
+                fee: d.fee,
+                description: d.description,
+                rules: d.rules,
+                allowPlusOnes: d.allowPlusOnes,
+                plusOneLimit: d.plusOneLimit
+            }, { merge: true });
 
-    if (descEl) descEl.value = event.description || '';
-    if (rulesEl) rulesEl.value = event.rules || '';
-    if (teamsCountEl) teamsCountEl.value = event.teamsCount || 3;
-    if (formatEl) formatEl.value = event.format || '7v7';
-    if (feeEl) feeEl.value = event.fee !== undefined ? event.fee : 'Free';
-
-    const allowPlus = event.allowPlusOnes ? 'yes' : 'no';
-    if (typeof window.setPlusOnesOption === 'function') {
-        window.setPlusOnesOption(allowPlus);
-    }
-    if (plusOneLimitEl) plusOneLimitEl.value = event.plusOneLimit || 1;
-};
-
-window.openEditEventForm = function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    if (typeof window.switchTab === 'function') {
-        window.switchTab('create-event');
-    }
-
-    setTimeout(() => {
-        window.populateEventFormFields(event, false);
-        const formEl = document.querySelector('#tab-create-event form') || document.querySelector('#create-event-form');
-        if (formEl) {
-            let hiddenId = document.getElementById('ce-edit-event-id');
-            if (!hiddenId) {
-                hiddenId = document.createElement('input');
-                hiddenId.type = 'hidden';
-                hiddenId.id = 'ce-edit-event-id';
-                formEl.appendChild(hiddenId);
-            }
-            hiddenId.value = event.id;
+            window.showToast("Game updated successfully!");
+            document.getElementById('two-page-game-wizard-modal')?.remove();
+        } catch (e) {
+            window.showToast("Failed to update game", "error");
         }
-    }, 150);
-};
-
-window.copyEvent = function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    if (typeof window.switchTab === 'function') {
-        window.switchTab('create-event');
     }
-
-    setTimeout(() => {
-        window.populateEventFormFields(event, true);
-        const formEl = document.querySelector('#tab-create-event form') || document.querySelector('#create-event-form');
-        if (formEl) {
-            const hiddenId = document.getElementById('ce-edit-event-id');
-            if (hiddenId) hiddenId.remove();
-        }
-        if (typeof window.showToast === 'function') {
-            window.showToast("Match details copied! Select a new date.", "info");
-        }
-    }, 150);
 };
-
-document.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-action]');
-    if (!btn) return;
-    const action = btn.getAttribute('data-action');
-    const eventId = btn.getAttribute('data-event-id');
-    const uid = btn.getAttribute('data-uid');
-    
-    if (action === 'manage-player') {
-        const name = btn.getAttribute('data-name');
-        window.openPlayerManagementModal(eventId, uid, name);
-    } else if (action === 'manage-guest') {
-        const guestIdx = parseInt(btn.getAttribute('data-guest-idx'), 10);
-        const guestName = btn.getAttribute('data-guest-name');
-        window.openGuestManagementModal(eventId, uid, guestIdx, guestName);
-    }
-});
 
 window.confirmCancelGame = async function(eventId) {
     if (confirm("Are you sure you want to cancel this match? All participants will be notified.")) {
@@ -394,7 +641,7 @@ window.openEditMatchModal = function(eventId, matchIndex) {
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 text-white shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 class="text-sm font-black uppercase text-white">✏️️ Edit Match Result</h3>
+                <h3 class="text-sm font-black uppercase text-white">✏ Edit Match Result</h3>
                 <button onclick="document.getElementById('edit-match-admin-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
@@ -574,6 +821,23 @@ window.removePlayerFromEvent = async function(eventId, uid) {
         window.showToast("Failed to remove player", "error");
     }
 };
+
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-action');
+    const eventId = btn.getAttribute('data-event-id');
+    const uid = btn.getAttribute('data-uid');
+    
+    if (action === 'manage-player') {
+        const name = btn.getAttribute('data-name');
+        window.openPlayerManagementModal(eventId, uid, name);
+    } else if (action === 'manage-guest') {
+        const guestIdx = parseInt(btn.getAttribute('data-guest-idx'), 10);
+        const guestName = btn.getAttribute('data-guest-name');
+        window.openGuestManagementModal(eventId, uid, guestIdx, guestName);
+    }
+});
 
 window.openGuestManagementModal = function(eventId, attendeeUid, guestIndex, guestName) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);

@@ -1,4 +1,4 @@
-// js/game-profile/team-tool.js: Full Team Builder & Tactical Lineup Tool with team-restricted slots and randomize guest-pairing options
+// js/game-profile/team-tool.js: Full Team Builder & Lineup Tool rendered as a dedicated full-page view with a Back button
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -10,6 +10,7 @@ window.teamColors = window.teamColors || {};
 window.teamCaptains = window.teamCaptains || {};
 
 async function updateTeamToolFirestore(event) {
+    if (!event || !event.id) return;
     const docRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
     
     event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
@@ -24,7 +25,8 @@ async function updateTeamToolFirestore(event) {
     if (cleanPayload.attendees) {
         cleanPayload.attendees.forEach(att => {
             if (!att.avatar || att.avatar.startsWith('data:')) {
-                att.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
+                const dirUser = window.directoryList?.find(u => String(u.uid) === String(att.uid));
+                att.avatar = dirUser?.avatar || dirUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
             }
             if (att.guests) {
                 att.guests.forEach(g => {
@@ -36,14 +38,23 @@ async function updateTeamToolFirestore(event) {
         });
     }
 
-    await setDoc(docRef, cleanPayload, { merge: true });
-    window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
+    try {
+        await setDoc(docRef, cleanPayload, { merge: true });
+        window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
+    } catch (err) {
+        console.error("Failed to update team tool in Firestore:", err);
+    }
 }
 
 function getFlattenedPlayersList(attendees) {
     const list = [];
     (attendees || []).forEach(att => {
-        const safeAvatar = (att && (att.avatar || att.photoURL)) ? String(att.avatar || att.photoURL) : `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att?.name || 'Player')}`;
+        let safeAvatar = att?.avatar || att?.photoURL;
+        if (!safeAvatar || safeAvatar.startsWith('data:')) {
+            const dirUser = window.directoryList?.find(u => String(u.uid) === String(att?.uid));
+            safeAvatar = dirUser?.avatar || dirUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att?.name || 'Player')}`;
+        }
+
         list.push({
             uid: String(att?.uid || 'usr_' + Math.random().toString(36).substring(2,7)),
             name: String(att?.name || att?.firstName || 'Player'),
@@ -76,39 +87,41 @@ window.openTeamMakingModal = function(eventId) {
         return;
     }
 
-    let modal = document.getElementById('team-making-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'team-making-modal';
-        modal.className = 'fixed inset-0 z-[150] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200';
-        document.body.appendChild(modal);
-    }
-
+    window.activeModalEventId = eventId;
+    window.activeModalTab = 'teams';
+    window.activeTeamTab = 0;
     window.currentTeamBuildingEvent = event;
+
     window.teamAssignments[event.id] = event.teamAssignments || {};
     window.teamNames[event.id] = event.teamNames || {};
     window.teamColors[event.id] = event.teamColors || {};
     window.teamCaptains[event.id] = event.teamCaptains || {};
-    window.activeTeamTab = 0;
 
-    try {
-        renderTeamMakingContent();
-    } catch (e) {
-        console.error("Error rendering team maker:", e);
-        if (typeof window.showToast === 'function') window.showToast("Failed to open Team Builder.", "error");
-        modal.remove();
+    if (typeof window.switchTab === 'function') {
+        window.switchTab('event-details-screen');
+    }
+    if (typeof window.renderEventDetailModalContent === 'function') {
+        window.renderEventDetailModalContent();
     }
 };
 
 window.switchTeamTab = function(teamIndex) {
     window.activeTeamTab = teamIndex;
-    renderTeamMakingContent();
+    if (typeof window.renderEventDetailModalContent === 'function') {
+        window.renderEventDetailModalContent();
+    }
 };
 
-window.changeTeamFormation = function(eventId, teamIndex, formationKey) {
+window.changeTeamFormation = async function(eventId, teamIndex, formationKey) {
     window.teamFormations[eventId] = window.teamFormations[eventId] || {};
     window.teamFormations[eventId][teamIndex] = formationKey;
-    renderTeamMakingContent();
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (event) {
+        await updateTeamToolFirestore(event);
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
+    }
 };
 
 window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
@@ -117,7 +130,9 @@ window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (event) {
         await updateTeamToolFirestore(event);
-        renderTeamMakingContent();
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
     }
 };
 
@@ -128,7 +143,9 @@ window.setTeamCaptain = async function(eventId, teamIndex, captainUid) {
     if (event) {
         await updateTeamToolFirestore(event);
         if (typeof window.showToast === 'function') window.showToast("Captain updated!");
-        renderTeamMakingContent();
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
     }
 };
 
@@ -149,15 +166,30 @@ window.saveTeamNameModal = async function(eventId, teamIndex) {
             if (typeof window.showToast === 'function') {
                 window.showToast(`Team name updated to "${newName}"!`);
             }
-            renderTeamMakingContent();
+            if (typeof window.renderEventDetailModalContent === 'function') {
+                window.renderEventDetailModalContent();
+            }
         } catch (err) {
             console.error("Failed to save team name:", err);
         }
     }
 };
 
-// Prompt randomize options modal (fully random vs keep guests together)
 window.promptRandomizeOptions = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
+    if (!event) return;
+
+    const teamAssigned = window.teamAssignments[eventId] || event.teamAssignments || {};
+    let placedCount = 0;
+    Object.values(teamAssigned).forEach(arr => {
+        if (Array.isArray(arr)) arr.forEach(p => { if (p && p.uid) placedCount++; });
+    });
+
+    if (placedCount === 0) {
+        window.promptRandomizeDistribution(eventId, false);
+        return;
+    }
+
     let modal = document.getElementById('randomize-options-modal');
     if (!modal) {
         modal = document.createElement('div');
@@ -168,14 +200,14 @@ window.promptRandomizeOptions = function(eventId) {
 
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
-            <h3 class="text-sm font-black uppercase text-white">Randomize Teams</h3>
-            <p class="text-[11px] text-white/60">How would you like to distribute the players?</p>
+            <h3 class="text-sm font-black uppercase text-white">You have players already selected</h3>
+            <p class="text-[11px] text-white/60">What would you like to do?</p>
             <div class="space-y-2.5 pt-2">
-                <button onclick="document.getElementById('randomize-options-modal').remove(); window.executeRandomizeTeams('${eventId}', false)" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-xl text-xs shadow transition">
-                    Fully Randomized
+                <button onclick="window.promptRandomizeDistribution('${eventId}', true)" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-xl text-xs shadow transition">
+                    Keep players &amp; randomize the rest
                 </button>
-                <button onclick="document.getElementById('randomize-options-modal').remove(); window.executeRandomizeTeams('${eventId}', true)" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition">
-                    Keep Players & Guests Together
+                <button onclick="window.promptRandomizeDistribution('${eventId}', false)" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition">
+                    Fully randomize again
                 </button>
                 <button onclick="document.getElementById('randomize-options-modal').remove()" class="w-full bg-transparent text-white/40 hover:text-white py-2 text-xs">
                     Cancel
@@ -185,83 +217,134 @@ window.promptRandomizeOptions = function(eventId) {
     `;
 };
 
-window.executeRandomizeTeams = async function(eventId, keepGuestsTogether) {
-    const event = window.currentTeamBuildingEvent;
-    if (!event) return;
-    
-    const teamsCount = event.teamsCount || 3;
-    window.teamAssignments[eventId] = {};
-    for (let i = 0; i < teamsCount; i++) {
-        window.teamAssignments[eventId][i] = [];
+window.promptRandomizeDistribution = function(eventId, keepExisting) {
+    let modal = document.getElementById('randomize-options-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'randomize-options-modal';
+        modal.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm';
+        document.body.appendChild(modal);
     }
 
-    if (keepGuestsTogether) {
-        const attendees = event.attendees || [];
-        const shuffledAttendees = [...attendees].sort(() => Math.random() - 0.5);
-        shuffledAttendees.forEach((att, idx) => {
-            const targetTeam = idx % teamsCount;
-            const mainPlayer = {
-                uid: String(att.uid || 'usr_' + Math.random()),
-                name: String(att.name || 'Player'),
-                avatar: att.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`,
-                position: att.position || 'Player'
-            };
-            window.teamAssignments[eventId][targetTeam].push(mainPlayer);
+    const togetherLabel = keepExisting ? 'Try to keep players with their plus ones' : 'Keep players &amp; plus ones together';
+    const togetherNote = keepExisting
+        ? '<p class="text-[10px] text-white/40">"Try" because teams may not have room for everyone since some players are already placed.</p>'
+        : '';
 
-            if (att.guests && Array.isArray(att.guests)) {
-                att.guests.forEach((g, gIdx) => {
-                    window.teamAssignments[eventId][targetTeam].push({
-                        uid: `${att.uid || 'usr'}_guest_${gIdx}`,
-                        name: String(g.name || 'Guest'),
-                        avatar: g.avatar || mainPlayer.avatar,
-                        position: 'Guest',
-                        isHostGuest: true
-                    });
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+            <h3 class="text-sm font-black uppercase text-white">Randomize Teams</h3>
+            <p class="text-[11px] text-white/60">How would you like to distribute the players?</p>
+            <div class="space-y-2.5 pt-2">
+                <button onclick="document.getElementById('randomize-options-modal').remove(); window.executeRandomizeTeams('${eventId}', false, ${keepExisting ? 'true' : 'false'})" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-xl text-xs shadow transition">
+                    Fully Randomized
+                </button>
+                <button onclick="document.getElementById('randomize-options-modal').remove(); window.executeRandomizeTeams('${eventId}', true, ${keepExisting ? 'true' : 'false'})" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition">
+                    ${togetherLabel}
+                </button>
+                ${togetherNote}
+                <button onclick="document.getElementById('randomize-options-modal').remove()" class="w-full bg-transparent text-white/40 hover:text-white py-2 text-xs">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    `;
+};
+
+window.executeRandomizeTeams = async function(eventId, keepGuestsTogether, keepExisting) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
+    if (!event) return;
+
+    const teamsCount = event.teamsCount || 3;
+    const capacity = keepExisting ? (parseInt(event.format) || 8) : Infinity;
+
+    const previous = window.teamAssignments[eventId] || event.teamAssignments || {};
+    const teams = {};
+    for (let i = 0; i < teamsCount; i++) {
+        teams[i] = keepExisting && Array.isArray(previous[i]) ? [...previous[i]] : [];
+    }
+
+    const placedUIDs = new Set();
+    Object.values(teams).forEach(arr => arr.forEach(p => { if (p && p.uid) placedUIDs.add(String(p.uid)); }));
+
+    const sizeOf = (i) => teams[i].filter(p => p && p.uid).length;
+    const shuffle = (arr) => {
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    };
+    const addToTeam = (i, player) => {
+        const hole = teams[i].findIndex(p => !p);
+        if (hole !== -1) teams[i][hole] = player;
+        else teams[i].push(player);
+        placedUIDs.add(String(player.uid));
+    };
+    const pickTeam = (needed) => {
+        const options = [];
+        for (let i = 0; i < teamsCount; i++) {
+            if (capacity - sizeOf(i) >= needed) options.push(i);
+        }
+        if (options.length === 0) return -1;
+        const min = Math.min(...options.map(sizeOf));
+        const best = options.filter(i => sizeOf(i) === min);
+        return best[Math.floor(Math.random() * best.length)];
+    };
+
+    const flat = getFlattenedPlayersList(event.attendees);
+    const groups = [];
+    flat.forEach(p => {
+        if (p.isHostGuest && groups.length) groups[groups.length - 1].push(p);
+        else groups.push([p]);
+    });
+
+    const pool = groups.map(g => g.filter(p => !placedUIDs.has(String(p.uid)))).filter(g => g.length > 0);
+
+    let leftOut = 0;
+    if (keepGuestsTogether) {
+        shuffle(pool).forEach(group => {
+            const t = pickTeam(group.length);
+            if (t !== -1) {
+                group.forEach(p => addToTeam(t, p));
+            } else {
+                group.forEach(p => {
+                    const t2 = pickTeam(1);
+                    if (t2 !== -1) addToTeam(t2, p);
+                    else leftOut++;
                 });
             }
         });
     } else {
-        const allPlayers = getFlattenedPlayersList(event.attendees);
-        for (let i = allPlayers.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [allPlayers[i], allPlayers[j]] = [allPlayers[j], allPlayers[i]];
-        }
-
-        allPlayers.forEach((player, idx) => {
-            const targetTeam = idx % teamsCount;
-            window.teamAssignments[eventId][targetTeam].push(player);
+        shuffle(pool.flat()).forEach(p => {
+            const t = pickTeam(1);
+            if (t !== -1) addToTeam(t, p);
+            else leftOut++;
         });
     }
 
-    event.teamAssignments = window.teamAssignments[eventId];
-    
+    window.teamAssignments[eventId] = teams;
+    event.teamAssignments = teams;
+
     try {
         await updateTeamToolFirestore(event);
         if (typeof window.showToast === 'function') {
-            window.showToast("Teams randomized successfully!");
+            if (leftOut > 0) window.showToast(`Teams randomized. ${leftOut} player(s) didn't fit.`);
+            else window.showToast("Teams randomized successfully!");
         }
-        renderTeamMakingContent();
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
     } catch (err) {
         console.error("Failed to randomize teams:", err);
     }
 };
 
-window.renderTeamMakingContent = function() {
-    const modal = document.getElementById('team-making-modal');
-    if (!modal || !window.currentTeamBuildingEvent) return;
-    
-    const currentEvtId = window.currentTeamBuildingEvent.id;
-    const latestEvent = (window.eventsList || []).find(ev => ev.id === currentEvtId);
-    if (latestEvent) {
-        window.currentTeamBuildingEvent = latestEvent;
-    }
-    const event = window.currentTeamBuildingEvent;
-
-    const attendees = event.attendees || [];
-    const allPlayers = getFlattenedPlayersList(attendees);
+export function renderTeamToolTab(event) {
+    if (!event) return '';
+    window.currentTeamBuildingEvent = event;
     const teamsCount = event.teamsCount || 3;
     const format = event.format || '7v7';
-
     const defaultColors = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7'];
 
     const formationOptions = {
@@ -281,15 +364,15 @@ window.renderTeamMakingContent = function() {
     window.teamFormations[event.id] = window.teamFormations[event.id] || {};
     window.teamColors[event.id] = window.teamColors[event.id] || {};
     window.teamCaptains[event.id] = window.teamCaptains[event.id] || {};
-    const activeTab = window.activeTeamTab;
+    const activeTab = window.activeTeamTab || 0;
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
     for (let i = 0; i < teamsCount; i++) {
         window.teamAssignments[event.id][i] = window.teamAssignments[event.id][i] || [];
     }
-
     window.teamNames[event.id] = window.teamNames[event.id] || {};
 
+    const allPlayers = getFlattenedPlayersList(event.attendees);
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[event.id]).forEach(teamArr => {
         if (Array.isArray(teamArr)) {
@@ -327,7 +410,7 @@ window.renderTeamMakingContent = function() {
             const captainUid = window.teamCaptains[event.id][i];
 
             const rosterPillsHtml = teamRoster.length === 0 
-                ? '<span class="text-xs text-white/40 italic">No players assigned yet. Click Add Player or Randomize.</span>'
+                ? '<span class="text-xs text-white/40 italic">No players assigned yet.</span>'
                 : teamRoster.map(p => {
                     const isCap = String(p?.uid) === String(captainUid);
                     const pAvatar = p?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -343,18 +426,22 @@ window.renderTeamMakingContent = function() {
                 }).join('');
 
             teamsSummaryHtml += `
-                <div class="bg-black/40 border-2 rounded-2xl p-4 space-y-3 shadow-lg" style="border-color: ${tColor}66;">
-                    <div class="flex items-center justify-between border-b border-white/10 pb-2">
-                        <div class="flex items-center gap-2">
-                            <span class="w-3 h-3 rounded-full" style="background-color: ${tColor};"></span>
-                            <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
+                <div class="bg-black/40 border-2 rounded-2xl p-4 space-y-3 shadow-lg flex flex-col justify-between" style="border-color: ${tColor}66;">
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between border-b border-white/10 pb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-full" style="background-color: ${tColor};"></span>
+                                <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
+                            </div>
                         </div>
-                        <button onclick="openAssignPicker('${event.id}', ${i}, null)" class="text-[10px] font-bold text-white/80 hover:text-white bg-black/60 px-3 py-1.5 rounded-lg border border-white/15 flex items-center gap-1 shadow">
-                            <i class="fa-solid fa-plus text-[9px] text-[#00F296]"></i> Add Player
-                        </button>
+                        <div class="flex flex-wrap gap-2">
+                            ${rosterPillsHtml}
+                        </div>
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                        ${rosterPillsHtml}
+                    <div class="pt-3 border-t border-white/10">
+                        <button onclick="openAssignPicker('${event.id}', ${i}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-2.5 px-4 rounded-xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
+                            <i class="fa-solid fa-user-plus"></i> + Add Player to ${tName}
+                        </button>
                     </div>
                 </div>
             `;
@@ -387,7 +474,7 @@ window.renderTeamMakingContent = function() {
     } else {
         const teamIdx = activeTab - 1;
         const currentTeamName = window.teamNames[event.id][teamIdx] || `Team ${teamIdx + 1}`;
-        const currentTeamColor = window.teamColors[event.id][teamIdx] || defaultColors[teamIdx % defaultColors.length];
+        const currentTeamColor = window.teamColors[event.id]?.[teamIdx] || defaultColors[teamIdx % defaultColors.length];
         const currentTeamPlayers = window.teamAssignments[event.id][teamIdx] || [];
         const currentCaptainUid = window.teamCaptains[event.id][teamIdx] || "";
         
@@ -398,24 +485,29 @@ window.renderTeamMakingContent = function() {
         let playerIndex = 0;
         let rowsHtml = '';
 
-        rowCounts.slice().reverse().forEach((count) => {
+        const displayRows = [...rowCounts].reverse();
+        displayRows.forEach((count, rIdx) => {
             let rowSlots = '';
             for (let c = 0; c < count; c++) {
                 const slotIdx = playerIndex++;
                 const p = currentTeamPlayers[slotIdx];
+                const positionName = rIdx === 0 ? "FWD" : (rIdx === displayRows.length - 1 ? "DEF" : "MID");
+                
                 if (p && p.name) {
                     rowSlots += `
-                        <div onclick="unassignPlayerFromSlot('${event.id}', ${teamIdx}, ${slotIdx})" class="w-24 h-16 bg-white/95 border-2 border-emerald-400 rounded-2xl p-1 text-center cursor-pointer shadow-lg flex flex-col items-center justify-center relative group">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5 border border-slate-900">
-                            <span class="text-[9px] font-black text-slate-950 truncate w-full px-1">${p.name}</span>
-                            <span class="absolute inset-0 bg-red-500/90 text-white text-[10px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
+                        <div onclick="promptRemoveOrChangeSlot('${event.id}', ${teamIdx}, ${slotIdx}, '${p.name.replace(/'/g, "\\'")}')" class="w-36 h-14 bg-black/80 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 relative group transition hover:scale-105" style="border-color: ${currentTeamColor};">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <div class="truncate text-left leading-tight">
+                                <span class="text-[7px] font-black uppercase block tracking-wider" style="color: ${currentTeamColor};">${positionName}</span>
+                                <span class="text-[10px] font-black text-white truncate block">${p.name}</span>
+                            </div>
                         </div>
                     `;
                 } else {
                     rowSlots += `
-                        <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${slotIdx})" class="w-24 h-16 border-2 border-dashed border-white/70 bg-emerald-950/40 rounded-2xl p-1 text-center cursor-pointer hover:bg-emerald-900/60 transition flex flex-col items-center justify-center text-white shadow">
-                            <i class="fa-solid fa-shirt text-white/90 text-sm mb-0.5"></i>
-                            <span class="text-[9px] font-bold uppercase tracking-wider">Spot</span>
+                        <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${slotIdx})" class="w-36 h-14 bg-black/60 border-2 border-dashed rounded-full px-3 py-1 text-center cursor-pointer hover:bg-black/80 transition flex items-center justify-center gap-2 shadow" style="border-color: ${currentTeamColor};">
+                            <i class="fa-solid fa-shirt text-white/80 text-xs"></i>
+                            <span class="text-[10px] font-black uppercase text-white/90 tracking-wider">${positionName}</span>
                         </div>
                     `;
                 }
@@ -427,14 +519,16 @@ window.renderTeamMakingContent = function() {
         const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
         rowsHtml += `
             <div class="flex justify-center mt-2">
-                <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${goalieSlotIdx})" class="w-28 h-16 ${goaliePlayer && goaliePlayer.name ? 'bg-white/95 border-2 border-emerald-400' : 'border-2 border-dashed border-amber-400/80 bg-emerald-950/40'} rounded-2xl p-1 text-center cursor-pointer shadow-lg flex flex-col items-center justify-center relative group">
+                <div onclick="${goaliePlayer && goaliePlayer.name ? `promptRemoveOrChangeSlot('${event.id}',${teamIdx}, ${goalieSlotIdx}, '${goaliePlayer.name.replace(/'/g, "\\'")}')` : `openAssignPicker('${event.id}', ${teamIdx},${goalieSlotIdx})`}" class="w-40 h-14 ${goaliePlayer && goaliePlayer.name ? 'bg-black/80 border-2' : 'border-2 border-dashed bg-black/60'} rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
                     ${goaliePlayer && goaliePlayer.name ? `
-                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover mb-0.5 border border-slate-900">
-                        <span class="text-[9px] font-black text-slate-950 truncate w-full px-1">${goaliePlayer.name}</span>
-                        <span class="absolute inset-0 bg-red-500/90 text-white text-[10px] font-bold rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition">Remove</span>
+                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <div class="truncate text-left leading-tight">
+                            <span class="text-[7px] font-black uppercase block tracking-wider text-amber-400">GK</span>
+                            <span class="text-[10px] font-black text-white truncate block">${goaliePlayer.name}</span>
+                        </div>
                     ` : `
-                        <i class="fa-solid fa-hand text-amber-300 text-sm mb-0.5"></i>
-                        <span class="text-[10px] text-amber-300 font-black uppercase">GK Spot</span>
+                        <i class="fa-solid fa-hand text-amber-300 text-sm ml-2"></i>
+                        <span class="text-[10px] font-black uppercase text-amber-300 tracking-wider ml-1">GK</span>
                     `}
                 </div>
             </div>
@@ -454,7 +548,7 @@ window.renderTeamMakingContent = function() {
                 return `
                     <div class="flex items-center justify-between p-2.5 bg-black/60 rounded-xl border border-white/10 text-xs">
                         <div class="flex items-center gap-2.5">
-                            <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover border border-white/20">
+                            <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div>
                                 <div class="font-bold text-white">${pName} ${isCap ? '👑 (Captain)' : ''}</div>
                                 <div class="text-[10px] text-white/50">${pPos}</div>
@@ -467,7 +561,6 @@ window.renderTeamMakingContent = function() {
 
         contentHtml = `
             <div class="space-y-4">
-                <!-- Team Configuration Panel -->
                 <div class="bg-black/50 border border-white/10 p-4 rounded-2xl space-y-3">
                     <h4 class="text-xs font-black text-white/70 uppercase tracking-wider">Team Configuration</h4>
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -494,10 +587,8 @@ window.renderTeamMakingContent = function() {
                     <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="w-full bg-[#00F296] text-slate-950 font-black py-2.5 rounded-xl text-xs shadow transition mt-1">Save Team Name</button>
                 </div>
 
-                <!-- Tactical Lineup Soccer Pitch -->
-                <div class="relative bg-gradient-to-b from-emerald-800 to-emerald-950 border-2 rounded-3xl p-5 shadow-inner overflow-hidden min-h-[400px] flex flex-col justify-between" style="border-color: ${currentTeamColor};">
-                    <div class="absolute inset-x-0 top-1/2 h-0.5 bg-white/30 pointer-events-none"></div>
-                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 border-2 border-white/30 rounded-full pointer-events-none"></div>
+                <div class="relative border-2 rounded-3xl p-5 shadow-inner overflow-hidden min-h-[420px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentTeamColor};">
+                    <div class="absolute inset-0 bg-black/40 pointer-events-none"></div>
 
                     <div class="flex justify-between items-center relative z-10">
                         <span class="text-white font-black text-xs px-3.5 py-1.5 rounded-full uppercase tracking-wider shadow" style="background-color: ${currentTeamColor};">${currentTeamName}</span>
@@ -510,39 +601,44 @@ window.renderTeamMakingContent = function() {
                         ${rowsHtml}
                     </div>
 
-                    <div class="text-center relative z-10 text-[10px] text-white/70 font-semibold">
-                        Tap any slot on the pitch to assign or remove players
+                    <div class="text-center relative z-10 text-[10px] text-white/80 font-semibold bg-black/50 py-1 rounded-xl">
+                        Tap any position on the pitch to assign or remove players
                     </div>
                 </div>
 
-                <!-- Squad Members List under Team -->
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
                     <div class="flex justify-between items-center">
                         <h4 class="text-xs font-black text-white/80 uppercase tracking-wider">Squad Members (${currentTeamPlayers.length})</h4>
-                        <button onclick="openAssignPicker('${event.id}', ${teamIdx}, null)" class="text-[10px] font-bold text-[#00F296] hover:underline bg-black/60 px-2.5 py-1 rounded-lg border border-white/10">
-                            + Add Player to Team
-                        </button>
                     </div>
                     <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
                         ${squadMembersListHtml}
+                    </div>
+                    <div class="pt-2">
+                        <button onclick="openAssignPicker('${event.id}', ${teamIdx}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-2.5 px-4 rounded-xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
+                            <i class="fa-solid fa-user-plus"></i> + Add Player to ${currentTeamName}
+                        </button>
                     </div>
                 </div>
             </div>
         `;
     }
 
-    modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-2xl w-full p-6 text-white shadow-2xl space-y-5 relative max-h-[90vh] overflow-y-auto">
+    return `
+        <div class="space-y-5">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <div>
-                    <h3 class="text-base font-black uppercase text-white">⚽ Team Builder & Lineups</h3>
-                    <p class="text-[10px] text-white/50">Format: ${format} • Build your squad</p>
+                <div class="flex items-center gap-3">
+                    <button onclick="switchModalTab('roster')" class="bg-black/60 hover:bg-black text-white font-bold px-3.5 py-2 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5 shadow">
+                        <i class="fa-solid fa-chevron-left text-[10px]"></i> Back to Event Profile
+                    </button>
+                    <div>
+                        <h3 class="text-base font-black uppercase text-white">⚽ Team Builder & Lineups</h3>
+                        <p class="text-[10px] text-white/50">Format: ${format} • Build your squad</p>
+                    </div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <button onclick="promptRandomizeOptions('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow flex items-center gap-1">
+                <div>
+                    <button onclick="promptRandomizeOptions('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow flex items-center gap-1">
                         <i class="fa-solid fa-shuffle text-[10px]"></i> Randomize
                     </button>
-                    <button onclick="document.getElementById('team-making-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
                 </div>
             </div>
 
@@ -553,21 +649,105 @@ window.renderTeamMakingContent = function() {
 
             <!-- Active Tab Content -->
             ${contentHtml}
-
-            <div class="text-center pt-2">
-                <button onclick="document.getElementById('team-making-modal').remove()" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition">Close</button>
-            </div>
         </div>
     `;
-};
+}
 
 window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    const allPlayers = getFlattenedPlayersList(event.attendees);
     window.teamAssignments[eventId] = event.teamAssignments || {};
-    
+    const teamRoster = window.teamAssignments[eventId][teamIndex] || [];
+    const assignedUIDsInTeam = new Set(teamRoster.map(p => String(p?.uid)));
+
+    const allPlayers = getFlattenedPlayersList(event.attendees);
+    const teamRosterPlayers = allPlayers.filter(a => {
+        const matchesTeam = (a.team && a.team.toLowerCase() === (window.teamNames[eventId]?.[teamIndex] || `Team ${teamIndex + 1}`).toLowerCase()) || assignedUIDsInTeam.has(String(a.uid));
+        return matchesTeam;
+    });
+
+    if (slotIndex !== null && slotIndex !== 'null') {
+        const assignedPitchUIDs = new Set();
+        Object.entries(window.teamAssignments[eventId][teamIndex] || {}).forEach(([sIdx, player]) => {
+            if (player && player.uid && parseInt(sIdx) !== slotIndex) {
+                assignedPitchUIDs.add(String(player.uid));
+            }
+        });
+        
+        const validTeamRoster = teamRoster.filter(p => p && p.uid);
+        const unplacedPitchPlayers = validTeamRoster.filter(p => !assignedPitchUIDs.has(String(p.uid)));
+        
+        if (unplacedPitchPlayers.length === 0) {
+            const placedPlayersWithPositions = validTeamRoster.filter(p => assignedPitchUIDs.has(String(p.uid)));
+            
+            let picker = document.getElementById('assign-picker-modal');
+            if (!picker) {
+                picker = document.createElement('div');
+                picker.id = 'assign-picker-modal';
+                picker.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
+                document.body.appendChild(picker);
+            }
+
+            if (placedPlayersWithPositions.length === 0) {
+                picker.innerHTML = `
+                    <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+                        <h4 class="text-xs font-black uppercase text-white">No players available</h4>
+                        <p class="text-xs text-white/70">No more players available for now! Add more players to the team first.</p>
+                        <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-[#00F296] text-slate-950 font-bold py-2.5 rounded-xl text-xs">OK</button>
+                    </div>
+                `;
+            } else {
+                picker.innerHTML = `
+                    <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+                        <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                            <h4 class="text-xs font-black uppercase text-white">Move Player Here</h4>
+                            <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <p class="text-[11px] text-white/70">No more players available for now! Would you like to move a player here?</p>
+                        <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                            ${placedPlayersWithPositions.map(p => `
+                                <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                                    <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                                    <span class="text-xs font-bold text-white">${p.name} (Move to this position)</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
+                    </div>
+                `;
+            }
+            return;
+        }
+
+        let picker = document.getElementById('assign-picker-modal');
+        if (!picker) {
+            picker = document.createElement('div');
+            picker.id = 'assign-picker-modal';
+            picker.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
+            document.body.appendChild(picker);
+        }
+
+        picker.innerHTML = `
+            <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+                <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                    <h4 class="text-xs font-black uppercase text-white">Assign Player to Position</h4>
+                    <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    ${unplacedPitchPlayers.map(p => `
+                        <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <span class="text-xs font-bold text-white">${p.name}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
+            </div>
+        `;
+        return;
+    }
+
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[eventId]).forEach(teamArr => {
         if (Array.isArray(teamArr)) {
@@ -575,12 +755,9 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         }
     });
 
-    // Restrict to players not yet assigned anywhere, OR already in this specific team
-    const teamPlayersSet = new Set((window.teamAssignments[eventId][teamIndex] || []).map(p => p?.uid));
-    const eligiblePlayers = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)) || teamPlayersSet.has(String(a.uid)));
-
-    if (eligiblePlayers.length === 0) {
-        if (typeof window.showToast === 'function') window.showToast("No available players found.", "error");
+    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
+    if (freeAgents.length === 0) {
+        if (typeof window.showToast === 'function') window.showToast("No available free agents found.", "error");
         return;
     }
 
@@ -592,28 +769,49 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         document.body.appendChild(picker);
     }
 
-    const eligibleListHtml = eligiblePlayers.map(a => {
-        const aAvatar = a?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
-        const aName = a?.name || 'Player';
-        const aUid = a?.uid || '';
-        return `
-            <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex !== null ? slotIndex : 'null'}, '${aUid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover">
-                <span class="text-xs font-bold text-white">${aName}</span>
-            </div>
-        `;
-    }).join('');
-
     picker.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h4 class="text-xs font-black uppercase text-white">Select Player for Team</h4>
+                <h4 class="text-xs font-black uppercase text-white">Add Player to Team</h4>
                 <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                ${eligibleListHtml}
+                ${freeAgents.map(a => `
+                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <span class="text-xs font-bold text-white">${a.name}</span>
+                    </div>
+                `).join('')}
             </div>
             <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
+        </div>
+    `;
+};
+
+window.promptRemoveOrChangeSlot = function(eventId, teamIndex, slotIndex, playerName) {
+    let modal = document.getElementById('slot-action-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'slot-action-modal';
+        modal.className = 'fixed inset-0 z-[170] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+            <h3 class="text-sm font-black uppercase text-white">Position: ${playerName}</h3>
+            <p class="text-[11px] text-white/60">Would you like to remove this player from the position?</p>
+            <div class="space-y-2.5 pt-2">
+                <button onclick="document.getElementById('slot-action-modal').remove(); window.unassignPlayerFromSlot('${eventId}', ${teamIndex}, ${slotIndex})" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 font-black py-3 rounded-xl text-xs shadow transition">
+                    Remove Player
+                </button>
+                <button onclick="document.getElementById('slot-action-modal').remove(); window.openAssignPicker('${eventId}', ${teamIndex}, ${slotIndex})" class="w-full bg-[#00F296] text-slate-950 font-bold py-3 rounded-xl text-xs transition">
+                    Change Player
+                </button>
+                <button onclick="document.getElementById('slot-action-modal').remove()" class="w-full bg-transparent text-white/40 hover:text-white py-2 text-xs">
+                    Cancel
+                </button>
+            </div>
         </div>
     `;
 };
@@ -629,9 +827,13 @@ window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     window.teamAssignments[eventId][teamIndex] = window.teamAssignments[eventId][teamIndex] || [];
 
     if (slotIndex !== null && slotIndex !== 'null') {
+        Object.entries(window.teamAssignments[eventId][teamIndex]).forEach(([sIdx, p]) => {
+            if (p && String(p.uid) === String(uid)) {
+                window.teamAssignments[eventId][teamIndex][parseInt(sIdx)] = null;
+            }
+        });
         window.teamAssignments[eventId][teamIndex][slotIndex] = player;
     } else {
-        // If added from summary/squad button without a specific pitch slot, push to roster array
         if (!window.teamAssignments[eventId][teamIndex].some(p => p && String(p.uid) === String(uid))) {
             window.teamAssignments[eventId][teamIndex].push(player);
         }
@@ -640,7 +842,9 @@ window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     event.teamAssignments = window.teamAssignments[eventId];
     try {
         await updateTeamToolFirestore(event);
-        renderTeamMakingContent();
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
     } catch (err) {
         console.error("Failed to assign player:", err);
     }
@@ -655,7 +859,9 @@ window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
     event.teamAssignments = window.teamAssignments[eventId];
     try {
         await updateTeamToolFirestore(event);
-        renderTeamMakingContent();
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
     } catch (err) {
         console.error("Failed to unassign player:", err);
     }
@@ -670,7 +876,9 @@ window.unassignPlayerFromTeamSlot = async function(eventId, teamIndex, uid) {
     event.teamAssignments = window.teamAssignments[eventId];
     try {
         await updateTeamToolFirestore(event);
-        renderTeamMakingContent();
+        if (typeof window.renderEventDetailModalContent === 'function') {
+            window.renderEventDetailModalContent();
+        }
     } catch (err) {
         console.error("Failed to remove player from team:", err);
     }

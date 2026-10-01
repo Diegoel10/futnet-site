@@ -1,7 +1,7 @@
-// js/firebase-config.js: Connects your app to Firebase
+// js/firebase-config.js: Connects your app to Firebase with forced network enablement
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, setPersistence, browserLocalPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, enableNetwork } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyCF_6foG4Y9Pq9FSbFcpKaoQNi2I_MQiAg",
@@ -16,7 +16,12 @@ const firebaseConfig = {
 export const appId = 'futnetsite-de7c3';
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = getFirestore(app, '(default)');
+
+// Force network connection on startup
+enableNetwork(db).catch((err) => {
+    console.warn("Could not enable Firestore network immediately:", err);
+});
 
 // 🛡️ Keep user logged in across page refreshes with incognito/private mode fallback
 setPersistence(auth, browserLocalPersistence).catch((error) => {

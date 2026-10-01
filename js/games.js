@@ -1,4 +1,4 @@
-// js/games.js: Manages date navigation, live Firestore listeners for individual event docs, and event copying
+// js/games.js: Manages date navigation, live Firestore listeners with connection timeout fallback
 import { db, appId } from './firebase-config.js';
 import { doc, getDoc, collection, getDocs, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -9,6 +9,7 @@ window.selectedDateStr = (() => {
 
 let eventsUnsubscribe = null;
 let directoryUnsubscribe = null;
+let initialLoadResolved = false;
 
 // 🛑 Stop active listeners upon logout to prevent permission errors
 window.stopAllLiveListeners = function() {
@@ -43,7 +44,21 @@ window.initEventsLiveListener = function() {
 
     const eventsRef = collection(db, 'artifacts', appId, 'eventsList');
 
+    // Connection timeout fallback to prevent infinite loading screen
+    const loadTimeout = setTimeout(() => {
+        if (!initialLoadResolved) {
+            initialLoadResolved = true;
+            window.eventsList = window.eventsList || [];
+            if (window.renderDateTabs) window.renderDateTabs();
+            if (window.renderEvents) window.renderEvents();
+            const splash = document.getElementById('loading-screen') || document.querySelector('.loading-screen');
+            if (splash) splash.style.display = 'none';
+        }
+    }, 2000);
+
     eventsUnsubscribe = onSnapshot(eventsRef, (snapshot) => {
+        initialLoadResolved = true;
+        clearTimeout(loadTimeout);
         const list = [];
         snapshot.forEach(docSnap => {
             const evData = docSnap.data();
@@ -61,12 +76,19 @@ window.initEventsLiveListener = function() {
         if (window.activeModalEventId && window.renderEventDetailModalContent) {
             window.renderEventDetailModalContent();
         }
+
+        const splash = document.getElementById('loading-screen') || document.querySelector('.loading-screen');
+        if (splash) splash.style.display = 'none';
     }, (error) => {
+        initialLoadResolved = true;
+        clearTimeout(loadTimeout);
         if (error.code !== 'permission-denied') {
             console.error("Error listening to events collection:", error);
         }
-        window.eventsList = [];
+        window.eventsList = window.eventsList || [];
         if (window.renderEvents) window.renderEvents();
+        const splash = document.getElementById('loading-screen') || document.querySelector('.loading-screen');
+        if (splash) splash.style.display = 'none';
     });
 };
 

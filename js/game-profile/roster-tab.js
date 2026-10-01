@@ -1,25 +1,12 @@
-// js/game-profile/roster-tab.js: Roster tab with segmented sub-tabs for Confirmed, Waitlist, and Not Going
+// js/game-profile/roster-tab.js: Roster tab with reliable avatar resolution and directory mapping
 export function renderRosterTab(event) {
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
     
-    // Maintain active sub-tab state globally per modal session
     window.activeRosterSubTab = window.activeRosterSubTab !== undefined ? window.activeRosterSubTab : 0;
 
     const confirmedList = attendees.filter(a => (a.status || 'confirmed') === 'confirmed');
     const waitlistList = attendees.filter(a => a.status === 'waitlist');
     const declinedList = attendees.filter(a => a.status === 'cancelled' || a.status === 'not_going');
-
-    const formatMatch = (event.format || "").match(/(\d+)/);
-    const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
-    
-    let teamsCountNum = 3;
-    if (typeof event.teamsCount === 'number') {
-        teamsCountNum = event.teamsCount;
-    } else if (typeof event.teamsCount === 'string') {
-        const parsed = parseInt(event.teamsCount.match(/(\d+)/)?.[1], 10);
-        if (!isNaN(parsed)) teamsCountNum = parsed;
-    }
-    const maxCapacity = playersPerTeam * teamsCountNum;
 
     let totalConfirmedHeads = 0;
     confirmedList.forEach(att => {
@@ -45,12 +32,28 @@ export function renderRosterTab(event) {
         }
     });
 
-    const resolveDirectoryUser = (uid) => {
-        if (!window.directoryList || !uid) return null;
-        return window.directoryList.find(u => u.uid === uid);
+    const resolveAvatar = (att) => {
+        // 1. Check direct properties on attendee object
+        if (att.avatar && att.avatar.trim() !== '' && !att.avatar.includes('dicebear.com/7.x/initials')) return att.avatar;
+        if (att.photoURL && att.photoURL.trim() !== '') return att.photoURL;
+        if (att.profilePicture && att.profilePicture.trim() !== '') return att.profilePicture;
+
+        // 2. Check global directory list by UID or Name
+        if (window.directoryList && Array.isArray(window.directoryList)) {
+            const foundDir = window.directoryList.find(u => 
+                (att.uid && String(u.uid) === String(att.uid)) || 
+                (u.name && att.name && u.name.toLowerCase() === att.name.toLowerCase())
+            );
+            if (foundDir && (foundDir.avatar || foundDir.photoURL)) {
+                return foundDir.avatar || foundDir.photoURL;
+            }
+        }
+
+        // 3. Fallback to Dicebear initials if no valid image URL exists
+        const seedName = encodeURIComponent(att.name || att.firstName || 'Player');
+        return `https://api.dicebear.com/7.x/initials/svg?seed=${seedName}`;
     };
 
-    // Determine current active list based on sub-tab index
     const currentList = window.activeRosterSubTab === 0 ? confirmedList : (window.activeRosterSubTab === 1 ? waitlistList : declinedList);
 
     return `
@@ -84,7 +87,7 @@ export function renderRosterTab(event) {
                     </button>
                 </div>
 
-                <!-- Sub-tab Content List (Fully expanded, no inner scroll box limit) -->
+                <!-- Sub-tab Content List -->
                 <div class="space-y-2.5 pr-1">
                     ${currentList.length === 0 ? `
                         <div class="text-center text-xs text-white/40 py-8">
@@ -94,10 +97,8 @@ export function renderRosterTab(event) {
 
                     ${currentList.map(att => {
                         const isPaid = att.paid === 'Paid';
-                        const dirUser = resolveDirectoryUser(att.uid);
-
-                        const safeAvatar = att.avatar || att.photoURL || att.profilePicture || att.userAvatar || dirUser?.avatar || dirUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
-                        const rawName = att.name || att.firstName || att.displayName || att.fullName || dirUser?.name || dirUser?.firstName || dirUser?.displayName || 'Player';
+                        const safeAvatar = resolveAvatar(att);
+                        const rawName = att.name || att.firstName || att.displayName || att.fullName || 'Player';
                         const safeName = rawName.replace(/'/g, "\\'");
                         const isOrganizer = att.uid === event.organizerId;
 

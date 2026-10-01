@@ -11,19 +11,19 @@ window.checkAndShowLegalModal = async function() {
         
         if (docSnap.exists()) {
             const data = docSnap.data();
-            // If they haven't accepted terms yet, show the popup
+            // If they haven't accepted terms yet, show the popup[cite: 27]
             if (!data.termsAccepted) {
                 renderLegalModal();
             }
         }
     } catch (err) {
-        console.error("Error checking legal terms status:", err);
+        console.warn("Legal terms check deferred or offline:", err.message);
     }
 };
 
 function renderLegalModal() {
     let modal = document.getElementById('legal-terms-modal');
-    if (modal) return; // already open
+    if (modal) return; // already open[cite: 27]
 
     modal = document.createElement('div');
     modal.id = 'legal-terms-modal';
@@ -60,7 +60,7 @@ function renderLegalModal() {
 
     document.body.appendChild(modal);
 
-    // Enable button only when both checkboxes are checked
+    // Enable button only when both checkboxes are checked[cite: 27]
     const termsCb = document.getElementById('accept-terms-checkbox');
     const privacyCb = document.getElementById('accept-privacy-checkbox');
     const submitBtn = document.getElementById('legal-submit-btn');
