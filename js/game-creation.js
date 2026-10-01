@@ -1,4 +1,4 @@
-// js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll
+// js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll and safe avatar handling
 import { db, appId } from './firebase-config.js';
 import { collection, doc, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -221,11 +221,18 @@ window.handleCreateEvent = async function(e) {
     const locationStr = `${parkname} (${city || 'Park'}, ${state || 'FL'})`;
     let eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-    const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim();
+    const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim() || 'Player';
     const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
-    const organizerAvatar = (window.userProfile.avatar && window.userProfile.avatar.trim() !== '') 
-        ? window.userProfile.avatar 
-        : (window.currentUser.photoURL || defaultAvatar);
+    
+    // Fallback if profile avatar is a massive base64 string that fails Firestore serialization
+    let organizerAvatar = defaultAvatar;
+    if (window.userProfile.avatar && typeof window.userProfile.avatar === 'string') {
+        if (window.userProfile.avatar.startsWith('http')) {
+            organizerAvatar = window.userProfile.avatar;
+        } else {
+            organizerAvatar = window.currentUser.photoURL || defaultAvatar;
+        }
+    }
 
     let attendees = [{
         uid: window.currentUser.uid,
@@ -266,7 +273,6 @@ window.handleCreateEvent = async function(e) {
     };
 
     try {
-        // Fixed collection path: saves directly into the top-level 'events' collection
         const eventDocRef = doc(db, 'events', eventId);
         await setDoc(eventDocRef, newEvent);
 
@@ -275,6 +281,6 @@ window.handleCreateEvent = async function(e) {
         window.switchTab('events');
     } catch (err) {
         console.error("Error saving event:", err);
-        window.showToast("Failed to save game", "error");
+        window.showToast("Failed to save game: " + (err.message || "Unknown error"), "error");
     }
 };
