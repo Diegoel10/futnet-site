@@ -636,7 +636,10 @@
 
         window.switchTab = function(tabName, pushHistory = true) {
             if (pushHistory) {
-                history.pushState({ tab: tabName }, "", `#${tabName}`);
+                const hashValue = (tabName === 'event-details-screen' && window.currentSharedEventId)
+                    ? `event=${encodeURIComponent(window.currentSharedEventId)}`
+                    : tabName;
+                history.pushState({ tab: tabName }, "", `#${hashValue}`);
             }
 
             ['events', 'create-event', 'event-details-screen', 'friends', 'hub', 'chat', 'profile'].forEach(t => {
@@ -693,6 +696,20 @@
             window.deepLinkEventId = id || null;
         })();
 
+        // Remember which game is open, so the address bar always holds a shareable link (#event=ID)
+        window.addEventListener('load', () => {
+            const original = window.openEventDetails;
+            if (typeof original !== 'function' || original.__wrapped) return;
+            const wrapped = function(eventId, ...rest) {
+                window.currentSharedEventId = eventId;
+                const result = original.call(this, eventId, ...rest);
+                try { history.replaceState(history.state, '', `#event=${encodeURIComponent(eventId)}`); } catch (e) {}
+                return result;
+            };
+            wrapped.__wrapped = true;
+            window.openEventDetails = wrapped;
+        });
+
         // 2) Logged-out visitors see a banner telling them why they need an account
         function showDeepLinkBanner() {
             if (!window.deepLinkEventId || document.getElementById('deeplink-banner')) return;
@@ -713,9 +730,6 @@
             const finish = () => {
                 window.deepLinkEventId = null;
                 try { sessionStorage.removeItem('futnet_pending_event'); } catch (e) {}
-                if (/event=/.test(window.location.hash + window.location.search)) {
-                    history.replaceState(history.state, '', window.location.pathname);
-                }
             };
             const tryOpen = () => {
                 const found = (window.eventsList || []).some(ev => String(ev.id) === String(id));
