@@ -681,6 +681,7 @@
         onAuthStateChanged(auth, async (user) => {
             window.currentUser = user;
             if (user) {
+                if (window.showAuthLoading) window.showAuthLoading('Loading profile...');
                 try {
                     const savedProfile = await window.ensureUserProfile(user);
                     if (savedProfile) {

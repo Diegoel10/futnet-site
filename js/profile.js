@@ -1,4 +1,4 @@
-// js/profile.js: Profile tab with clean CSS stadium gradient header banner, eliminating broken image placeholders
+// js/profile.js: Compact profile tab layout with optimized spacing to show more content above the fold
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -17,38 +17,38 @@ window.renderProfileTab = function() {
 
     container.innerHTML = `
         <div class="relative min-h-screen bg-[#01060A] text-white pb-24 overflow-y-auto">
-            <!-- Stadium Background Header Banner (Pure CSS Gradient & Texture) -->
-            <div class="relative h-[280px] w-full overflow-hidden bg-gradient-to-b from-[#031422] via-[#020b12] to-[#01060A] border-b border-[#00B4AE]/20">
+            <!-- Compact Stadium Header Banner -->
+            <div class="relative h-[210px] w-full overflow-hidden bg-gradient-to-b from-[#031422] via-[#020b12] to-[#01060A] border-b border-[#00B4AE]/20">
                 <div class="absolute inset-0 opacity-25 bg-[radial-gradient(#00F296_1px,transparent_1px)] [background-size:16px_16px]"></div>
 
                 <!-- Top Header: Title Only -->
-                <div class="relative z-10 px-6 pt-12 flex items-center justify-between">
-                    <h1 class="text-3xl font-black text-white tracking-wide">Profile</h1>
+                <div class="relative z-10 px-5 pt-4 flex items-center justify-between">
+                    <h1 class="text-2xl font-black text-white tracking-wide">Profile</h1>
                 </div>
 
                 <!-- Avatar & Name Header -->
-                <div class="absolute bottom-6 left-6 right-6 z-10 flex items-center gap-4">
+                <div class="absolute bottom-4 left-5 right-5 z-10 flex items-center gap-3.5">
                     <div class="relative">
-                        <img src="${avatarUrl}" class="w-20 h-20 rounded-full object-cover border-2 border-[#00B4AE] shadow-[0_0_15px_rgba(0,180,174,0.5)]">
+                        <img src="${avatarUrl}" class="w-16 h-16 rounded-full object-cover border-2 border-[#00B4AE] shadow-[0_0_15px_rgba(0,180,174,0.5)]">
                         <button onclick="openEditProfileModal()" class="absolute bottom-0 right-0 bg-black/80 p-1.5 rounded-full border border-[#00B4AE] text-white hover:bg-black transition">
-                            <i class="fa-solid fa-camera text-[10px]"></i>
+                            <i class="fa-solid fa-camera text-[9px]"></i>
                         </button>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                         <div class="flex items-center gap-2">
-                            <h2 class="text-lg font-black text-white">${fullName}</h2>
+                            <h2 class="text-base font-black text-white">${fullName}</h2>
                         </div>
                         <p class="text-xs text-white/80 font-medium">${nickname}</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Main Content Container -->
-            <div class="px-5 space-y-4 -mt-2 relative z-20">
+            <!-- Main Content Container (Shifted Up) -->
+            <div class="px-5 space-y-3 -mt-2 relative z-20">
                 <!-- 2x2 Info Grid Cards -->
-                <div class="grid grid-cols-2 gap-3.5">
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3.5 space-y-2 shadow-lg backdrop-blur-md">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
+                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
                             <i class="fa-solid fa-shield text-xs"></i>
                         </div>
                         <div>
@@ -57,8 +57,8 @@ window.renderProfileTab = function() {
                         </div>
                     </div>
 
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3.5 space-y-2 shadow-lg backdrop-blur-md">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
+                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
                             <i class="fa-solid fa-id-badge text-xs"></i>
                         </div>
                         <div>
@@ -67,8 +67,8 @@ window.renderProfileTab = function() {
                         </div>
                     </div>
 
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3.5 space-y-2 shadow-lg backdrop-blur-md">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
+                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
                             <i class="fa-solid fa-cake-candles text-xs"></i>
                         </div>
                         <div>
@@ -77,8 +77,8 @@ window.renderProfileTab = function() {
                         </div>
                     </div>
 
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3.5 space-y-2 shadow-lg backdrop-blur-md">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
+                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
                             <i class="fa-solid fa-venus-mars text-xs"></i>
                         </div>
                         <div>
@@ -89,10 +89,10 @@ window.renderProfileTab = function() {
                 </div>
 
                 <!-- My Games Button -->
-                <button onclick="toggleProfileEventsSection()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3.5 flex items-center justify-between shadow-lg transition">
+                <button onclick="toggleProfileEventsSection()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
                     <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-futbol text-sm"></i>
+                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                            <i class="fa-solid fa-futbol text-xs"></i>
                         </div>
                         <div class="text-left">
                             <div class="text-[9px] font-black text-[#00B4AE] uppercase tracking-wider">My Games</div>
@@ -112,14 +112,14 @@ window.renderProfileTab = function() {
                 </div>
 
                 <!-- Account Settings Section Header -->
-                <div class="pt-2">
+                <div class="pt-1">
                     <h3 class="text-[10px] font-black text-white/50 uppercase tracking-wider">Account Settings</h3>
                 </div>
 
                 <!-- Edit Profile Details Button -->
-                <button onclick="openEditProfileModal()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3.5 flex items-center justify-between shadow-lg transition">
+                <button onclick="openEditProfileModal()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                        <div class="w-7 h-7 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
                             <i class="fa-solid fa-pen-to-square text-xs"></i>
                         </div>
                         <span class="text-xs font-bold text-white">Edit Profile Details</span>
@@ -128,9 +128,9 @@ window.renderProfileTab = function() {
                 </button>
 
                 <!-- Log Out Button -->
-                <button id="real-logout-btn" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-orange-500/40 rounded-2xl p-3.5 flex items-center justify-between shadow-lg transition">
+                <button id="real-logout-btn" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-orange-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-xl bg-orange-500/20 flex items-center justify-center text-orange-400">
+                        <div class="w-7 h-7 rounded-xl bg-orange-500/20 flex items-center justify-center text-orange-400">
                             <i class="fa-solid fa-right-from-bracket text-xs"></i>
                         </div>
                         <span class="text-xs font-bold text-orange-400">Log Out</span>
@@ -139,9 +139,9 @@ window.renderProfileTab = function() {
                 </button>
 
                 <!-- Delete Profile Button -->
-                <button onclick="confirmDeleteAccountPrompt()" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-red-500/40 rounded-2xl p-3.5 flex items-center justify-between shadow-lg transition">
+                <button onclick="confirmDeleteAccountPrompt()" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-red-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-xl bg-red-500/20 flex items-center justify-center text-red-400">
+                        <div class="w-7 h-7 rounded-xl bg-red-500/20 flex items-center justify-center text-red-400">
                             <i class="fa-solid fa-trash-can text-xs"></i>
                         </div>
                         <span class="text-xs font-bold text-red-400">Delete Profile</span>
@@ -381,7 +381,7 @@ window.handleSaveProfile = async function(e) {
         document.getElementById('edit-profile-modal')?.remove();
         window.renderProfileTab();
     } catch (err) {
-        console.error("Failed to save profile:", err);
+        console.error("Failed to update profile:", err);
         if (typeof window.showToast === 'function') window.showToast("Failed to update profile", "error");
     }
 };

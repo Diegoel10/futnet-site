@@ -19,6 +19,22 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+// Loading screen helpers: show "Loading profile..." instead of flashing the login page
+window.showAuthLoading = function(message) {
+    const loading = document.getElementById('loading-screen');
+    const authBox = document.getElementById('auth-container');
+    const status = document.getElementById('loading-status');
+    if (status && message) status.textContent = message;
+    if (authBox) authBox.classList.add('hidden');
+    if (loading) loading.classList.remove('hidden');
+};
+window.hideAuthLoading = function() {
+    const loading = document.getElementById('loading-screen');
+    const authBox = document.getElementById('auth-container');
+    if (loading) loading.classList.add('hidden');
+    if (authBox) authBox.classList.remove('hidden');
+};
+
 window.selectedSignupAvatarUrl = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
 window.handleSignupAvatarSelection = function(event) {
@@ -81,6 +97,7 @@ window.handleEmailAuth = async function(event) {
 
     try {
         await signInWithEmailAndPassword(auth, email, password);
+        window.showAuthLoading('Loading profile...');
         if (typeof window.showToast === 'function') window.showToast("Signed in successfully!");
     } catch (err) {
         console.error("Login error:", err);
@@ -184,9 +201,11 @@ window.handleSocialAuth = async function(providerName) {
         // Popup is the most reliable option: signInWithRedirect is blocked by modern browsers
         // when the site (futnet.site) and the Firebase auth domain (firebaseapp.com) are different.
         await signInWithPopup(auth, provider);
+        window.showAuthLoading('Loading profile...');
         // onAuthStateChanged takes it from here (creates the profile if needed and opens the app)
     } catch (err) {
         console.error("Social auth error:", err.code, err.message);
+        window.hideAuthLoading();
         if (err.code === 'auth/popup-blocked') {
             try { await signInWithRedirect(auth, provider); return; } catch (e2) { err = e2; }
         }
