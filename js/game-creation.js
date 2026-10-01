@@ -1,6 +1,6 @@
 // js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll
 import { db, appId } from './firebase-config.js';
-import { collection, doc, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { collection, doc, setDoc, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 let cachedParks = [];
 let isParksLoaded = false;
@@ -221,10 +221,11 @@ window.handleCreateEvent = async function(e) {
     const locationStr = `${parkname} (${city || 'Park'}, ${state || 'FL'})`;
     let eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-    const organizerName = `${window.userProfile?.firstName || ''} ${window.userProfile?.lastName || ''}`.trim() || 'Player';
-    
-    // Always use a safe web URL avatar for the event document to prevent Firestore 1MB size limit errors
-    const organizerAvatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(organizerName)}`;
+    const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim();
+    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const organizerAvatar = (window.userProfile.avatar && window.userProfile.avatar.trim() !== '') 
+        ? window.userProfile.avatar 
+        : (window.currentUser.photoURL || defaultAvatar);
 
     let attendees = [{
         uid: window.currentUser.uid,
@@ -265,7 +266,7 @@ window.handleCreateEvent = async function(e) {
     };
 
     try {
-        const eventDocRef = doc(db, 'events', eventId);
+        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
         await setDoc(eventDocRef, newEvent);
 
         window.resetCreateGameForm();
@@ -273,6 +274,6 @@ window.handleCreateEvent = async function(e) {
         window.switchTab('events');
     } catch (err) {
         console.error("Error saving event:", err);
-        window.showToast("Failed to save game: " + (err.message || "Unknown error"), "error");
+        window.showToast("Failed to save game", "error");
     }
 };
