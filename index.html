@@ -19,6 +19,12 @@
                 font-size: 16px !important;
             }
         }
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #040E13 url('img/GamesBackground.png') center top / cover no-repeat fixed !important;
+            min-height: 100vh;
+        }
     </style>
     <script>
         tailwind.config = {
@@ -38,10 +44,10 @@
         }
     </script>
 </head>
-<body class="bg-slate-950 text-white font-sans antialiased min-h-screen flex flex-col pb-20 md:pb-0" style="background: #040E13 url('img/GamesBackground.png') center/cover no-repeat fixed;">
+<body class="text-white font-sans antialiased min-h-screen flex flex-col pb-20 md:pb-0">
 
-    <!-- Dark Gradient Overlay for Immersive Stadium Look -->
-    <div class="fixed inset-0 bg-gradient-to-b from-black/60 via-black/70 to-black/90 pointer-events-none z-0"></div>
+    <!-- Lighter Top Gradient Overlay so Stadium Background Shines Through Top Nav -->
+    <div class="fixed inset-0 bg-gradient-to-b from-black/20 via-black/50 to-black/90 pointer-events-none z-0"></div>
 
     <!-- Notification Toast Container -->
     <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col space-y-3 pointer-events-none"></div>
@@ -249,8 +255,8 @@
 
         <!-- MAIN DASHBOARD CONTAINER -->
         <div id="main-container" class="hidden flex-1 flex flex-col">
-            <!-- Desktop Header Bar with Split Logo -->
-            <header class="bg-[#040E13]/90 border-b border-emerald-500/30 px-6 py-4 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md shadow-lg">
+            <!-- Desktop Header Bar with Split Logo (Transparent background so stadium background shows through at top) -->
+            <header class="bg-transparent border-b border-emerald-500/30 px-6 py-4 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md shadow-lg">
                 <div class="flex items-center space-x-1">
                     <img src="img/FutnetJustLogo.png" alt="FutNet Icon" class="h-[38px] object-contain">
                     <img src="img/FutnetJustText.png" alt="FutNet Text" class="h-[40px] object-contain" style="mix-blend-mode: screen;">
@@ -304,181 +310,182 @@
                 <div id="tab-event-details-screen" class="hidden space-y-6"></div>
 
                 <!-- FULL SCREEN: CREATE GAME (2-STEP WIZARD) -->
-                <div id="tab-create-event" class="hidden max-w-lg mx-auto bg-[#040E13]/95 border border-emerald-500/50 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-md space-y-5">
-                    <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-[#00F296] text-lg shadow-[0_0_10px_rgba(0,242,150,0.3)]">
-                                <i class="fa-solid fa-futbol"></i>
-                            </div>
+                <div id="tab-create-event" class="hidden space-y-6">
+                    <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 rounded-3xl p-5 shadow-lg flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <button onclick="switchTab('events')" class="w-10 h-10 bg-black/50 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition">
+                                <i class="fa-solid fa-chevron-left"></i>
+                            </button>
                             <div>
                                 <h2 id="create-step-title" class="text-base sm:text-lg font-black text-white">Create New Soccer Game</h2>
                                 <p id="create-step-subtitle" class="text-white/70 text-[11px] font-medium">Step 1 of 2: Fill out basic match details.</p>
                             </div>
                         </div>
-                        <button onclick="switchTab('events')" class="text-white/50 hover:text-white text-sm font-bold w-8 h-8 rounded-full bg-black/40 flex items-center justify-center border border-white/10"><i class="fa-solid fa-xmark"></i></button>
                     </div>
 
-                    <form onsubmit="handleCreateEvent(event)" class="space-y-4">
-                        
-                        <!-- STEP 1: Core Details -->
-                        <div id="create-step-1" class="space-y-4">
+                    <div class="max-w-lg mx-auto bg-[#040E13]/95 border border-emerald-500/50 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-md space-y-5">
+                        <form onsubmit="handleCreateEvent(event)" class="space-y-4">
                             
-                            <!-- Title -->
-                            <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-1.5">
-                                <label class="block text-[10px] font-black text-white/60 tracking-wider">🏆 GAME / EVENT TITLE (OPTIONAL)</label>
-                                <input type="text" id="ce-title" placeholder="Soccer pick-up (default)" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
-                            </div>
-
-                            <!-- Visibility -->
-                            <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-2">
-                                <label class="block text-[10px] font-black text-white/60 tracking-wider">👁 GAME VISIBILITY</label>
-                                <input type="hidden" id="ce-visibility" value="Public">
-                                <div class="flex gap-3">
-                                    <button type="button" id="vis-btn-public" onclick="setVisibilityOption('Public')" class="flex-1 flex items-center space-x-2.5 p-3 rounded-2xl transition bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-bold shadow-md">
-                                        <i class="fa-solid fa-globe text-sm"></i>
-                                        <div class="text-left leading-tight">
-                                            <div class="text-xs font-black">Public</div>
-                                            <div class="text-[9px] opacity-80">Anyone can see and join</div>
-                                        </div>
-                                    </button>
-                                    <button type="button" id="vis-btn-private" onclick="setVisibilityOption('Private')" class="flex-1 flex items-center space-x-2.5 p-3 rounded-2xl transition bg-black/40 text-white hover:bg-black/60 border border-white/10">
-                                        <i class="fa-solid fa-lock text-sm"></i>
-                                        <div class="text-left leading-tight">
-                                            <div class="text-xs font-black">Private</div>
-                                            <div class="text-[9px] opacity-60">Invite only</div>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Date & Time -->
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="bg-black/30 p-3.5 rounded-2xl border border-white/10 space-y-1.5">
-                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">📅 DATE</label>
-                                    <input type="date" id="ce-date" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
-                                </div>
-                                <div class="bg-black/30 p-3.5 rounded-2xl border border-white/10 space-y-1.5">
-                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">⏰ TIME</label>
-                                    <input type="time" id="ce-time" value="20:00" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
-                                </div>
-                            </div>
-
-                            <!-- Park & Location -->
-                            <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-3">
-                                <label class="block text-[10px] font-black text-[#00F296] tracking-wider">📍 PARK & LOCATION *</label>
-                                <div class="relative">
-                                    <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Enter park name (Required)" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2.5 text-white text-base sm:text-xs focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
-                                    <i class="fa-solid fa-location-dot absolute left-3 top-3 text-[#00F296] text-xs"></i>
-                                </div>
-                                <input type="hidden" id="ce-parkname">
-                                <div class="grid grid-cols-3 gap-2">
-                                    <div class="col-span-2">
-                                        <label class="block text-[9px] font-black text-[#00F296] mb-1">CITY *</label>
-                                        <input type="text" id="ce-city" placeholder="City" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
-                                    </div>
-                                    <div>
-                                        <label class="block text-[9px] font-black text-white/60 mb-1">STATE</label>
-                                        <input type="text" id="ce-state" value="FL" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Teams, Format, Fee -->
-                            <div class="grid grid-cols-3 gap-2.5">
-                                <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
-                                    <label class="block text-[9px] font-black text-white/60 mb-1">👥 TEAMS</label>
-                                    <select id="ce-teams-count" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
-                                        <option value="2">2 Teams</option>
-                                        <option value="3" selected>3 Teams</option>
-                                        <option value="4">4 Teams</option>
-                                    </select>
-                                </div>
-                                <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
-                                    <label class="block text-[9px] font-black text-white/60 mb-1">⚽ FORMAT</label>
-                                    <select id="ce-format" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
-                                        <option value="5v5">5v5</option>
-                                        <option value="7v7" selected>7v7</option>
-                                        <option value="8v8">8v8</option>
-                                        <option value="11v11">11v11</option>
-                                    </select>
-                                </div>
-                                <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
-                                    <label class="block text-[9px] font-black text-white/60 mb-1">💵 FEE</label>
-                                    <select id="ce-fee" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
-                                        <option value="Free" selected>Free</option>
-                                        <option value="$5">$5</option>
-                                        <option value="$6">$6</option>
-                                        <option value="$7">$7</option>
-                                        <option value="$8">$8</option>
-                                        <option value="$10">$10</option>
-                                        <option value="$12">$12</option>
-                                        <option value="$15">$15</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <!-- Next Step Button -->
-                            <button type="button" onclick="setCreationStep(2)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl transition text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
-                                <span>Next: Description & Rules</span>
-                                <i class="fa-solid fa-arrow-right"></i>
-                            </button>
-                        </div>
-
-                        <!-- STEP 2: Description, Rules & Plus Ones -->
-                        <div id="create-step-2" class="hidden space-y-4">
-                            
-                            <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-4">
+                            <!-- STEP 1: Core Details -->
+                            <div id="create-step-1" class="space-y-4">
                                 
-                                <!-- Description -->
-                                <div class="space-y-1">
-                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">📝 DESCRIPTION</label>
-                                    <textarea id="ce-description" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Friendly match, bring light/dark shirts..."></textarea>
+                                <!-- Title -->
+                                <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-1.5">
+                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">🏆 GAME / EVENT TITLE (OPTIONAL)</label>
+                                    <input type="text" id="ce-title" placeholder="Soccer pick-up (default)" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;">
                                 </div>
 
-                                <!-- Rules -->
-                                <div class="space-y-1">
-                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">📜 RULES</label>
-                                    <textarea id="ce-rules" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="No sliding tackles, respect referee calls..."></textarea>
-                                </div>
-
-                                <!-- Plus Ones -->
-                                <div class="space-y-2 pt-1">
-                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">➕ ALLOW PLUS ONES?</label>
-                                    <input type="hidden" id="ce-allow-plus-ones" value="no">
-                                    <div class="flex bg-black/40 p-1 rounded-xl border border-white/10">
-                                        <button type="button" id="plus-btn-no" onclick="setPlusOnesOption('no')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-[#00F296] text-slate-950 shadow">No</button>
-                                        <button type="button" id="plus-btn-yes" onclick="setPlusOnesOption('yes')" class="flex-1 py-2 rounded-lg text-xs font-bold text-white hover:text-white/90">Yes</button>
+                                <!-- Visibility -->
+                                <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-2">
+                                    <label class="block text-[10px] font-black text-white/60 tracking-wider">👁 GAME VISIBILITY</label>
+                                    <input type="hidden" id="ce-visibility" value="Public">
+                                    <div class="flex gap-3">
+                                        <button type="button" id="vis-btn-public" onclick="setVisibilityOption('Public')" class="flex-1 flex items-center space-x-2.5 p-3 rounded-2xl transition bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-bold shadow-md">
+                                            <i class="fa-solid fa-globe text-sm"></i>
+                                            <div class="text-left leading-tight">
+                                                <div class="text-xs font-black">Public</div>
+                                                <div class="text-[9px] opacity-80">Anyone can see and join</div>
+                                            </div>
+                                        </button>
+                                        <button type="button" id="vis-btn-private" onclick="setVisibilityOption('Private')" class="flex-1 flex items-center space-x-2.5 p-3 rounded-2xl transition bg-black/40 text-white hover:bg-black/60 border border-white/10">
+                                            <i class="fa-solid fa-lock text-sm"></i>
+                                            <div class="text-left leading-tight">
+                                                <div class="text-xs font-black">Private</div>
+                                                <div class="text-[9px] opacity-60">Invite only</div>
+                                            </div>
+                                        </button>
                                     </div>
+                                </div>
 
-                                    <div id="plus-one-limit-box" class="hidden pt-2 flex items-center justify-between text-xs text-white/80">
-                                        <span>Max Plus Ones Limit:</span>
-                                        <select id="ce-plus-one-limit" class="bg-black/50 border border-teal-500/50 rounded-lg px-3 py-1.5 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
-                                            <option value="1">1</option>
-                                            <option value="2">2</option>
-                                            <option value="3">3</option>
-                                            <option value="4">4</option>
-                                            <option value="5">5</option>
-                                            <option value="6">6</option>
+                                <!-- Date & Time -->
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="bg-black/30 p-3.5 rounded-2xl border border-white/10 space-y-1.5">
+                                        <label class="block text-[10px] font-black text-white/60 tracking-wider">📅 DATE</label>
+                                        <input type="date" id="ce-date" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    </div>
+                                    <div class="bg-black/30 p-3.5 rounded-2xl border border-white/10 space-y-1.5">
+                                        <label class="block text-[10px] font-black text-white/60 tracking-wider">⏰ TIME</label>
+                                        <input type="time" id="ce-time" value="20:00" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand cursor-pointer" style="background-color: #000000 !important; color: #ffffff !important;">
+                                    </div>
+                                </div>
+
+                                <!-- Park & Location -->
+                                <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-3">
+                                    <label class="block text-[10px] font-black text-[#00F296] tracking-wider">📍 PARK & LOCATION *</label>
+                                    <div class="relative">
+                                        <input type="text" id="ce-park-search" oninput="handleParkSearchInput(this.value)" placeholder="Enter park name (Required)" required class="w-full bg-black/50 border border-teal-500/60 rounded-xl pl-9 pr-3 py-2.5 text-white text-base sm:text-xs focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
+                                        <i class="fa-solid fa-location-dot absolute left-3 top-3 text-[#00F296] text-xs"></i>
+                                    </div>
+                                    <input type="hidden" id="ce-parkname">
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <div class="col-span-2">
+                                            <label class="block text-[9px] font-black text-[#00F296] mb-1">CITY *</label>
+                                            <input type="text" id="ce-city" placeholder="City" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[9px] font-black text-white/60 mb-1">STATE</label>
+                                            <input type="text" id="ce-state" value="FL" required class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Teams, Format, Fee -->
+                                <div class="grid grid-cols-3 gap-2.5">
+                                    <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
+                                        <label class="block text-[9px] font-black text-white/60 mb-1">👥 TEAMS</label>
+                                        <select id="ce-teams-count" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="2">2 Teams</option>
+                                            <option value="3" selected>3 Teams</option>
+                                            <option value="4">4 Teams</option>
+                                        </select>
+                                    </div>
+                                    <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
+                                        <label class="block text-[9px] font-black text-white/60 mb-1">⚽ FORMAT</label>
+                                        <select id="ce-format" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="5v5">5v5</option>
+                                            <option value="7v7" selected>7v7</option>
+                                            <option value="8v8">8v8</option>
+                                            <option value="11v11">11v11</option>
+                                        </select>
+                                    </div>
+                                    <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
+                                        <label class="block text-[9px] font-black text-white/60 mb-1">💵 FEE</label>
+                                        <select id="ce-fee" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="Free" selected>Free</option>
+                                            <option value="$5">$5</option>
+                                            <option value="$6">$6</option>
+                                            <option value="$7">$7</option>
+                                            <option value="$8">$8</option>
+                                            <option value="$10">$10</option>
+                                            <option value="$12">$12</option>
+                                            <option value="$15">$15</option>
                                         </select>
                                     </div>
                                 </div>
 
-                            </div>
-
-                            <!-- Back and Create Game Buttons -->
-                            <div class="flex gap-3 pt-2">
-                                <button type="button" onclick="setCreationStep(1)" class="flex-1 bg-black/50 hover:bg-black text-white font-bold py-3.5 rounded-2xl transition text-xs border border-white/20 flex items-center justify-center space-x-2">
-                                    <i class="fa-solid fa-arrow-left"></i>
-                                    <span>Back</span>
-                                </button>
-                                <button type="submit" class="flex-[2] bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl transition text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
-                                    <i class="fa-solid fa-paper-plane"></i>
-                                    <span>Create Game</span>
+                                <!-- Next Step Button -->
+                                <button type="button" onclick="setCreationStep(2)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl transition text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
+                                    <span>Next: Description & Rules</span>
+                                    <i class="fa-solid fa-arrow-right"></i>
                                 </button>
                             </div>
-                        </div>
 
-                    </form>
+                            <!-- STEP 2: Description, Rules & Plus Ones -->
+                            <div id="create-step-2" class="hidden space-y-4">
+                                
+                                <div class="bg-black/30 p-4 rounded-2xl border border-white/10 space-y-4">
+                                    
+                                    <!-- Description -->
+                                    <div class="space-y-1">
+                                        <label class="block text-[10px] font-black text-white/60 tracking-wider">📝 DESCRIPTION</label>
+                                        <textarea id="ce-description" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Friendly match, bring light/dark shirts..."></textarea>
+                                    </div>
+
+                                    <!-- Rules -->
+                                    <div class="space-y-1">
+                                        <label class="block text-[10px] font-black text-white/60 tracking-wider">📜 RULES</label>
+                                        <textarea id="ce-rules" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="No sliding tackles, respect referee calls..."></textarea>
+                                    </div>
+
+                                    <!-- Plus Ones -->
+                                    <div class="space-y-2 pt-1">
+                                        <label class="block text-[10px] font-black text-white/60 tracking-wider">➕ ALLOW PLUS ONES?</label>
+                                        <input type="hidden" id="ce-allow-plus-ones" value="no">
+                                        <div class="flex bg-black/40 p-1 rounded-xl border border-white/10">
+                                            <button type="button" id="plus-btn-no" onclick="setPlusOnesOption('no')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-[#00F296] text-slate-950 shadow">No</button>
+                                            <button type="button" id="plus-btn-yes" onclick="setPlusOnesOption('yes')" class="flex-1 py-2 rounded-lg text-xs font-bold text-white hover:text-white/90">Yes</button>
+                                        </div>
+
+                                        <div id="plus-one-limit-box" class="hidden pt-2 flex items-center justify-between text-xs text-white/80">
+                                            <span>Max Plus Ones Limit:</span>
+                                            <select id="ce-plus-one-limit" class="bg-black/50 border border-teal-500/50 rounded-lg px-3 py-1.5 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                                <option value="1">1</option>
+                                                <option value="2">2</option>
+                                                <option value="3">3</option>
+                                                <option value="4">4</option>
+                                                <option value="5">5</option>
+                                                <option value="6">6</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                <!-- Back and Create Game Buttons -->
+                                <div class="flex gap-3 pt-2">
+                                    <button type="button" onclick="setCreationStep(1)" class="flex-1 bg-black/50 hover:bg-black text-white font-bold py-3.5 rounded-2xl transition text-xs border border-white/20 flex items-center justify-center space-x-2">
+                                        <i class="fa-solid fa-arrow-left"></i>
+                                        <span>Back</span>
+                                    </button>
+                                    <button type="submit" class="flex-[2] bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl transition text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
+                                        <i class="fa-solid fa-paper-plane"></i>
+                                        <span>Create Game</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                        </form>
+                    </div>
                 </div>
 
                 <!-- TAB 2: FRIENDS & SQUAD -->
@@ -628,7 +635,11 @@
             window.showToast("Community creation hub coming online!");
         };
 
-        window.switchTab = function(tabName) {
+        window.switchTab = function(tabName, pushHistory = true) {
+            if (pushHistory) {
+                history.pushState({ tab: tabName }, "", `#${tabName}`);
+            }
+
             ['events', 'create-event', 'event-details-screen', 'friends', 'hub', 'chat', 'profile'].forEach(t => {
                 const el = document.getElementById(`tab-${t}`);
                 if (el) el.classList.toggle('hidden', t !== tabName);
@@ -662,6 +673,11 @@
             if (tabName === 'chat' && window.renderChatsList) window.renderChatsList();
             if (tabName === 'profile' && window.renderProfileTab) window.renderProfileTab();
         };
+
+        window.addEventListener('popstate', (event) => {
+            const targetTab = event.state?.tab || 'events';
+            window.switchTab(targetTab, false);
+        });
 
         window.handleSocialAuth = async function(providerName) {
             let provider;

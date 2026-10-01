@@ -1,26 +1,21 @@
-// js/game-profile/admin-tab.js: Clean admin tab implementation with match deletion confirmation and score/goalscorer editing
+// js/game-profile/admin-tab.js: Updated admin tab with 3 clear pill sections (Manage Event, Manage Players, Manage Matches)
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-window.adminAccordionState = window.adminAccordionState || {
-    manageEvent: false,
-    managePlayers: false,
-    manageMatches: true
-};
+window.activeGameProfileTab = window.activeGameProfileTab || 'manage-event';
 
-window.toggleAdminSection = function(sectionKey) {
-    window.adminAccordionState[sectionKey] = !window.adminAccordionState[sectionKey];
+window.switchGameProfileTab = function(tabKey) {
+    window.activeGameProfileTab = tabKey;
     if (typeof window.renderEventDetailModalContent === 'function') {
         window.renderEventDetailModalContent();
     }
 };
 
 export function renderAdminTab(event) {
-    const isSessionEnded = event.isSessionEnded || false;
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
     const waitingList = Array.isArray(event.waitingList) ? event.waitingList : [];
     const matches = Array.isArray(event.matches) ? event.matches : [];
-    const states = window.adminAccordionState;
+    const currentTab = window.activeGameProfileTab || 'manage-event';
 
     const resolvePlayerAvatar = (name) => {
         if (!name) return 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -44,14 +39,6 @@ export function renderAdminTab(event) {
         }
     });
 
-    const eventChevron = states.manageEvent ? 'fa-chevron-up' : 'fa-chevron-down';
-    const playersChevron = states.managePlayers ? 'fa-chevron-up' : 'fa-chevron-down';
-    const matchesChevron = states.manageMatches ? 'fa-chevron-up' : 'fa-chevron-down';
-
-    const eventBodyClass = states.manageEvent ? 'space-y-3 pt-3 border-t border-white/10' : 'hidden';
-    const playersBodyClass = states.managePlayers ? 'space-y-4 pt-3 border-t border-white/10' : 'hidden';
-    const matchesBodyClass = states.manageMatches ? 'space-y-3 pt-3 border-t border-white/10' : 'hidden';
-
     const attendeesHtml = attendees.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-4">No players confirmed yet.</div>'
         : attendees.map(att => {
@@ -64,7 +51,7 @@ export function renderAdminTab(event) {
             let guestsHtml = '';
             if (att.guests && att.guests.length > 0) {
                 guestsHtml = att.guests.map((g, gIdx) => `
-                    <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-lg border border-white/5">
+                    <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-xl border border-white/5">
                         <div>
                             <span class="text-white/80 font-medium">➕ ${g.name || 'Guest'}</span>
                             <span class="text-[9px] text-[#00F296] ml-1">(+1 of ${att.name || 'Player'})</span>
@@ -76,7 +63,7 @@ export function renderAdminTab(event) {
             }
 
             return `
-                <div class="bg-black/40 border border-white/10 p-3 rounded-xl space-y-2">
+                <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-3 overflow-hidden">
                             <img src="${attAvatar}" class="w-8 h-8 rounded-full object-cover bg-black border border-white/20 shrink-0">
@@ -169,75 +156,70 @@ export function renderAdminTab(event) {
             `;
         }).join('');
 
-    return `
-        <div class="space-y-4">
-            <!-- SECTION 1: MANAGE EVENT -->
-            <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-[18px] p-4 shadow-lg space-y-3">
-                <div onclick="toggleAdminSection('manageEvent')" class="flex items-center justify-between cursor-pointer">
-                    <div>
-                        <h4 class="text-xs font-black text-[#00F296] uppercase tracking-wider">MANAGE EVENT</h4>
-                        <p class="text-[10px] text-white/50">Modify title, time, rules, or venue.</p>
-                    </div>
-                    <i class="fa-solid ${eventChevron} text-white/60 text-xs"></i>
-                </div>
+    // 3 Clear Pill Navigation Tabs
+    const pillsNavHtml = `
+        <div class="flex items-center gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10 overflow-x-auto no-scrollbar">
+            <button onclick="switchGameProfileTab('manage-event')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition whitespace-nowrap ${currentTab === 'manage-event' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">
+                Manage Event
+            </button>
+            <button onclick="switchGameProfileTab('manage-players')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition whitespace-nowrap ${currentTab === 'manage-players' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">
+                Manage Players (${totalConfirmedPeople})
+            </button>
+            <button onclick="switchGameProfileTab('manage-matches')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition whitespace-nowrap ${currentTab === 'manage-matches' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">
+                Manage Matches (${matches.length})
+            </button>
+        </div>
+    `;
 
-                <div class="${eventBodyClass}">
+    let activeTabContentHtml = '';
+
+    if (currentTab === 'manage-event') {
+        activeTabContentHtml = `
+            <div class="space-y-3">
+                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <h5 class="text-xs font-black uppercase text-[#00F296]">Event Controls</h5>
                     <div class="flex flex-wrap gap-2">
-                        <button onclick="openEditEventForm('${event.id}')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-md transition">Edit Game</button>
-                        <button onclick="copyEvent('${event.id}')" class="bg-black/60 hover:bg-black text-white font-bold px-3.5 py-2 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5">
-                            <i class="fa-solid fa-copy text-[10px]"></i> Copy Event
-                        </button>
-                        <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-bold px-3 py-2 rounded-xl text-xs border border-red-500/40 transition">Cancel Game</button>
+                        <button onclick="openEditEventForm('${event.id}')" class="bg-[#00F296] text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow">Edit Game</button>
+                        <button onclick="copyEvent('${event.id}')" class="bg-black/60 text-white font-bold px-4 py-2.5 rounded-xl text-xs border border-white/20">Copy Event</button>
+                        <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl text-xs border border-red-500/40">Cancel Game</button>
                     </div>
                 </div>
             </div>
-
-            <!-- SECTION 2: MANAGE PLAYERS -->
-            <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-[18px] p-4 shadow-lg space-y-3">
-                <div onclick="toggleAdminSection('managePlayers')" class="flex items-center justify-between cursor-pointer">
-                    <div>
-                        <h4 class="text-xs font-black text-[#00B4AE] uppercase tracking-wider">MANAGE PLAYERS</h4>
-                        <p class="text-[10px] text-white/50">Add players or manage roster attendance.</p>
-                    </div>
-                    <i class="fa-solid ${playersChevron} text-white/60 text-xs"></i>
+        `;
+    } else if (currentTab === 'manage-players') {
+        activeTabContentHtml = `
+            <div class="space-y-4">
+                <button onclick="openAddPlayersScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-user-plus"></i> Add Players
+                </button>
+                <div class="space-y-2.5">
+                    ${attendeesHtml}
                 </div>
-
-                <div class="${playersBodyClass}">
-                    <button onclick="openAddPlayersScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-user-plus"></i> Add Players
-                    </button>
-
-                    <div class="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-                        <h5 class="text-[11px] font-black text-white/75 uppercase tracking-wider">Confirmed Attendees (${totalConfirmedPeople})</h5>
-                        ${attendeesHtml}
-                    </div>
-
-                    ${waitlistHtml}
-                </div>
+                ${waitlistHtml}
             </div>
-
-            <!-- SECTION 3: MANAGE MATCHES -->
-            <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-[18px] p-4 shadow-lg space-y-3">
-                <div onclick="toggleAdminSection('manageMatches')" class="flex items-center justify-between cursor-pointer">
-                    <div>
-                        <h4 class="text-xs font-black text-[#00F296] uppercase tracking-wider">MANAGE MATCHES</h4>
-                        <p class="text-[10px] text-white/50">Start live matches and record scores.</p>
-                    </div>
-                    <div class="flex items-center gap-3">
-                        <button onclick="event.stopPropagation(); toggleSessionEnded('${event.id}')" class="px-2.5 py-1 rounded-lg text-[10px] font-black ${isSessionEnded ? 'bg-amber-400 text-slate-950 shadow' : 'bg-black/60 text-white/70 border border-white/15'}">${isSessionEnded ? 'Session Ended' : 'End Session'}</button>
-                        <i class="fa-solid ${matchesChevron} text-white/60 text-xs"></i>
-                    </div>
-                </div>
-
-                <div class="${matchesBodyClass}">
-                    <button onclick="openStartMatchScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
+        `;
+    } else if (currentTab === 'manage-matches') {
+        const isSessionEnded = event.isSessionEnded || false;
+        activeTabContentHtml = `
+            <div class="space-y-4">
+                <div class="flex items-center justify-between gap-2">
+                    <button onclick="openStartMatchScreen('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
                         <i class="fa-solid fa-play"></i> Start Match
                     </button>
-
-                    <div class="space-y-3 pt-1">
-                        ${matchesListHtml}
-                    </div>
+                    <button onclick="toggleSessionEnded('${event.id}')" class="px-3 py-2.5 rounded-xl text-xs font-black ${isSessionEnded ? 'bg-amber-400 text-slate-950 shadow' : 'bg-black/60 text-white/70 border border-white/15'}">${isSessionEnded ? 'Session Ended' : 'End Session'}</button>
                 </div>
+                <div class="space-y-3">
+                    ${matchesListHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="space-y-4">
+            ${pillsNavHtml}
+            <div>
+                ${activeTabContentHtml}
             </div>
         </div>
     `;
@@ -387,7 +369,6 @@ window.openEditMatchModal = function(eventId, matchIndex) {
     const t2Goals = Array.isArray(match.team2Goals) ? [...match.team2Goals] : [];
     const isFinished = match.isFinished !== undefined ? match.isFinished : true;
 
-    // Helper to get players assigned to teamName from teamAssignments
     const getTeamPlayers = (teamName) => {
         let tIdx = -1;
         if (event.teamNames) {
@@ -396,7 +377,6 @@ window.openEditMatchModal = function(eventId, matchIndex) {
         if (tIdx !== undefined && tIdx !== -1 && event.teamAssignments && event.teamAssignments[tIdx]) {
             return event.teamAssignments[tIdx].filter(p => p && p.name);
         }
-        // Fallback to attendees if team assignment not mapped
         return (event.attendees || []).map(a => ({ name: a.name || 'Player', avatar: a.avatar || a.photoURL }));
     };
 
@@ -414,17 +394,15 @@ window.openEditMatchModal = function(eventId, matchIndex) {
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 text-white shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 class="text-sm font-black uppercase text-white">✏️ Edit Match Result</h3>
+                <h3 class="text-sm font-black uppercase text-white">✏️️ Edit Match Result</h3>
                 <button onclick="document.getElementById('edit-match-admin-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
-            <!-- Match Status Toggle -->
             <div class="flex items-center justify-between bg-black/50 p-3 rounded-2xl border border-white/10">
                 <span class="text-xs font-bold text-white/80">Match Status for Stats:</span>
                 <button type="button" onclick="window._editMatchIsFinished = !window._editMatchIsFinished; this.innerText = window._editMatchIsFinished ? 'Ended' : 'Pending'; this.className = window._editMatchIsFinished ? 'px-3 py-1 rounded-xl text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'px-3 py-1 rounded-xl text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/40';" class="px-3 py-1 rounded-xl text-xs font-black ${isFinished ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">${isFinished ? 'Ended' : 'Pending'}</button>
             </div>
 
-            <!-- Team A Section -->
             <div class="bg-black/40 border border-emerald-500/30 rounded-2xl p-4 space-y-3">
                 <div class="flex justify-between items-center text-xs font-black text-[#00F296]">
                     <span>${teamA} Goals (${t1Goals.length})</span>
@@ -446,7 +424,6 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                 </div>
             </div>
 
-            <!-- Team B Section -->
             <div class="bg-black/40 border border-red-500/30 rounded-2xl p-4 space-y-3">
                 <div class="flex justify-between items-center text-xs font-black text-red-400">
                     <span>${teamB} Goals (${t2Goals.length})</span>
@@ -501,7 +478,6 @@ window.addGoalToEditMatch = function(eventId, teamKey) {
         window._editMatchState.team2Goals.push(scorerName);
     }
     
-    // Re-render modal inner lists
     refreshEditMatchModalUI(eventId);
 };
 
@@ -517,8 +493,6 @@ window.removeGoalFromEditMatch = function(eventId, teamKey, gIdx) {
 function refreshEditMatchModalUI(eventId) {
     const t1Goals = window._editMatchState.team1Goals;
     const t2Goals = window._editMatchState.team2Goals;
-    const t1Players = window._editMatchCurrentPlayers.A;
-    const t2Players = window._editMatchCurrentPlayers.B;
 
     const listA = document.getElementById('edit-match-scorers-list-A');
     const listB = document.getElementById('edit-match-scorers-list-B');

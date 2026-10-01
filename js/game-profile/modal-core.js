@@ -99,57 +99,59 @@ window.renderEventDetailModalContent = function() {
     const isFull = totalConfirmed >= maxCapacity;
     const rosterDisplayLabel = isFull ? "Roster (Full)" : `Roster (${totalConfirmed})`;
 
+    const safeTitle = (event.title || 'Soccer Match').replace(/'/g, "\\'");
+    const safeDate = (event.date || '').replace(/'/g, "\\'");
+    const safeLocation = (event.location || '').replace(/'/g, "\\'");
+
     container.innerHTML = `
-        <div class="max-w-4xl mx-auto space-y-6 pb-12 text-slate-900">
-            <!-- Top Navigation / Back Bar (Not Sticky) -->
-            <div class="bg-white/95 backdrop-blur-md border border-slate-200 rounded-3xl p-6 shadow-md flex items-center justify-between">
-                <div class="flex items-center gap-4">
-                    <button onclick="closeEventModal()" class="w-10 h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full flex items-center justify-center font-bold transition">
-                        <i class="fa-solid fa-arrow-left"></i>
+        <div class="space-y-4 text-white">
+            <!-- Compact Top Bar -->
+            <div class="bg-[#040E13]/80 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between">
+                <div class="flex items-center gap-3 overflow-hidden">
+                    <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
+                        <i class="fa-solid fa-chevron-left text-xs"></i>
                     </button>
-                    <div>
-                        <div class="flex items-center gap-2 mb-1">
-                            <h2 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900">${event.title}</h2>
-                            <span class="px-2.5 py-0.5 bg-brand/10 text-brand font-black text-[10px] rounded-full uppercase tracking-wider border border-brand/30">${event.visibility || 'Public'}</span>
+                    <div class="truncate">
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-sm font-black tracking-tight text-white truncate">${event.title}</h2>
+                            <span class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-black text-[9px] rounded-full uppercase tracking-wider border border-emerald-500/40 shrink-0">${event.visibility || 'Public'}</span>
                         </div>
-                        <p class="text-xs text-slate-500 flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-brand"></i> ${event.location}</p>
+                        <p class="text-[10px] text-white/60 truncate flex items-center gap-1 mt-0.5"><i class="fa-solid fa-location-dot text-[#00F296]"></i> ${event.location}</p>
                     </div>
                 </div>
 
-                <div class="flex items-center gap-2">
-                    <!-- Yellow Share Button -->
+                <div class="flex items-center gap-2 shrink-0">
+                    <!-- Share Button & Dropdown -->
                     <div class="relative">
-                        <button onclick="toggleShareDropdown()" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 shadow transition">
-                            <i class="fa-solid fa-share-nodes"></i> Share
+                        <button onclick="toggleShareDropdown()" class="w-8 h-8 bg-black/60 hover:bg-black text-[#00F296] rounded-full flex items-center justify-center font-bold border border-[#00F296]/40 transition shadow-[0_0_10px_rgba(0,242,150,0.2)]" title="Share Game">
+                            <i class="fa-solid fa-share-nodes text-xs"></i>
                         </button>
-                        <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 w-48 py-2 divide-y divide-slate-100 text-xs">
-                            <button onclick="shareToWhatsApp('${event.title.replace(/'/g, "\\'")}', '${event.location.replace(/'/g, "\\'")}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-2.5">
-                                <i class="fa-brands fa-whatsapp text-emerald-500 text-base"></i> WhatsApp
+                        <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-50 w-48 py-2 divide-y divide-white/10 text-xs">
+                            <button onclick="shareToWhatsApp('${safeTitle}', '${safeLocation}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                                <i class="fa-brands fa-whatsapp text-emerald-400 text-base"></i> WhatsApp
                             </button>
-                            <button onclick="shareToTwitter('${event.title.replace(/'/g, "\\'")}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-2.5">
-                                <i class="fa-brands fa-x-twitter text-black text-base"></i> X (Twitter)
+                            <button onclick="shareToTwitter('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                                <i class="fa-brands fa-x-twitter text-white text-base"></i> X (Twitter)
                             </button>
-                            <button onclick="copyEventLink('${event.title}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-2.5">
-                                <i class="fa-solid fa-link text-brand text-base"></i> Copy Link
+                            <button onclick="copyEventLink('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                                <i class="fa-solid fa-link text-[#00F296] text-base"></i> Copy Link
                             </button>
                         </div>
                     </div>
-
-                    ${isCreator ? `<button onclick="copyEvent('${event.id}')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold px-3 py-2 rounded-xl text-xs hidden sm:flex items-center gap-1.5"><i class="fa-solid fa-copy"></i> Copy</button>` : ''}
                 </div>
             </div>
 
             <!-- Navigation Tabs Bar -->
-            <div class="bg-white border border-slate-200 p-2 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-sm">
-                ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition ${tab === 'admin' ? 'bg-brand text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
-                <button onclick="switchModalTab('info')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition ${tab === 'info' ? 'bg-brand text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900'}">Game Info</button>
-                <button onclick="switchModalTab('roster')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition ${tab === 'roster' ? 'bg-brand text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900'}">${rosterDisplayLabel}</button>
-                <button onclick="switchModalTab('stats')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition ${tab === 'stats' ? 'bg-brand text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900'}">Game Stats</button>
-                <button onclick="switchModalTab('comments')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition ${tab === 'comments' ? 'bg-brand text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900'}">Comments (${commentsCount})</button>
+            <div class="bg-black/40 border border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
+                ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
+                <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
+                <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
+                <button onclick="switchModalTab('stats')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'stats' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Stats</button>
+                <button onclick="switchModalTab('comments')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'comments' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Comments (${commentsCount})</button>
             </div>
 
             <!-- Tab Content Routing Container -->
-            <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
+            <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
                 ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
                 ${tab === 'info' ? renderInfoTab(event) : ''}
                 ${tab === 'roster' ? renderRosterTab(event) : ''}
@@ -177,7 +179,7 @@ window.openJoinGameModal = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'join-guests-modal';
-        modal.className = 'fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
+        modal.className = 'fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md';
         document.body.appendChild(modal);
     }
 
@@ -186,28 +188,28 @@ window.openJoinGameModal = function(eventId) {
     window._activeJoiningEventId = eventId;
 
     modal.innerHTML = `
-        <div class="bg-white rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl text-slate-900 text-center animate-in fade-in zoom-in duration-200">
-            <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-                <h3 class="text-xs font-black uppercase text-slate-900">Joining: ${event.title}</h3>
-                <button onclick="document.getElementById('join-guests-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl text-white text-center">
+            <div class="flex justify-between items-center border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase text-white">Joining: ${event.title}</h3>
+                <button onclick="document.getElementById('join-guests-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
             <div class="space-y-3 py-2">
-                <h4 class="text-sm font-black text-slate-800">Bringing guests?</h4>
-                <p class="text-[11px] text-slate-500">You can bring up to ${maxGuests} guest(s).</p>
+                <h4 class="text-sm font-black text-white">Bringing guests?</h4>
+                <p class="text-[11px] text-white/60">You can bring up to ${maxGuests} guest(s).</p>
                 
                 <div class="flex items-center justify-center gap-6 pt-2">
-                    <button type="button" onclick="window.updateJoinGuestCount(-1)" class="w-10 h-10 bg-slate-100 hover:bg-slate-200 text-slate-800 font-black rounded-xl text-base transition flex items-center justify-center shadow-sm">
+                    <button type="button" onclick="window.updateJoinGuestCount(-1)" class="w-10 h-10 bg-black/60 hover:bg-black text-white font-black rounded-xl text-base transition flex items-center justify-center border border-white/20">
                         <i class="fa-solid fa-minus"></i>
                     </button>
-                    <span id="join-guest-count-display" class="text-3xl font-black text-slate-900 w-12 text-center">0</span>
-                    <button type="button" onclick="window.updateJoinGuestCount(1)" class="w-10 h-10 bg-slate-100 hover:bg-slate-200 text-slate-800 font-black rounded-xl text-base transition flex items-center justify-center shadow-sm">
+                    <span id="join-guest-count-display" class="text-3xl font-black text-white w-12 text-center">0</span>
+                    <button type="button" onclick="window.updateJoinGuestCount(1)" class="w-10 h-10 bg-black/60 hover:bg-black text-white font-black rounded-xl text-base transition flex items-center justify-center border border-white/20">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                 </div>
             </div>
 
-            <button type="button" onclick="window.proceedToGuestNamesStep()" class="w-full bg-brand hover:bg-brand-dark text-slate-950 font-black py-3 rounded-xl text-xs shadow transition uppercase tracking-wider">
+            <button type="button" onclick="window.proceedToGuestNamesStep()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition uppercase tracking-wider">
                 Confirm & Continue
             </button>
         </div>
@@ -240,22 +242,22 @@ window.proceedToGuestNamesStep = function() {
 
     if (!modal) return;
     modal.innerHTML = `
-        <div class="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-slate-900 text-left animate-in fade-in zoom-in duration-200">
-            <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-                <h3 class="text-xs font-black uppercase text-slate-900">Enter Guest Names (${count})</h3>
-                <button onclick="document.getElementById('join-guests-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-left">
+            <div class="flex justify-between items-center border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase text-white">Enter Guest Names (${count})</h3>
+                <button onclick="document.getElementById('join-guests-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
             <div id="guest-names-inputs-container" class="space-y-3 max-h-52 overflow-y-auto pr-1">
                 ${Array.from({ length: count }, (_, i) => `
                     <div>
-                        <label class="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Guest #${i + 1} Name</label>
-                        <input type="text" id="guest-name-input-${i}" placeholder="Enter full name..." required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-brand font-medium">
+                        <label class="block text-[10px] font-black uppercase tracking-wider text-white/60 mb-1">Guest #${i + 1} Name</label>
+                        <input type="text" id="guest-name-input-${i}" placeholder="Enter full name..." required class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-brand font-medium" style="background-color: #000000 !important; color: #ffffff !important;">
                     </div>
                 `).join('')}
             </div>
 
-            <button type="button" onclick="window.submitJoinGameWithGuestNames('${eventId}', ${count})" class="w-full bg-brand hover:bg-brand-dark text-slate-950 font-black py-3 rounded-xl text-xs shadow transition uppercase tracking-wider text-center">
+            <button type="button" onclick="window.submitJoinGameWithGuestNames('${eventId}', ${count})" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition uppercase tracking-wider text-center">
                 Confirm & Join Game
             </button>
         </div>
@@ -294,7 +296,6 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
     event.waitingList = event.waitingList || [];
     event.declinedList = event.declinedList || [];
 
-    // 🧹 Clean up: Automatically remove user from declined list if they join/rejoin
     event.declinedList = event.declinedList.filter(d => String(d.uid) !== String(window.currentUser.uid));
 
     const formatMatch = (event.format || "").match(/(\d+)/);
@@ -319,7 +320,7 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
 
     const profile = window.userProfile;
     const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
-    const avatarUrl = profile.avatar || window.currentUser.photoURL || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
+    const avatarUrl = profile.avatar || window.currentUser.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
     const newAttendee = {
         uid: String(window.currentUser.uid),
@@ -407,33 +408,33 @@ window.openNewGameSetupModal = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'new-game-setup-modal';
-        modal.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
+        modal.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md';
         document.body.appendChild(modal);
     }
 
     modal.innerHTML = `
-        <div class="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-slate-900">
-            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h4 class="text-sm font-black uppercase text-slate-900">⚽ Setup New Match</h4>
-                <button onclick="document.getElementById('new-game-setup-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h4 class="text-sm font-black uppercase text-white">⚽ Setup New Match</h4>
+                <button onclick="document.getElementById('new-game-setup-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Team A (Home)</label>
-                    <select id="setup-team-a" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-900">
+                    <label class="block text-xs font-bold text-white/70 uppercase mb-1">Team A (Home)</label>
+                    <select id="setup-team-a" class="w-full bg-black border border-teal-500/60 rounded-xl p-2.5 text-xs font-bold text-white" style="background-color: #000000 !important; color: #ffffff !important;">
                         ${teamOptionsHtml}
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Team B (Away)</label>
-                    <select id="setup-team-b" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-900">
+                    <label class="block text-xs font-bold text-white/70 uppercase mb-1">Team B (Away)</label>
+                    <select id="setup-team-b" class="w-full bg-black border border-teal-500/60 rounded-xl p-2.5 text-xs font-bold text-white" style="background-color: #000000 !important; color: #ffffff !important;">
                         ${teamOptionsHtml}
                     </select>
                 </div>
             </div>
             <div class="flex gap-2 pt-2">
-                <button onclick="document.getElementById('new-game-setup-modal').remove()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold transition">Cancel</button>
-                <button onclick="confirmCreateNewGame('${event.id}')" class="flex-1 bg-brand hover:bg-brand-dark text-slate-950 font-black py-2.5 rounded-xl text-xs shadow transition">Start Game</button>
+                <button onclick="document.getElementById('new-game-setup-modal').remove()" class="flex-1 bg-black/60 hover:bg-black text-white py-2.5 rounded-xl text-xs font-bold transition border border-white/20">Cancel</button>
+                <button onclick="confirmCreateNewGame('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-2.5 rounded-xl text-xs shadow">Start Game</button>
             </div>
         </div>
     `;
@@ -499,25 +500,25 @@ window.promptTeamGoal = function(eventId, mIndex, teamNum) {
     if (!picker) {
         picker = document.createElement('div');
         picker.id = 'goal-picker-modal';
-        picker.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
+        picker.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md';
         document.body.appendChild(picker);
     }
 
     picker.innerHTML = `
-        <div class="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-slate-900">
-            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h4 class="text-sm font-black uppercase text-slate-900">⚽ Goal Scorer (${targetTeamName})</h4>
-                <button onclick="document.getElementById('goal-picker-modal').remove()" class="text-slate-400 hover:text-slate-700 text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h4 class="text-sm font-black uppercase text-white">⚽ Goal Scorer (${targetTeamName})</h4>
+                <button onclick="document.getElementById('goal-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${teamPlayers.map(player => `
-                    <div onclick="selectGoalScorer('${event.id}',${mIndex}, ${teamNum}, '${(player.name || player).replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl cursor-pointer transition shadow-sm">
-                        <img src="${player.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100'}" class="w-8 h-8 rounded-full object-cover border border-slate-300 shadow-sm">
-                        <span class="text-xs font-bold text-slate-900">${player.name || player}</span>
+                    <div onclick="selectGoalScorer('${event.id}',${mIndex}, ${teamNum}, '${(player.name || player).replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black border border-white/10 hover:border-emerald-500/50 rounded-2xl cursor-pointer transition shadow-sm">
+                        <img src="${player.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shadow-sm">
+                        <span class="text-xs font-bold text-white">${player.name || player}</span>
                     </div>
                 `).join('')}
             </div>
-            <button onclick="document.getElementById('goal-picker-modal').remove()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold transition">Cancel</button>
+            <button onclick="document.getElementById('goal-picker-modal').remove()" class="w-full bg-black/60 hover:bg-black text-white py-2.5 rounded-xl text-xs font-bold transition border border-white/20">Cancel</button>
         </div>
     `;
 };
@@ -752,7 +753,7 @@ window.handleRSVPAction = async function(eventId, action) {
         if (!event.declinedList.some(d => String(d.uid) === String(window.currentUser.uid))) {
             const profile = window.userProfile || {};
             const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
-            event.declinedList.path({ uid: String(window.currentUser.uid), name: fullName });
+            event.declinedList.push({ uid: String(window.currentUser.uid), name: fullName });
         }
         window.showToast("You have left the game.");
         await updateEventInFirestore(event);

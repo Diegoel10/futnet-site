@@ -1,4 +1,4 @@
-// js/game-profile/team-tool.js: Full Team Builder & Tactical Lineup Tool with syntax error fixed
+// js/game-profile/team-tool.js: Full Team Builder & Tactical Lineup Tool with team-restricted slots and randomize guest-pairing options
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -48,7 +48,8 @@ function getFlattenedPlayersList(attendees) {
             uid: String(att?.uid || 'usr_' + Math.random().toString(36).substring(2,7)),
             name: String(att?.name || att?.firstName || 'Player'),
             avatar: safeAvatar,
-            position: String(att?.position || 'Player')
+            position: String(att?.position || 'Player'),
+            guests: att?.guests || []
         });
         
         if (att?.guests && Array.isArray(att.guests)) {
@@ -155,33 +156,89 @@ window.saveTeamNameModal = async function(eventId, teamIndex) {
     }
 };
 
-window.randomizeTeamsTool = async function(eventId) {
+// Prompt randomize options modal (fully random vs keep guests together)
+window.promptRandomizeOptions = function(eventId) {
+    let modal = document.getElementById('randomize-options-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'randomize-options-modal';
+        modal.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+            <h3 class="text-sm font-black uppercase text-white">Randomize Teams</h3>
+            <p class="text-[11px] text-white/60">How would you like to distribute the players?</p>
+            <div class="space-y-2.5 pt-2">
+                <button onclick="document.getElementById('randomize-options-modal').remove(); window.executeRandomizeTeams('${eventId}', false)" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-xl text-xs shadow transition">
+                    Fully Randomized
+                </button>
+                <button onclick="document.getElementById('randomize-options-modal').remove(); window.executeRandomizeTeams('${eventId}', true)" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition">
+                    Keep Players & Guests Together
+                </button>
+                <button onclick="document.getElementById('randomize-options-modal').remove()" class="w-full bg-transparent text-white/40 hover:text-white py-2 text-xs">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    `;
+};
+
+window.executeRandomizeTeams = async function(eventId, keepGuestsTogether) {
     const event = window.currentTeamBuildingEvent;
     if (!event) return;
     
-    const allPlayers = getFlattenedPlayersList(event.attendees);
-    for (let i = allPlayers.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [allPlayers[i], allPlayers[j]] = [allPlayers[j], allPlayers[i]];
-    }
-
     const teamsCount = event.teamsCount || 3;
     window.teamAssignments[eventId] = {};
     for (let i = 0; i < teamsCount; i++) {
         window.teamAssignments[eventId][i] = [];
     }
 
-    allPlayers.forEach((player, idx) => {
-        const targetTeam = idx % teamsCount;
-        window.teamAssignments[eventId][targetTeam].push(player);
-    });
+    if (keepGuestsTogether) {
+        const attendees = event.attendees || [];
+        const shuffledAttendees = [...attendees].sort(() => Math.random() - 0.5);
+        shuffledAttendees.forEach((att, idx) => {
+            const targetTeam = idx % teamsCount;
+            const mainPlayer = {
+                uid: String(att.uid || 'usr_' + Math.random()),
+                name: String(att.name || 'Player'),
+                avatar: att.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`,
+                position: att.position || 'Player'
+            };
+            window.teamAssignments[eventId][targetTeam].push(mainPlayer);
+
+            if (att.guests && Array.isArray(att.guests)) {
+                att.guests.forEach((g, gIdx) => {
+                    window.teamAssignments[eventId][targetTeam].push({
+                        uid: `${att.uid || 'usr'}_guest_${gIdx}`,
+                        name: String(g.name || 'Guest'),
+                        avatar: g.avatar || mainPlayer.avatar,
+                        position: 'Guest',
+                        isHostGuest: true
+                    });
+                });
+            }
+        });
+    } else {
+        const allPlayers = getFlattenedPlayersList(event.attendees);
+        for (let i = allPlayers.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [allPlayers[i], allPlayers[j]] = [allPlayers[j], allPlayers[i]];
+        }
+
+        allPlayers.forEach((player, idx) => {
+            const targetTeam = idx % teamsCount;
+            window.teamAssignments[eventId][targetTeam].push(player);
+        });
+    }
 
     event.teamAssignments = window.teamAssignments[eventId];
     
     try {
         await updateTeamToolFirestore(event);
         if (typeof window.showToast === 'function') {
-            window.showToast("Teams randomized and saved!");
+            window.showToast("Teams randomized successfully!");
         }
         renderTeamMakingContent();
     } catch (err) {
@@ -279,7 +336,7 @@ window.renderTeamMakingContent = function() {
                     return `
                         <div class="flex items-center gap-2 bg-black/70 px-3 py-1.5 rounded-full border text-xs shadow-sm" style="border-color: ${tColor};">
                             <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20">
-                            <span class="font-bold text-white">${pName} ${isCap ? '⭐' : ''}</span>
+                            <span class="font-bold text-white">${pName} ${isCap ? '👑' : ''}</span>
                             <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${i}, '${pUid}')" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     `;
@@ -292,8 +349,8 @@ window.renderTeamMakingContent = function() {
                             <span class="w-3 h-3 rounded-full" style="background-color: ${tColor};"></span>
                             <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
                         </div>
-                        <button onclick="switchTeamTab(${i + 1})" class="text-[10px] font-bold text-white/60 hover:text-white bg-black/60 px-2.5 py-1 rounded-lg border border-white/10 flex items-center gap-1">
-                            <i class="fa-solid fa-plus text-[9px]"></i> Add Player
+                        <button onclick="openAssignPicker('${event.id}', ${i}, null)" class="text-[10px] font-bold text-white/80 hover:text-white bg-black/60 px-3 py-1.5 rounded-lg border border-white/15 flex items-center gap-1 shadow">
+                            <i class="fa-solid fa-plus text-[9px] text-[#00F296]"></i> Add Player
                         </button>
                     </div>
                     <div class="flex flex-wrap gap-2">
@@ -319,7 +376,7 @@ window.renderTeamMakingContent = function() {
         contentHtml = `
             <div class="space-y-4">
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
-                    <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">🆓 Free Agents (${freeAgents.length})</h4>
+                    <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">⏳ Free Agents (${freeAgents.length})</h4>
                     <div class="flex flex-wrap gap-2">
                         ${freeAgentsPillsHtml}
                     </div>
@@ -383,7 +440,7 @@ window.renderTeamMakingContent = function() {
             </div>
         `;
 
-        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>⭐ ${p.name}</option>`).join('');
+        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>👑 ${p.name}</option>`).join('');
         const formationsOptionsHtml = Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('');
 
         const squadMembersListHtml = currentTeamPlayers.length === 0 
@@ -399,7 +456,7 @@ window.renderTeamMakingContent = function() {
                         <div class="flex items-center gap-2.5">
                             <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover border border-white/20">
                             <div>
-                                <div class="font-bold text-white">${pName} ${isCap ? '⭐ (Captain)' : ''}</div>
+                                <div class="font-bold text-white">${pName} ${isCap ? '👑 (Captain)' : ''}</div>
                                 <div class="text-[10px] text-white/50">${pPos}</div>
                             </div>
                         </div>
@@ -460,7 +517,12 @@ window.renderTeamMakingContent = function() {
 
                 <!-- Squad Members List under Team -->
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
-                    <h4 class="text-xs font-black text-white/80 uppercase tracking-wider">Squad Members (${currentTeamPlayers.length})</h4>
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-xs font-black text-white/80 uppercase tracking-wider">Squad Members (${currentTeamPlayers.length})</h4>
+                        <button onclick="openAssignPicker('${event.id}', ${teamIdx}, null)" class="text-[10px] font-bold text-[#00F296] hover:underline bg-black/60 px-2.5 py-1 rounded-lg border border-white/10">
+                            + Add Player to Team
+                        </button>
+                    </div>
                     <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
                         ${squadMembersListHtml}
                     </div>
@@ -473,11 +535,11 @@ window.renderTeamMakingContent = function() {
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-2xl w-full p-6 text-white shadow-2xl space-y-5 relative max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
                 <div>
-                    <h3 class="text-base font-black uppercase text-white">🏆 Team Builder & Lineups</h3>
+                    <h3 class="text-base font-black uppercase text-white">⚽ Team Builder & Lineups</h3>
                     <p class="text-[10px] text-white/50">Format: ${format} • Build your squad</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="randomizeTeamsTool('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow flex items-center gap-1">
+                    <button onclick="promptRandomizeOptions('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow flex items-center gap-1">
                         <i class="fa-solid fa-shuffle text-[10px]"></i> Randomize
                     </button>
                     <button onclick="document.getElementById('team-making-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
@@ -505,6 +567,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
 
     const allPlayers = getFlattenedPlayersList(event.attendees);
     window.teamAssignments[eventId] = event.teamAssignments || {};
+    
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[eventId]).forEach(teamArr => {
         if (Array.isArray(teamArr)) {
@@ -512,9 +575,12 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         }
     });
 
-    const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
-    if (freeAgents.length === 0) {
-        if (typeof window.showToast === 'function') window.showToast("No Free Agents available.", "error");
+    // Restrict to players not yet assigned anywhere, OR already in this specific team
+    const teamPlayersSet = new Set((window.teamAssignments[eventId][teamIndex] || []).map(p => p?.uid));
+    const eligiblePlayers = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)) || teamPlayersSet.has(String(a.uid)));
+
+    if (eligiblePlayers.length === 0) {
+        if (typeof window.showToast === 'function') window.showToast("No available players found.", "error");
         return;
     }
 
@@ -526,12 +592,12 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         document.body.appendChild(picker);
     }
 
-    const freeAgentsListHtml = freeAgents.map(a => {
+    const eligibleListHtml = eligiblePlayers.map(a => {
         const aAvatar = a?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
         const aName = a?.name || 'Player';
         const aUid = a?.uid || '';
         return `
-            <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex}, '${aUid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+            <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}', ${teamIndex}, ${slotIndex !== null ? slotIndex : 'null'}, '${aUid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
                 <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover">
                 <span class="text-xs font-bold text-white">${aName}</span>
             </div>
@@ -541,11 +607,11 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     picker.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h4 class="text-xs font-black uppercase text-white">Select Free Agent</h4>
+                <h4 class="text-xs font-black uppercase text-white">Select Player for Team</h4>
                 <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                ${freeAgentsListHtml}
+                ${eligibleListHtml}
             </div>
             <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
@@ -561,7 +627,15 @@ window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
 
     window.teamAssignments[eventId] = event.teamAssignments || {};
     window.teamAssignments[eventId][teamIndex] = window.teamAssignments[eventId][teamIndex] || [];
-    window.teamAssignments[eventId][teamIndex][slotIndex] = player;
+
+    if (slotIndex !== null && slotIndex !== 'null') {
+        window.teamAssignments[eventId][teamIndex][slotIndex] = player;
+    } else {
+        // If added from summary/squad button without a specific pitch slot, push to roster array
+        if (!window.teamAssignments[eventId][teamIndex].some(p => p && String(p.uid) === String(uid))) {
+            window.teamAssignments[eventId][teamIndex].push(player);
+        }
+    }
 
     event.teamAssignments = window.teamAssignments[eventId];
     try {

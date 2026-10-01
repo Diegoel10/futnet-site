@@ -84,8 +84,8 @@ export function renderRosterTab(event) {
                     </button>
                 </div>
 
-                <!-- Sub-tab Content List -->
-                <div class="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                <!-- Sub-tab Content List (Fully expanded, no inner scroll box limit) -->
+                <div class="space-y-2.5 pr-1">
                     ${currentList.length === 0 ? `
                         <div class="text-center text-xs text-white/40 py-8">
                             ${window.activeRosterSubTab === 0 ? 'No confirmed players on the roster yet.' : (window.activeRosterSubTab === 1 ? 'Waitlist is empty.' : 'No declined responses.')}
@@ -96,7 +96,7 @@ export function renderRosterTab(event) {
                         const isPaid = att.paid === 'Paid';
                         const dirUser = resolveDirectoryUser(att.uid);
 
-                        const safeAvatar = att.avatar || att.photoURL || att.profilePicture || att.userAvatar || dirUser?.avatar || dirUser?.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                        const safeAvatar = att.avatar || att.photoURL || att.profilePicture || att.userAvatar || dirUser?.avatar || dirUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
                         const rawName = att.name || att.firstName || att.displayName || att.fullName || dirUser?.name || dirUser?.firstName || dirUser?.displayName || 'Player';
                         const safeName = rawName.replace(/'/g, "\\'");
                         const isOrganizer = att.uid === event.organizerId;
@@ -129,7 +129,7 @@ export function renderRosterTab(event) {
                             <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                                 <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '${safeAvatar}')">
-                                        <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition">
+                                        <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                                         <div>
                                             <div class="flex items-center gap-1.5 flex-wrap">
                                                 <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${rawName}</span>${isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : ''}
@@ -168,8 +168,6 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
         modal.className = 'fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
         document.body.appendChild(modal);
     }
-
-    const initialChar = (name || 'U').charAt(0).toUpperCase();
 
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center animate-in fade-in zoom-in duration-200">
