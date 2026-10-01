@@ -1,4 +1,4 @@
-// js/auth.js
+// js/auth.js: Auth logic with popup fallback to redirect for seamless Google and Apple sign-in on mobile
 import './profile.js';
 import './home.js';
 import './legal-modal.js';
@@ -7,6 +7,8 @@ import {
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     signInWithPopup, 
+    signInWithRedirect,
+    getRedirectResult,
     GoogleAuthProvider, 
     FacebookAuthProvider, 
     TwitterAuthProvider,
@@ -17,7 +19,6 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// Global Avatar State for Sign Up (using a clean default silhouette vector)[cite: 26]
 window.selectedSignupAvatarUrl = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
 window.handleSignupAvatarSelection = function(event) {
@@ -39,7 +40,6 @@ window.showSignupScreen = function() {
     document.getElementById('view-login').classList.add('hidden');
     document.getElementById('view-signup').classList.remove('hidden');
     
-    // Inject Avatar Picker into signup form if not already present
     const signupForm = document.querySelector('#view-signup form');
     if (signupForm && !document.getElementById('signup-avatar-preview')) {
         const avatarWrapper = document.createElement('div');
@@ -119,10 +119,8 @@ window.handleUnifiedRegistration = async function(event) {
             createdAt: new Date().toISOString()
         };
 
-        // Save profile to user private doc[cite: 26]
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), profileData);
 
-        // Save/merge into global directory for app-wide player lookups[cite: 26]
         await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
             uid: user.uid,
             name: `${firstName} ${lastName}`.trim(),
@@ -134,7 +132,6 @@ window.handleUnifiedRegistration = async function(event) {
         window.userProfile = profileData;
         window.showToast("Account created successfully!");
         
-        // Hide signup and show main events view smoothly without hard reload[cite: 26]
         if (typeof window.switchTab === 'function') {
             window.switchTab('events');
         }
@@ -161,51 +158,71 @@ window.handleSocialAuth = async function(providerName) {
     else return;
 
     try {
-        const result = await signInWithPopup(auth, provider);
+        // Attempt popup first; if it fails or gets blocked, fallback to redirect
+        let result;
+        try {
+            result = await signInWithPopup(auth, provider);
+        } catch (popupErr) {
+            console.warn("Popup blocked or failed, falling back to redirect:", popupErr);
+            await signInWithRedirect(auth, provider);
+            return;
+        }
+
         const user = result.user;
-
-        const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
-        const docSnap = await getDoc(profileRef);
-
-        if (!docSnap.exists()) {
-            const nameParts = (user.displayName || "Player").split(" ");
-            const firstName = nameParts[0] || "Player";
-            const lastName = nameParts.slice(1).join(" ") || "";
-
-            const profileData = {
-                uid: user.uid,
-                firstName,
-                lastName,
-                nickname: "",
-                email: user.email || "",
-                gender: "Male",
-                dob: "1995-01-01",
-                position: "Forward",
-                avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
-                termsAccepted: false,
-                createdAt: new Date().toISOString()
-            };
-
-            await setDoc(profileRef, profileData);
-            await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
-                uid: user.uid,
-                name: `${firstName} ${lastName}`.trim(),
-                avatar: profileData.avatar,
-                position: "Forward"
-            }, { merge: true });
-        }
-
-        window.showToast("Signed in successfully!");
-        if (typeof window.checkAndShowLegalModal === 'function') {
-            window.checkAndShowLegalModal();
-        }
+        await handleSocialUserSession(user);
     } catch (err) {
         console.error("Social auth error:", err);
         window.showToast(err.message || "Social sign-in failed", "error");
     }
 };
 
-// Global Logout Handler mapped securely in the main entry point[cite: 26]
+async function handleSocialUserSession(user) {
+    const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+    const docSnap = await getDoc(profileRef);
+
+    if (!docSnap.exists()) {
+        const nameParts = (user.displayName || "Player").split(" ");
+        const firstName = nameParts[0] || "Player";
+        const lastName = nameParts.slice(1).join(" ") || "";
+
+        const profileData = {
+            uid: user.uid,
+            firstName,
+            lastName,
+            nickname: "",
+            email: user.email || "",
+            gender: "Male",
+            dob: "1995-01-01",
+            position: "Forward",
+            avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+            termsAccepted: false,
+            createdAt: new Date().toISOString()
+        };
+
+        await setDoc(profileRef, profileData);
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
+            uid: user.uid,
+            name: `${firstName} ${lastName}`.trim(),
+            avatar: profileData.avatar,
+            position: "Forward"
+        }, { merge: true });
+    }
+
+    window.showToast("Signed in successfully!");
+    if (typeof window.checkAndShowLegalModal === 'function') {
+        window.checkAndShowLegalModal();
+    }
+}
+
+// Check for redirect result on page load (handles Apple/Google redirect authentication return)
+getRedirectResult(auth).then(async (result) => {
+    if (result && result.user) {
+        await handleSocialUserSession(result.user);
+    }
+}).catch((error) => {
+    console.error("Redirect auth error:", error);
+});
+
 window.handleLogout = async function() {
     try {
         const activeAuth = auth || getAuth();
@@ -220,7 +237,6 @@ window.handleLogout = async function() {
     }
 };
 
-// Listen for authentication state changes and boot up live listeners & legal checks instantly on login[cite: 26]
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         window.currentUser = user;
@@ -231,16 +247,13 @@ onAuthStateChanged(auth, async (user) => {
                 window.userProfile = docSnap.data();
             }
         } catch (e) {
-            // Gracefully catch offline or initial connection timing drops
             console.warn("Profile fetch deferred or offline:", e.message);
         }
 
-        // Boot up live games listener immediately so games show up[cite: 26]
         if (typeof window.initEventsLiveListener === 'function') {
             window.initEventsLiveListener();
         }
 
-        // Check if terms have been accepted[cite: 26]
         if (typeof window.checkAndShowLegalModal === 'function') {
             window.checkAndShowLegalModal();
         }

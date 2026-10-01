@@ -1,4 +1,4 @@
-// js/profile.js: Profile tab matching exact dark theme UI layout with robust FontAwesome icons
+// js/profile.js: Profile tab with clean CSS stadium gradient header banner, eliminating broken image placeholders
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -17,10 +17,9 @@ window.renderProfileTab = function() {
 
     container.innerHTML = `
         <div class="relative min-h-screen bg-[#01060A] text-white pb-24 overflow-y-auto">
-            <!-- Stadium Background Header Banner -->
-            <div class="relative h-[300px] w-full overflow-hidden">
-                <img src="img/stadium-bg.png" class="absolute inset-0 w-full h-full object-cover opacity-60" onerror="this.src='https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800'">
-                <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-[#01060A]"></div>
+            <!-- Stadium Background Header Banner (Pure CSS Gradient & Texture) -->
+            <div class="relative h-[280px] w-full overflow-hidden bg-gradient-to-b from-[#031422] via-[#020b12] to-[#01060A] border-b border-[#00B4AE]/20">
+                <div class="absolute inset-0 opacity-25 bg-[radial-gradient(#00F296_1px,transparent_1px)] [background-size:16px_16px]"></div>
 
                 <!-- Top Header: Title Only -->
                 <div class="relative z-10 px-6 pt-12 flex items-center justify-between">
