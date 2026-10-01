@@ -1,4 +1,4 @@
-// js/auth.js: Complete auth module with full avatar selectors, popup sign-in, and auth state listeners
+// js/auth.js: Robust social auth with fully configured Apple and Google redirect handlers
 import './profile.js';
 import './home.js';
 import './legal-modal.js';
@@ -6,7 +6,8 @@ import { auth, db, appId } from './firebase-config.js';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
-    signInWithPopup, 
+    signInWithRedirect,
+    getRedirectResult,
     GoogleAuthProvider, 
     FacebookAuthProvider, 
     TwitterAuthProvider,
@@ -160,20 +161,36 @@ window.handleUnifiedRegistration = async function(event) {
 
 window.handleSocialAuth = async function(providerName) {
     let provider;
-    if (providerName === 'google') provider = new GoogleAuthProvider();
-    else if (providerName === 'facebook') provider = new FacebookAuthProvider();
-    else if (providerName === 'apple') {
+    if (providerName === 'google') {
+        provider = new GoogleAuthProvider();
+    } else if (providerName === 'facebook') {
+        provider = new FacebookAuthProvider();
+    } else if (providerName === 'apple') {
         provider = new OAuthProvider('apple.com');
         provider.addScope('email');
         provider.addScope('name');
+        provider.setCustomParameters({
+            // Ensures Apple requests and returns proper credential payloads
+            locale: 'en'
+        });
+    } else if (providerName === 'x') {
+        provider = new TwitterAuthProvider();
+    } else {
+        return;
     }
-    else if (providerName === 'x') provider = new TwitterAuthProvider();
-    else return;
 
     try {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
+        await signInWithRedirect(auth, provider);
+    } catch (err) {
+        console.error("Social auth error:", err);
+        if (typeof window.showToast === 'function') window.showToast(err.message || "Social sign-in failed", "error");
+    }
+};
 
+// Handle result when the page redirects back from Google or Apple
+getRedirectResult(auth).then(async (result) => {
+    if (result && result.user) {
+        const user = result.user;
         const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
         const docSnap = await getDoc(profileRef);
 
@@ -209,11 +226,13 @@ window.handleSocialAuth = async function(providerName) {
         if (typeof window.checkAndShowLegalModal === 'function') {
             window.checkAndShowLegalModal();
         }
-    } catch (err) {
-        console.error("Social auth error:", err);
-        if (typeof window.showToast === 'function') window.showToast(err.message || "Social sign-in failed", "error");
     }
-};
+}).catch((error) => {
+    console.error("Redirect result error:", error);
+    if (typeof window.showToast === 'function') {
+        window.showToast("Sign-in incomplete or cancelled.", "error");
+    }
+});
 
 window.handleLogout = async function() {
     try {
