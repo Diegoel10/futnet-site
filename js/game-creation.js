@@ -224,9 +224,13 @@ window.handleCreateEvent = async function(e) {
     const organizerName = `${window.userProfile?.firstName || ''} ${window.userProfile?.lastName || ''}`.trim() || 'Player';
     const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     
-    // Dynamically look up avatar from directory list or profile, with reliable fallbacks
     const directoryEntry = (window.directoryList || []).find(u => String(u.uid) === String(window.currentUser.uid));
-    const organizerAvatar = directoryEntry?.avatar || window.userProfile?.avatar || window.currentUser?.photoURL || defaultAvatar;
+    let rawAvatar = directoryEntry?.avatar || window.userProfile?.avatar || window.currentUser?.photoURL || defaultAvatar;
+    
+    // Prevent Firestore 1MB document size limit errors from massive base64 strings
+    const organizerAvatar = (typeof rawAvatar === 'string' && rawAvatar.startsWith('data:image') && rawAvatar.length > 500000)
+        ? `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(organizerName)}`
+        : rawAvatar;
 
     let attendees = [{
         uid: window.currentUser.uid,
