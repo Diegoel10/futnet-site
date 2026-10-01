@@ -383,7 +383,7 @@ export function renderTeamToolTab(event) {
     const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
 
     let tabsHtml = `
-        <button onclick="switchTeamTab(0)" class="px-3.5 py-2 rounded-xl text-xs font-black transition ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/50 text-white/70 border border-white/10'}">
+        <button onclick="switchTeamTab(0)" class="px-4 py-2.5 rounded-2xl text-xs font-black transition shrink-0 ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/80 border border-white/10'}">
             📋 Summary
         </button>
     `;
@@ -393,8 +393,8 @@ export function renderTeamToolTab(event) {
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
         const tColor = window.teamColors[event.id][i] || defaultColors[i % defaultColors.length];
         tabsHtml += `
-            <button onclick="switchTeamTab(${tIdx})" style="border-color: ${tColor} !important;" class="px-3.5 py-2 rounded-xl text-xs font-black transition border ${isActive ? 'bg-[#00F296] text-slate-950 shadow' : 'bg-black/50 text-white/80'}">
-                <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background-color: ${tColor};"></span> ${tName}
+            <button onclick="switchTeamTab(${tIdx})" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
+                <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle" style="background-color: ${tColor};"></span> ${tName}
             </button>
         `;
     }
@@ -417,29 +417,29 @@ export function renderTeamToolTab(event) {
                     const pName = p?.name || 'Player';
                     const pUid = p?.uid || '';
                     return `
-                        <div class="flex items-center gap-2 bg-black/70 px-3 py-1.5 rounded-full border text-xs shadow-sm" style="border-color: ${tColor};">
+                        <div class="flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl border text-xs shadow-md" style="border-color: ${tColor};">
                             <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20">
-                            <span class="font-bold text-white">${pName} ${isCap ? '👑' : ''}</span>
+                            <span class="font-bold text-white">${pName} ${isCap ? '⭐' : ''}</span>
                             <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${i}, '${pUid}')" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     `;
                 }).join('');
 
             teamsSummaryHtml += `
-                <div class="bg-black/40 border-2 rounded-2xl p-4 space-y-3 shadow-lg flex flex-col justify-between" style="border-color: ${tColor}66;">
+                <div class="bg-[#040E13]/95 border-2 rounded-3xl p-5 space-y-4 shadow-xl flex flex-col justify-between" style="border-color: ${tColor}66;">
                     <div class="space-y-3">
-                        <div class="flex items-center justify-between border-b border-white/10 pb-2">
-                            <div class="flex items-center gap-2">
-                                <span class="w-3 h-3 rounded-full" style="background-color: ${tColor};"></span>
+                        <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-3.5 h-3.5 rounded-full" style="background-color: ${tColor};"></span>
                                 <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
                             </div>
                         </div>
-                        <div class="flex flex-wrap gap-2">
+                        <div class="flex flex-wrap gap-2.5">
                             ${rosterPillsHtml}
                         </div>
                     </div>
                     <div class="pt-3 border-t border-white/10">
-                        <button onclick="openAssignPicker('${event.id}', ${i}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-2.5 px-4 rounded-xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
+                        <button onclick="openAssignPicker('${event.id}', ${i}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
                             <i class="fa-solid fa-user-plus"></i> + Add Player to ${tName}
                         </button>
                     </div>
@@ -453,18 +453,18 @@ export function renderTeamToolTab(event) {
                 const aAvatar = a?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
                 const aName = a?.name || 'Player';
                 return `
-                    <div class="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
-                        <img src="${aAvatar}" class="w-5 h-5 rounded-full object-cover">
+                    <div class="flex items-center gap-2 bg-black/60 px-3 py-2 rounded-2xl border border-white/10 text-xs">
+                        <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover">
                         <span class="font-bold text-white">${aName}</span>
                     </div>
                 `;
             }).join('');
 
         contentHtml = `
-            <div class="space-y-4">
-                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+            <div class="space-y-5 pb-10">
+                <div class="bg-[#040E13]/95 border border-amber-500/40 rounded-3xl p-5 space-y-3 shadow-xl">
                     <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">⏳ Free Agents (${freeAgents.length})</h4>
-                    <div class="flex flex-wrap gap-2">
+                    <div class="flex flex-wrap gap-2.5">
                         ${freeAgentsPillsHtml}
                     </div>
                 </div>
@@ -495,7 +495,7 @@ export function renderTeamToolTab(event) {
                 
                 if (p && p.name) {
                     rowSlots += `
-                        <div onclick="promptRemoveOrChangeSlot('${event.id}', ${teamIdx}, ${slotIdx}, '${p.name.replace(/'/g, "\\'")}')" class="w-36 h-14 bg-black/80 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 relative group transition hover:scale-105" style="border-color: ${currentTeamColor};">
+                        <div onclick="promptRemoveOrChangeSlot('${event.id}', ${teamIdx}, ${slotIdx}, '${p.name.replace(/'/g, "\\'")}')" class="w-36 h-14 bg-black/90 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 relative group transition hover:scale-105" style="border-color: ${currentTeamColor};">
                             <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate text-left leading-tight">
                                 <span class="text-[7px] font-black uppercase block tracking-wider" style="color: ${currentTeamColor};">${positionName}</span>
@@ -512,14 +512,14 @@ export function renderTeamToolTab(event) {
                     `;
                 }
             }
-            rowsHtml += `<div class="flex justify-center gap-3 mb-3">${rowSlots}</div>`;
+            rowsHtml += `<div class="flex justify-center gap-3 mb-4">${rowSlots}</div>`;
         });
 
         const goalieSlotIdx = playerIndex++;
         const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
         rowsHtml += `
-            <div class="flex justify-center mt-2">
-                <div onclick="${goaliePlayer && goaliePlayer.name ? `promptRemoveOrChangeSlot('${event.id}',${teamIdx}, ${goalieSlotIdx}, '${goaliePlayer.name.replace(/'/g, "\\'")}')` : `openAssignPicker('${event.id}', ${teamIdx},${goalieSlotIdx})`}" class="w-40 h-14 ${goaliePlayer && goaliePlayer.name ? 'bg-black/80 border-2' : 'border-2 border-dashed bg-black/60'} rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
+            <div class="flex justify-center mt-3">
+                <div onclick="${goaliePlayer && goaliePlayer.name ? `promptRemoveOrChangeSlot('${event.id}',${teamIdx}, ${goalieSlotIdx}, '${goaliePlayer.name.replace(/'/g, "\\'")}')` : `openAssignPicker('${event.id}', ${teamIdx},${goalieSlotIdx})`}" class="w-40 h-14 ${goaliePlayer && goaliePlayer.name ? 'bg-black/90 border-2' : 'border-2 border-dashed bg-black/60'} rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
                     ${goaliePlayer && goaliePlayer.name ? `
                         <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div class="truncate text-left leading-tight">
@@ -534,7 +534,7 @@ export function renderTeamToolTab(event) {
             </div>
         `;
 
-        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>👑 ${p.name}</option>`).join('');
+        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>⭐ ${p.name}</option>`).join('');
         const formationsOptionsHtml = Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('');
 
         const squadMembersListHtml = currentTeamPlayers.length === 0 
@@ -546,75 +546,75 @@ export function renderTeamToolTab(event) {
                 const pPos = p?.position || 'Player';
                 const pUid = p?.uid || '';
                 return `
-                    <div class="flex items-center justify-between p-2.5 bg-black/60 rounded-xl border border-white/10 text-xs">
-                        <div class="flex items-center gap-2.5">
-                            <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <div class="flex items-center justify-between p-3 bg-black/60 rounded-2xl border border-white/10 text-xs shadow-sm">
+                        <div class="flex items-center gap-3">
+                            <img src="${pAvatar}" class="w-8 h-8 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div>
-                                <div class="font-bold text-white">${pName} ${isCap ? '👑 (Captain)' : ''}</div>
+                                <div class="font-bold text-white">${pName} ${isCap ? '⭐ (Captain)' : ''}</div>
                                 <div class="text-[10px] text-white/50">${pPos}</div>
                             </div>
                         </div>
-                        <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${teamIdx}, '${pUid}')" class="text-red-400 hover:text-red-300 font-bold px-2.5 py-1 rounded-lg text-xs bg-red-500/10 border border-red-500/30">Remove</button>
+                        <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${teamIdx}, '${pUid}')" class="text-red-400 hover:text-red-300 font-bold px-3 py-1.5 rounded-xl text-xs bg-red-500/10 border border-red-500/30 transition">Remove</button>
                     </div>
                 `;
             }).join('');
 
         contentHtml = `
-            <div class="space-y-4">
-                <div class="bg-black/50 border border-white/10 p-4 rounded-2xl space-y-3">
+            <div class="space-y-5 pb-16">
+                <div class="bg-[#040E13]/95 border border-white/10 p-5 rounded-3xl space-y-4 shadow-xl">
                     <h4 class="text-xs font-black text-white/70 uppercase tracking-wider">Team Configuration</h4>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div class="space-y-1">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                        <div class="space-y-1.5">
                             <label class="block text-[10px] font-bold text-white/60 uppercase">Team Name</label>
-                            <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
+                            <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="w-full bg-black/80 border border-white/20 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
                         </div>
-                        <div class="space-y-1">
+                        <div class="space-y-1.5">
                             <label class="block text-[10px] font-bold text-white/60 uppercase">Team Color</label>
-                            <div class="flex items-center gap-2 pt-1">
+                            <div class="flex items-center gap-2.5 pt-1.5">
                                 ${defaultColors.map(col => `
-                                    <button onclick="changeTeamColor('${event.id}', ${teamIdx}, '${col}')" class="w-6 h-6 rounded-full border-2 transition ${currentTeamColor === col ? 'border-white scale-110 shadow' : 'border-transparent'}" style="background-color: ${col};"></button>
+                                    <button onclick="changeTeamColor('${event.id}', ${teamIdx}, '${col}')" class="w-7 h-7 rounded-full border-2 transition ${currentTeamColor === col ? 'border-white scale-110 shadow-md' : 'border-transparent'}" style="background-color: ${col};"></button>
                                 `).join('')}
                             </div>
                         </div>
-                        <div class="space-y-1">
+                        <div class="space-y-1.5">
                             <label class="block text-[10px] font-bold text-white/60 uppercase">Captain</label>
-                            <select onchange="setTeamCaptain('${event.id}', ${teamIdx}, this.value)" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2 text-xs font-bold text-white">
+                            <select onchange="setTeamCaptain('${event.id}', ${teamIdx}, this.value)" class="w-full bg-black/80 border border-white/20 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white">
                                 <option value="">Select Captain</option>
                                 ${captainOptionsHtml}
                             </select>
                         </div>
                     </div>
-                    <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="w-full bg-[#00F296] text-slate-950 font-black py-2.5 rounded-xl text-xs shadow transition mt-1">Save Team Name</button>
+                    <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-xs shadow-md transition mt-1">Save Team Name</button>
                 </div>
 
-                <div class="relative border-2 rounded-3xl p-5 shadow-inner overflow-hidden min-h-[420px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentTeamColor};">
-                    <div class="absolute inset-0 bg-black/40 pointer-events-none"></div>
+                <div class="relative border-2 rounded-3xl p-5 shadow-2xl overflow-hidden min-h-[480px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentTeamColor};">
+                    <div class="absolute inset-0 bg-black/50 pointer-events-none"></div>
 
                     <div class="flex justify-between items-center relative z-10">
-                        <span class="text-white font-black text-xs px-3.5 py-1.5 rounded-full uppercase tracking-wider shadow" style="background-color: ${currentTeamColor};">${currentTeamName}</span>
-                        <select onchange="changeTeamFormation('${event.id}', ${teamIdx}, this.value)" class="bg-black/90 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl border border-white/20">
+                        <span class="text-white font-black text-xs px-4 py-2 rounded-2xl uppercase tracking-wider shadow-lg" style="background-color: ${currentTeamColor};">${currentTeamName}</span>
+                        <select onchange="changeTeamFormation('${event.id}', ${teamIdx}, this.value)" class="bg-black/90 text-white font-bold text-xs px-4 py-2 rounded-2xl border border-white/20 shadow-md">
                             ${formationsOptionsHtml}
                         </select>
                     </div>
 
-                    <div class="relative z-10 my-4 flex flex-col items-center justify-center">
+                    <div class="relative z-10 my-6 flex flex-col items-center justify-center">
                         ${rowsHtml}
                     </div>
 
-                    <div class="text-center relative z-10 text-[10px] text-white/80 font-semibold bg-black/50 py-1 rounded-xl">
+                    <div class="text-center relative z-10 text-[10px] text-white/80 font-semibold bg-black/60 py-2 rounded-xl">
                         Tap any position on the pitch to assign or remove players
                     </div>
                 </div>
 
-                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                <div class="bg-[#040E13]/95 border border-white/10 rounded-3xl p-5 space-y-4 shadow-xl">
                     <div class="flex justify-between items-center">
                         <h4 class="text-xs font-black text-white/80 uppercase tracking-wider">Squad Members (${currentTeamPlayers.length})</h4>
                     </div>
-                    <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    <div class="space-y-2.5 max-h-56 overflow-y-auto pr-1">
                         ${squadMembersListHtml}
                     </div>
                     <div class="pt-2">
-                        <button onclick="openAssignPicker('${event.id}', ${teamIdx}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-2.5 px-4 rounded-xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
+                        <button onclick="openAssignPicker('${event.id}', ${teamIdx}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
                             <i class="fa-solid fa-user-plus"></i> + Add Player to ${currentTeamName}
                         </button>
                     </div>
@@ -624,26 +624,26 @@ export function renderTeamToolTab(event) {
     }
 
     return `
-        <div class="space-y-5">
-            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <div class="space-y-6 max-w-4xl mx-auto pb-12">
+            <div class="bg-[#040E13]/95 backdrop-blur-md border border-emerald-500/40 rounded-3xl p-5 shadow-2xl flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <button onclick="switchModalTab('roster')" class="bg-black/60 hover:bg-black text-white font-bold px-3.5 py-2 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5 shadow">
-                        <i class="fa-solid fa-chevron-left text-[10px]"></i> Back to Event Profile
+                    <button onclick="switchModalTab('roster')" class="w-10 h-10 bg-black/50 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shadow">
+                        <i class="fa-solid fa-chevron-left text-xs"></i>
                     </button>
                     <div>
-                        <h3 class="text-base font-black uppercase text-white">⚽ Team Builder & Lineups</h3>
-                        <p class="text-[10px] text-white/50">Format: ${format} • Build your squad</p>
+                        <h3 class="text-base font-black uppercase text-white">🔀 Team Builder & Lineups</h3>
+                        <p class="text-[11px] text-white/70 font-medium">Format: ${format} • Squad Setup</p>
                     </div>
                 </div>
                 <div>
-                    <button onclick="promptRandomizeOptions('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow flex items-center gap-1">
-                        <i class="fa-solid fa-shuffle text-[10px]"></i> Randomize
+                    <button onclick="promptRandomizeOptions('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2.5 rounded-2xl text-xs shadow-md transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-shuffle text-xs"></i> Randomize
                     </button>
                 </div>
             </div>
 
             <!-- Tabs Navigation Bar -->
-            <div class="flex items-center gap-2 overflow-x-auto pb-1">
+            <div class="flex items-center gap-2.5 overflow-x-auto pb-2 no-scrollbar">
                 ${tabsHtml}
             </div>
 
