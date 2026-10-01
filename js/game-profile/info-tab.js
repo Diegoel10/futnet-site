@@ -140,15 +140,29 @@ export function renderInfoTab(event) {
 };
 
 window.shareGameLink = function(eventId) {
-    const shareUrl = `${window.location.origin}${window.location.pathname}#event=${eventId}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(shareUrl).then(() => {
-            window.showToast("📋 Game link copied to clipboard!");
-        }).catch(() => {
+    const cleanPath = window.location.pathname.replace(/index\.html$/, '');
+    const shareUrl = `${window.location.origin}${cleanPath}#event=${encodeURIComponent(eventId)}`;
+    const ev = (window.eventsList || []).find(e => String(e.id) === String(eventId));
+    const title = ev?.title || ev?.name || 'FutNet game';
+
+    const copyLink = () => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                window.showToast("📋 Game link copied to clipboard!");
+            }).catch(() => {
+                prompt("Copy game link:", shareUrl);
+            });
+        } else {
             prompt("Copy game link:", shareUrl);
-        });
+        }
+    };
+
+    // On phones this opens the normal share sheet (WhatsApp, iMessage, etc.)
+    if (navigator.share) {
+        navigator.share({ title, text: `Join me at ${title} on FutNet!`, url: shareUrl })
+            .catch((err) => { if (err && err.name !== 'AbortError') copyLink(); });
     } else {
-        prompt("Copy game link:", shareUrl);
+        copyLink();
     }
 };
 

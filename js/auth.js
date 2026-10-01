@@ -162,7 +162,7 @@ window.handleUnifiedRegistration = async function(event) {
         window.userProfile = profileData;
         if (typeof window.showToast === 'function') window.showToast("Account created successfully!");
         
-        if (typeof window.switchTab === 'function') {
+        if (typeof window.switchTab === 'function' && !window.deepLinkEventId) {
             window.switchTab('events');
         }
         if (typeof window.checkAndShowLegalModal === 'function') {

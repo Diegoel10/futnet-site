@@ -678,18 +678,61 @@
             window.switchTab(targetTab, false);
         });
 
-        // Automatically check URL hash on load for direct game links
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                const hash = window.location.hash;
-                if (hash && hash.includes('#event=')) {
-                    const eventId = hash.split('#event=')[1];
-                    if (eventId && typeof window.openEventDetails === 'function') {
-                        window.openEventDetails(eventId);
-                    }
+        // ---------- SHARED GAME LINKS (deep links) ----------
+        // Link format: https://futnet.site/#event=EVENT_ID  (also works as ?event=EVENT_ID)
+        // 1) Remember the game as soon as the page opens (survives sign-up / login screens and redirects)
+        (function captureDeepLink() {
+            let id = null;
+            try {
+                const hashMatch = window.location.hash.match(/[#&]event=([^&/]+)/);
+                const queryId = new URLSearchParams(window.location.search).get('event');
+                id = hashMatch ? decodeURIComponent(hashMatch[1]) : queryId;
+                if (id) sessionStorage.setItem('futnet_pending_event', id);
+                else id = sessionStorage.getItem('futnet_pending_event');
+            } catch (e) { /* storage blocked: the link still works when the person is already signed in */ }
+            window.deepLinkEventId = id || null;
+        })();
+
+        // 2) Logged-out visitors see a banner telling them why they need an account
+        function showDeepLinkBanner() {
+            if (!window.deepLinkEventId || document.getElementById('deeplink-banner')) return;
+            const authBox = document.getElementById('auth-container');
+            if (!authBox) return;
+            const banner = document.createElement('div');
+            banner.id = 'deeplink-banner';
+            banner.className = 'absolute top-3 inset-x-3 z-20 max-w-[440px] mx-auto bg-[#00F296]/15 border border-[#00F296]/60 text-white rounded-2xl px-4 py-3 text-center text-xs font-bold backdrop-blur-md shadow-lg';
+            banner.innerHTML = '<i class="fa-solid fa-futbol text-[#00F296] mr-1.5"></i> You were invited to a game! Sign in or tap <span class="text-[#00F296]">Sign Up</span> to create your profile and view it.';
+            authBox.appendChild(banner);
+        }
+
+        // 3) After sign-in, wait for the games to load, then open the shared game
+        window.openPendingEvent = function() {
+            const id = window.deepLinkEventId;
+            if (!id) return;
+            const started = Date.now();
+            const finish = () => {
+                window.deepLinkEventId = null;
+                try { sessionStorage.removeItem('futnet_pending_event'); } catch (e) {}
+                if (/event=/.test(window.location.hash + window.location.search)) {
+                    history.replaceState(history.state, '', window.location.pathname);
                 }
-            }, 1200);
-        });
+            };
+            const tryOpen = () => {
+                const found = (window.eventsList || []).some(ev => String(ev.id) === String(id));
+                if (found && typeof window.openEventDetails === 'function') {
+                    window.openEventDetails(id);
+                    finish();
+                    return;
+                }
+                if (Date.now() - started > 12000) {
+                    finish();
+                    if (typeof window.showToast === 'function') window.showToast("Sorry, that game could not be found. It may have been removed.", "error");
+                    return;
+                }
+                setTimeout(tryOpen, 300);
+            };
+            tryOpen();
+        };
 
         onAuthStateChanged(auth, async (user) => {
             window.currentUser = user;
@@ -726,14 +769,17 @@
                     };
                 }
                 initAppDashboard();
+                window.openPendingEvent();
             } else {
                 document.getElementById('loading-screen').classList.add('hidden');
                 document.getElementById('auth-container').classList.remove('hidden');
                 document.getElementById('main-container').classList.add('hidden');
+                showDeepLinkBanner();
             }
         });
 
         function initAppDashboard() {
+            document.getElementById('deeplink-banner')?.remove();
             document.getElementById('loading-screen').classList.add('hidden');
             document.getElementById('auth-container').classList.add('hidden');
             document.getElementById('main-container').classList.remove('hidden');
