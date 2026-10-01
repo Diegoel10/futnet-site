@@ -140,7 +140,7 @@ export function renderInfoTab(event) {
 };
 
 window.shareGameLink = function(eventId) {
-    const shareUrl = `https://futnet.site/#event=${eventId}`;
+    const shareUrl = `${window.location.origin}${window.location.pathname}#event=${eventId}`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(shareUrl).then(() => {
             window.showToast("📋 Game link copied to clipboard!");
