@@ -241,7 +241,10 @@ window.renderEvents = function() {
 
         const communityName = ev.communityName || "";
         const communityThumbnail = ev.communityThumbnail || "";
-        const hostAvatar = (ev.organizerAvatar && ev.organizerAvatar.trim() !== '') ? ev.organizerAvatar : ((ev.hostAvatar && ev.hostAvatar.trim() !== '') ? ev.hostAvatar : defaultAvatar);
+        
+        // Dynamically prioritize directory match or active user profile avatar over any fallback badge
+        const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(ev.organizerId));
+        const hostAvatar = dirMatch?.avatar || window.userProfile?.avatar || ev.organizerAvatar || ev.hostAvatar || defaultAvatar;
         const hostName = ev.organizer || ev.hostName || 'Organizer';
 
         return `

@@ -33,23 +33,29 @@ export function renderRosterTab(event) {
     });
 
     const resolveAvatar = (att) => {
-        // 1. Check direct properties on attendee object
+        const currentUid = window.currentUser?.uid;
+        
+        // 1. Check if this attendee is you by UID
+        if (currentUid && att.uid && String(att.uid) === String(currentUid)) {
+            if (window.userProfile?.avatar && window.userProfile.avatar.trim() !== '') {
+                return window.userProfile.avatar;
+            }
+        }
+
+        // 2. Check global directory list by UID for your profile record
+        if (window.directoryList && Array.isArray(window.directoryList)) {
+            const foundDir = window.directoryList.find(u => (att.uid && String(u.uid) === String(u.uid)) || (currentUid && String(u.uid) === String(currentUid)));
+            if (foundDir && foundDir.avatar && foundDir.avatar.trim() !== '') {
+                return foundDir.avatar;
+            }
+        }
+
+        // 3. Fallback to direct properties if valid
         if (att.avatar && att.avatar.trim() !== '' && !att.avatar.includes('dicebear.com/7.x/initials')) return att.avatar;
         if (att.photoURL && att.photoURL.trim() !== '') return att.photoURL;
         if (att.profilePicture && att.profilePicture.trim() !== '') return att.profilePicture;
 
-        // 2. Check global directory list by UID or Name
-        if (window.directoryList && Array.isArray(window.directoryList)) {
-            const foundDir = window.directoryList.find(u => 
-                (att.uid && String(u.uid) === String(att.uid)) || 
-                (u.name && att.name && u.name.toLowerCase() === att.name.toLowerCase())
-            );
-            if (foundDir && (foundDir.avatar || foundDir.photoURL)) {
-                return foundDir.avatar || foundDir.photoURL;
-            }
-        }
-
-        // 3. Fallback to Dicebear initials if no valid image URL exists
+        // 4. Fallback to initials
         const seedName = encodeURIComponent(att.name || att.firstName || 'Player');
         return `https://api.dicebear.com/7.x/initials/svg?seed=${seedName}`;
     };

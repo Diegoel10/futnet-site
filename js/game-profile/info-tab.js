@@ -1,8 +1,12 @@
 // js/game-profile/info-tab.js: Compact frosted glass layout with resized navigation pills and tighter spacing
 export function renderInfoTab(event) {
     const organizerName = event.organizer || event.hostName || 'Organizer';
-    const organizerAvatar = event.organizerAvatar || event.hostAvatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     const organizerId = event.organizerId;
+    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+
+    // Prioritize active user profile or directory match over default badge for the organizer avatar
+    const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(organizerId));
+    const organizerAvatar = dirMatch?.avatar || window.userProfile?.avatar || event.organizerAvatar || event.hostAvatar || defaultAvatar;
 
     const currentUid = window.currentUser?.uid;
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
