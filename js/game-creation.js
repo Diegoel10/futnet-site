@@ -222,15 +222,9 @@ window.handleCreateEvent = async function(e) {
     let eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
     const organizerName = `${window.userProfile?.firstName || ''} ${window.userProfile?.lastName || ''}`.trim() || 'Player';
-    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     
-    const directoryEntry = (window.directoryList || []).find(u => String(u.uid) === String(window.currentUser.uid));
-    let rawAvatar = directoryEntry?.avatar || window.userProfile?.avatar || window.currentUser?.photoURL || defaultAvatar;
-    
-    // Prevent Firestore 1MB document size limit errors from massive base64 strings
-    const organizerAvatar = (typeof rawAvatar === 'string' && rawAvatar.startsWith('data:image') && rawAvatar.length > 500000)
-        ? `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(organizerName)}`
-        : rawAvatar;
+    // Always use a safe web URL avatar for the event document to prevent Firestore 1MB size limit errors
+    const organizerAvatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(organizerName)}`;
 
     let attendees = [{
         uid: window.currentUser.uid,
