@@ -42,7 +42,7 @@ function formatTimeTo12Hour(timeStr) {
 window.initEventsLiveListener = function() {
     if (eventsUnsubscribe) eventsUnsubscribe();
 
-    const eventsRef = collection(db, 'artifacts', appId, 'eventsList');
+    const eventsRef = collection(db, 'events');
 
     // Connection timeout fallback to prevent infinite loading screen
     const loadTimeout = setTimeout(() => {

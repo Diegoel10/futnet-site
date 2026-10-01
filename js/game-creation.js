@@ -1,6 +1,6 @@
 // js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll
 import { db, appId } from './firebase-config.js';
-import { collection, doc, setDoc, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { collection, doc, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 let cachedParks = [];
 let isParksLoaded = false;
@@ -266,7 +266,8 @@ window.handleCreateEvent = async function(e) {
     };
 
     try {
-        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
+        // Fixed collection path: saves directly into the top-level 'events' collection
+        const eventDocRef = doc(db, 'events', eventId);
         await setDoc(eventDocRef, newEvent);
 
         window.resetCreateGameForm();
