@@ -1,4 +1,4 @@
-// js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll and safe avatar handling
+// js/game-creation.js: Handles 2-step game creation matching the iOS app with mobile keyboard auto-scroll
 import { db, appId } from './firebase-config.js';
 import { collection, doc, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -224,15 +224,8 @@ window.handleCreateEvent = async function(e) {
     const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim() || 'Player';
     const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     
-    // Fallback if profile avatar is a massive base64 string that fails Firestore serialization
-    let organizerAvatar = defaultAvatar;
-    if (window.userProfile.avatar && typeof window.userProfile.avatar === 'string') {
-        if (window.userProfile.avatar.startsWith('http')) {
-            organizerAvatar = window.userProfile.avatar;
-        } else {
-            organizerAvatar = window.currentUser.photoURL || defaultAvatar;
-        }
-    }
+    // Restored full support for custom profile picture (base64 or URL)
+    const organizerAvatar = window.userProfile.avatar || window.currentUser?.photoURL || defaultAvatar;
 
     let attendees = [{
         uid: window.currentUser.uid,
