@@ -4,7 +4,6 @@ export function renderInfoTab(event) {
     const organizerId = event.organizerId;
     const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
-    // Prioritize active user profile or directory match over default badge for the organizer avatar
     const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(organizerId));
     const organizerAvatar = dirMatch?.avatar || window.userProfile?.avatar || event.organizerAvatar || event.hostAvatar || defaultAvatar;
 
@@ -30,7 +29,12 @@ export function renderInfoTab(event) {
                         <h4 class="text-xs font-black text-white group-hover:text-[#00F296] transition mt-0.5">${organizerName}</h4>
                     </div>
                 </div>
-                <span class="text-[9px] font-bold px-3 py-1 rounded-full bg-[#00F296]/15 text-[#00F296] border border-[#00F296]/50 shadow-[0_0_12px_rgba(0,242,150,0.3)]">Organizer</span>
+                <div class="flex items-center gap-2">
+                    <button onclick="window.shareGameLink('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] border border-[#00F296]/50 px-3 py-1.5 rounded-full text-[10px] font-black transition flex items-center gap-1.5 shadow-[0_0_10px_rgba(0,242,150,0.2)]">
+                        <i class="fa-solid fa-share-nodes"></i> Share Link
+                    </button>
+                    <span class="text-[9px] font-bold px-3 py-1 rounded-full bg-[#00F296]/15 text-[#00F296] border border-[#00F296]/50 shadow-[0_0_12px_rgba(0,242,150,0.3)]">Organizer</span>
+                </div>
             </div>
 
             <!-- 2. Date, Time & Location Box -->
@@ -56,7 +60,7 @@ export function renderInfoTab(event) {
                     <span class="text-[8px] font-black text-white/50 uppercase tracking-wider flex items-center gap-1.5">
                         <i class="fa-solid fa-location-dot text-[#00F296] text-[9px]"></i> Park & Location
                     </span>
-                    <p class="text-[11px] font-black text-white leading-snug">${event.location || 'George Gerber Park (Coconut Creek, Florida)'}</p>
+                    <p class="text-[11px] font-black text-white leading-snug">${event.location || ''}</p>
                 </div>
 
                 <button onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location || '')}', '_blank')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-3 rounded-xl text-xs shadow-[0_0_15px_rgba(0,242,150,0.4)] transition flex flex-col items-center justify-center gap-0.5 shrink-0">
@@ -133,6 +137,19 @@ export function renderInfoTab(event) {
             </div>
         </div>
     `;
+};
+
+window.shareGameLink = function(eventId) {
+    const shareUrl = `https://futnet.site/#event=${eventId}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            window.showToast("📋 Game link copied to clipboard!");
+        }).catch(() => {
+            prompt("Copy game link:", shareUrl);
+        });
+    } else {
+        prompt("Copy game link:", shareUrl);
+    }
 };
 
 window.toggleSection = function(contentId, chevronId) {

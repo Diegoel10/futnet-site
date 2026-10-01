@@ -678,6 +678,19 @@
             window.switchTab(targetTab, false);
         });
 
+        // Automatically check URL hash on load for direct game links
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const hash = window.location.hash;
+                if (hash && hash.includes('#event=')) {
+                    const eventId = hash.split('#event=')[1];
+                    if (eventId && typeof window.openEventDetails === 'function') {
+                        window.openEventDetails(eventId);
+                    }
+                }
+            }, 1200);
+        });
+
         onAuthStateChanged(auth, async (user) => {
             window.currentUser = user;
             if (user) {
