@@ -1,4 +1,4 @@
-// js/auth.js: Auth logic with popup fallback to redirect for seamless Google and Apple sign-in on mobile
+// js/auth.js: Complete auth module with full avatar selectors, popup sign-in, and auth state listeners
 import './profile.js';
 import './home.js';
 import './legal-modal.js';
@@ -7,8 +7,6 @@ import {
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     signInWithPopup, 
-    signInWithRedirect,
-    getRedirectResult,
     GoogleAuthProvider, 
     FacebookAuthProvider, 
     TwitterAuthProvider,
@@ -37,8 +35,10 @@ window.handleSignupAvatarSelection = function(event) {
 };
 
 window.showSignupScreen = function() {
-    document.getElementById('view-login').classList.add('hidden');
-    document.getElementById('view-signup').classList.remove('hidden');
+    const loginView = document.getElementById('view-login');
+    const signupView = document.getElementById('view-signup');
+    if (loginView) loginView.classList.add('hidden');
+    if (signupView) signupView.classList.remove('hidden');
     
     const signupForm = document.querySelector('#view-signup form');
     if (signupForm && !document.getElementById('signup-avatar-preview')) {
@@ -59,45 +59,56 @@ window.showSignupScreen = function() {
 };
 
 window.showLoginScreen = function() {
-    document.getElementById('view-signup').classList.add('hidden');
-    document.getElementById('view-login').classList.remove('hidden');
+    const loginView = document.getElementById('view-login');
+    const signupView = document.getElementById('view-signup');
+    if (signupView) signupView.classList.add('hidden');
+    if (loginView) loginView.classList.remove('hidden');
 };
 
 window.handleEmailAuth = async function(event) {
     event.preventDefault();
-    const email = document.getElementById('auth-email').value.trim();
-    const password = document.getElementById('auth-password').value;
+    const emailInput = document.getElementById('auth-email');
+    const passInput = document.getElementById('auth-password');
     const errorBox = document.getElementById('login-error-msg');
-    errorBox.classList.add('hidden');
+    
+    if (!emailInput || !passInput) return;
+    const email = emailInput.value.trim();
+    const password = passInput.value;
+    
+    if (errorBox) errorBox.classList.add('hidden');
 
     try {
         await signInWithEmailAndPassword(auth, email, password);
-        window.showToast("Signed in successfully!");
+        if (typeof window.showToast === 'function') window.showToast("Signed in successfully!");
     } catch (err) {
         console.error("Login error:", err);
-        errorBox.textContent = err.message || "Wrong email or password";
-        errorBox.classList.remove('hidden');
+        if (errorBox) {
+            errorBox.textContent = err.message || "Wrong email or password";
+            errorBox.classList.remove('hidden');
+        }
     }
 };
 
 window.handleUnifiedRegistration = async function(event) {
     event.preventDefault();
-    const firstName = document.getElementById('reg-firstname').value.trim();
-    const lastName = document.getElementById('reg-lastname').value.trim();
-    const nickname = document.getElementById('reg-nickname').value.trim();
-    const email = document.getElementById('reg-email').value.trim();
-    const password = document.getElementById('reg-password').value;
-    const confirmPass = document.getElementById('reg-confirm').value;
-    const gender = document.getElementById('reg-gender').value;
-    const dob = document.getElementById('reg-dob').value;
-    const position = document.getElementById('reg-position').value;
+    const firstName = document.getElementById('reg-firstname')?.value.trim() || '';
+    const lastName = document.getElementById('reg-lastname')?.value.trim() || '';
+    const nickname = document.getElementById('reg-nickname')?.value.trim() || '';
+    const email = document.getElementById('reg-email')?.value.trim() || '';
+    const password = document.getElementById('reg-password')?.value || '';
+    const confirmPass = document.getElementById('reg-confirm')?.value || '';
+    const gender = document.getElementById('reg-gender')?.value || 'Male';
+    const dob = document.getElementById('reg-dob')?.value || '1995-01-01';
+    const position = document.getElementById('reg-position')?.value || 'Forward';
     const errorBox = document.getElementById('signup-error-msg');
     
-    errorBox.classList.add('hidden');
+    if (errorBox) errorBox.classList.add('hidden');
 
     if (password !== confirmPass) {
-        errorBox.textContent = "Passwords do not match!";
-        errorBox.classList.remove('hidden');
+        if (errorBox) {
+            errorBox.textContent = "Passwords do not match!";
+            errorBox.classList.remove('hidden');
+        }
         return;
     }
 
@@ -130,7 +141,7 @@ window.handleUnifiedRegistration = async function(event) {
         }, { merge: true });
 
         window.userProfile = profileData;
-        window.showToast("Account created successfully!");
+        if (typeof window.showToast === 'function') window.showToast("Account created successfully!");
         
         if (typeof window.switchTab === 'function') {
             window.switchTab('events');
@@ -140,8 +151,10 @@ window.handleUnifiedRegistration = async function(event) {
         }
     } catch (err) {
         console.error("Registration error:", err);
-        errorBox.textContent = err.message || "Failed to create account.";
-        errorBox.classList.remove('hidden');
+        if (errorBox) {
+            errorBox.textContent = err.message || "Failed to create account.";
+            errorBox.classList.remove('hidden');
+        }
     }
 };
 
@@ -158,70 +171,49 @@ window.handleSocialAuth = async function(providerName) {
     else return;
 
     try {
-        // Attempt popup first; if it fails or gets blocked, fallback to redirect
-        let result;
-        try {
-            result = await signInWithPopup(auth, provider);
-        } catch (popupErr) {
-            console.warn("Popup blocked or failed, falling back to redirect:", popupErr);
-            await signInWithRedirect(auth, provider);
-            return;
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+
+        const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+        const docSnap = await getDoc(profileRef);
+
+        if (!docSnap.exists()) {
+            const nameParts = (user.displayName || "Player").split(" ");
+            const firstName = nameParts[0] || "Player";
+            const lastName = nameParts.slice(1).join(" ") || "";
+
+            const profileData = {
+                uid: user.uid,
+                firstName,
+                lastName,
+                nickname: "",
+                email: user.email || "",
+                gender: "Male",
+                dob: "1995-01-01",
+                position: "Forward",
+                avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+                termsAccepted: false,
+                createdAt: new Date().toISOString()
+            };
+
+            await setDoc(profileRef, profileData);
+            await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
+                uid: user.uid,
+                name: `${firstName} ${lastName}`.trim(),
+                avatar: profileData.avatar,
+                position: "Forward"
+            }, { merge: true });
         }
 
-        const user = result.user;
-        await handleSocialUserSession(user);
+        if (typeof window.showToast === 'function') window.showToast("Signed in successfully!");
+        if (typeof window.checkAndShowLegalModal === 'function') {
+            window.checkAndShowLegalModal();
+        }
     } catch (err) {
         console.error("Social auth error:", err);
-        window.showToast(err.message || "Social sign-in failed", "error");
+        if (typeof window.showToast === 'function') window.showToast(err.message || "Social sign-in failed", "error");
     }
 };
-
-async function handleSocialUserSession(user) {
-    const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
-    const docSnap = await getDoc(profileRef);
-
-    if (!docSnap.exists()) {
-        const nameParts = (user.displayName || "Player").split(" ");
-        const firstName = nameParts[0] || "Player";
-        const lastName = nameParts.slice(1).join(" ") || "";
-
-        const profileData = {
-            uid: user.uid,
-            firstName,
-            lastName,
-            nickname: "",
-            email: user.email || "",
-            gender: "Male",
-            dob: "1995-01-01",
-            position: "Forward",
-            avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
-            termsAccepted: false,
-            createdAt: new Date().toISOString()
-        };
-
-        await setDoc(profileRef, profileData);
-        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), {
-            uid: user.uid,
-            name: `${firstName} ${lastName}`.trim(),
-            avatar: profileData.avatar,
-            position: "Forward"
-        }, { merge: true });
-    }
-
-    window.showToast("Signed in successfully!");
-    if (typeof window.checkAndShowLegalModal === 'function') {
-        window.checkAndShowLegalModal();
-    }
-}
-
-// Check for redirect result on page load (handles Apple/Google redirect authentication return)
-getRedirectResult(auth).then(async (result) => {
-    if (result && result.user) {
-        await handleSocialUserSession(result.user);
-    }
-}).catch((error) => {
-    console.error("Redirect auth error:", error);
-});
 
 window.handleLogout = async function() {
     try {
@@ -229,11 +221,11 @@ window.handleLogout = async function() {
         await signOut(activeAuth);
         window.currentUser = null;
         window.userProfile = null;
-        window.showToast("Logged out successfully.");
+        if (typeof window.showToast === 'function') window.showToast("Logged out successfully.");
         window.location.reload();
     } catch (err) {
         console.error("Error signing out:", err);
-        window.showToast("Failed to log out", "error");
+        if (typeof window.showToast === 'function') window.showToast("Failed to log out", "error");
     }
 };
 
