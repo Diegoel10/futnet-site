@@ -1,4 +1,4 @@
-// js/game-profile/team-tool.js: Full Team Builder & Lineup Tool rendered as a dedicated full-page view with a Back button
+// js/game-profile/team-tool.js: Full Team Builder & Lineup Tool rendered as a dedicated overlay modal view with pointer-events enabled
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -81,15 +81,14 @@ function getFlattenedPlayersList(attendees) {
 }
 
 window.openTeamMakingModal = function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) {
         if (typeof window.showToast === 'function') window.showToast("Event data not found.", "error");
         return;
     }
 
-    window.activeModalEventId = eventId;
-    window.activeModalTab = 'teams';
-    window.activeTeamTab = 0;
+    window.activeModalEventId = event.id;
+    window.activeTeamTab = window.activeTeamTab !== undefined ? window.activeTeamTab : 0;
     window.currentTeamBuildingEvent = event;
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
@@ -97,18 +96,26 @@ window.openTeamMakingModal = function(eventId) {
     window.teamColors[event.id] = event.teamColors || {};
     window.teamCaptains[event.id] = event.teamCaptains || {};
 
-    if (typeof window.switchTab === 'function') {
-        window.switchTab('event-details-screen');
+    let modal = document.getElementById('standalone-team-builder-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'standalone-team-builder-modal';
+        modal.className = 'fixed inset-0 z-[180] flex flex-col bg-[#040E13] overflow-y-auto p-4 sm:p-6 text-white pointer-events-auto';
+        document.body.appendChild(modal);
     }
-    if (typeof window.renderEventDetailModalContent === 'function') {
-        window.renderEventDetailModalContent();
-    }
+
+    modal.innerHTML = `
+        <div class="max-w-4xl mx-auto w-full space-y-6 pointer-events-auto">
+            ${renderTeamToolTab(event)}
+        </div>
+    `;
 };
 
 window.switchTeamTab = function(teamIndex) {
     window.activeTeamTab = teamIndex;
-    if (typeof window.renderEventDetailModalContent === 'function') {
-        window.renderEventDetailModalContent();
+    const event = window.currentTeamBuildingEvent || (window.eventsList || []).find(ev => ev.id === window.activeModalEventId);
+    if (event) {
+        window.openTeamMakingModal(event.id);
     }
 };
 
@@ -118,9 +125,7 @@ window.changeTeamFormation = async function(eventId, teamIndex, formationKey) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (event) {
         await updateTeamToolFirestore(event);
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(eventId);
     }
 };
 
@@ -130,9 +135,7 @@ window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (event) {
         await updateTeamToolFirestore(event);
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(eventId);
     }
 };
 
@@ -143,9 +146,7 @@ window.setTeamCaptain = async function(eventId, teamIndex, captainUid) {
     if (event) {
         await updateTeamToolFirestore(event);
         if (typeof window.showToast === 'function') window.showToast("Captain updated!");
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(eventId);
     }
 };
 
@@ -166,9 +167,7 @@ window.saveTeamNameModal = async function(eventId, teamIndex) {
             if (typeof window.showToast === 'function') {
                 window.showToast(`Team name updated to "${newName}"!`);
             }
-            if (typeof window.renderEventDetailModalContent === 'function') {
-                window.renderEventDetailModalContent();
-            }
+            window.openTeamMakingModal(eventId);
         } catch (err) {
             console.error("Failed to save team name:", err);
         }
@@ -194,12 +193,12 @@ window.promptRandomizeOptions = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'randomize-options-modal';
-        modal.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm';
+        modal.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm pointer-events-auto';
         document.body.appendChild(modal);
     }
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center pointer-events-auto">
             <h3 class="text-sm font-black uppercase text-white">You have players already selected</h3>
             <p class="text-[11px] text-white/60">What would you like to do?</p>
             <div class="space-y-2.5 pt-2">
@@ -222,7 +221,7 @@ window.promptRandomizeDistribution = function(eventId, keepExisting) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'randomize-options-modal';
-        modal.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm';
+        modal.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm pointer-events-auto';
         document.body.appendChild(modal);
     }
 
@@ -232,7 +231,7 @@ window.promptRandomizeDistribution = function(eventId, keepExisting) {
         : '';
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center pointer-events-auto">
             <h3 class="text-sm font-black uppercase text-white">Randomize Teams</h3>
             <p class="text-[11px] text-white/60">How would you like to distribute the players?</p>
             <div class="space-y-2.5 pt-2">
@@ -332,9 +331,7 @@ window.executeRandomizeTeams = async function(eventId, keepGuestsTogether, keepE
             if (leftOut > 0) window.showToast(`Teams randomized. ${leftOut} player(s) didn't fit.`);
             else window.showToast("Teams randomized successfully!");
         }
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(eventId);
     } catch (err) {
         console.error("Failed to randomize teams:", err);
     }
@@ -366,7 +363,7 @@ export function renderTeamToolTab(event) {
     window.teamCaptains[event.id] = window.teamCaptains[event.id] || {};
     const activeTab = window.activeTeamTab || 0;
 
-    window.teamAssignments[event.id] = event.teamAssignments || {};
+    window.teamAssignments[event.id] = window.teamAssignments[event.id] || {};
     for (let i = 0; i < teamsCount; i++) {
         window.teamAssignments[event.id][i] = window.teamAssignments[event.id][i] || [];
     }
@@ -383,7 +380,7 @@ export function renderTeamToolTab(event) {
     const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
 
     let tabsHtml = `
-        <button onclick="switchTeamTab(0)" class="px-4 py-2.5 rounded-2xl text-xs font-black transition shrink-0 ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/80 border border-white/10'}">
+        <button data-action="switch-team-tab" data-team-index="0" class="px-4 py-2.5 rounded-2xl text-xs font-black transition shrink-0 ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/80 border border-white/10'}">
             📋 Summary
         </button>
     `;
@@ -393,7 +390,7 @@ export function renderTeamToolTab(event) {
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
         const tColor = window.teamColors[event.id][i] || defaultColors[i % defaultColors.length];
         tabsHtml += `
-            <button onclick="switchTeamTab(${tIdx})" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
+            <button data-action="switch-team-tab" data-team-index="${tIdx}" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
                 <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle" style="background-color: ${tColor};"></span> ${tName}
             </button>
         `;
@@ -420,7 +417,7 @@ export function renderTeamToolTab(event) {
                         <div class="flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl border text-xs shadow-md" style="border-color: ${tColor};">
                             <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20">
                             <span class="font-bold text-white">${pName} ${isCap ? '⭐' : ''}</span>
-                            <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${i}, '${pUid}')" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
+                            <button data-action="unassign-team-slot" data-event-id="${event.id}" data-team-index="${i}" data-uid="${pUid}" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     `;
                 }).join('');
@@ -439,7 +436,7 @@ export function renderTeamToolTab(event) {
                         </div>
                     </div>
                     <div class="pt-3 border-t border-white/10">
-                        <button onclick="openAssignPicker('${event.id}', ${i}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
+                        <button data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${i}" data-slot-index="null" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
                             <i class="fa-solid fa-user-plus"></i> + Add Player to ${tName}
                         </button>
                     </div>
@@ -484,8 +481,8 @@ export function renderTeamToolTab(event) {
 
         let playerIndex = 0;
         let rowsHtml = '';
-
         const displayRows = [...rowCounts].reverse();
+
         displayRows.forEach((count, rIdx) => {
             let rowSlots = '';
             for (let c = 0; c < count; c++) {
@@ -495,9 +492,9 @@ export function renderTeamToolTab(event) {
                 
                 if (p && p.name) {
                     rowSlots += `
-                        <div onclick="promptRemoveOrChangeSlot('${event.id}', ${teamIdx}, ${slotIdx}, '${p.name.replace(/'/g, "\\'")}')" class="w-36 h-14 bg-black/90 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 relative group transition hover:scale-105" style="border-color: ${currentTeamColor};">
+                        <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${(p.name || '').replace(/'/g, "\\'")}" class="w-36 h-14 bg-black/90 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 relative group transition hover:scale-105" style="border-color: ${currentTeamColor};">
                             <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                            <div class="truncate text-left leading-tight">
+                            <div class="truncate text-left leading-tight pointer-events-none">
                                 <span class="text-[7px] font-black uppercase block tracking-wider" style="color: ${currentTeamColor};">${positionName}</span>
                                 <span class="text-[10px] font-black text-white truncate block">${p.name}</span>
                             </div>
@@ -505,9 +502,9 @@ export function renderTeamToolTab(event) {
                     `;
                 } else {
                     rowSlots += `
-                        <div onclick="openAssignPicker('${event.id}', ${teamIdx}, ${slotIdx})" class="w-36 h-14 bg-black/60 border-2 border-dashed rounded-full px-3 py-1 text-center cursor-pointer hover:bg-black/80 transition flex items-center justify-center gap-2 shadow" style="border-color: ${currentTeamColor};">
-                            <i class="fa-solid fa-shirt text-white/80 text-xs"></i>
-                            <span class="text-[10px] font-black uppercase text-white/90 tracking-wider">${positionName}</span>
+                        <div data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" class="w-36 h-14 bg-black/60 border-2 border-dashed rounded-full px-3 py-1 text-center cursor-pointer hover:bg-black/80 transition flex items-center justify-center gap-2 shadow" style="border-color: ${currentTeamColor};">
+                            <i class="fa-solid fa-shirt text-white/80 text-xs pointer-events-none"></i>
+                            <span class="text-[10px] font-black uppercase text-white/90 tracking-wider pointer-events-none">${positionName}</span>
                         </div>
                     `;
                 }
@@ -517,22 +514,28 @@ export function renderTeamToolTab(event) {
 
         const goalieSlotIdx = playerIndex++;
         const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
-        rowsHtml += `
-            <div class="flex justify-center mt-3">
-                <div onclick="${goaliePlayer && goaliePlayer.name ? `promptRemoveOrChangeSlot('${event.id}',${teamIdx}, ${goalieSlotIdx}, '${goaliePlayer.name.replace(/'/g, "\\'")}')` : `openAssignPicker('${event.id}', ${teamIdx},${goalieSlotIdx})`}" class="w-40 h-14 ${goaliePlayer && goaliePlayer.name ? 'bg-black/90 border-2' : 'border-2 border-dashed bg-black/60'} rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
-                    ${goaliePlayer && goaliePlayer.name ? `
+        if (goaliePlayer && goaliePlayer.name) {
+            rowsHtml += `
+                <div class="flex justify-center mt-3">
+                    <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${(goaliePlayer.name || '').replace(/'/g, "\\'")}" class="w-40 h-14 bg-black/90 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
                         <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <div class="truncate text-left leading-tight">
+                        <div class="truncate text-left leading-tight pointer-events-none">
                             <span class="text-[7px] font-black uppercase block tracking-wider text-amber-400">GK</span>
                             <span class="text-[10px] font-black text-white truncate block">${goaliePlayer.name}</span>
                         </div>
-                    ` : `
-                        <i class="fa-solid fa-hand text-amber-300 text-sm ml-2"></i>
-                        <span class="text-[10px] font-black uppercase text-amber-300 tracking-wider ml-1">GK</span>
-                    `}
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        } else {
+            rowsHtml += `
+                <div class="flex justify-center mt-3">
+                    <div data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" class="w-40 h-14 border-2 border-dashed bg-black/60 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
+                        <i class="fa-solid fa-hand text-amber-300 text-sm ml-2 pointer-events-none"></i>
+                        <span class="text-[10px] font-black uppercase text-amber-300 tracking-wider ml-1 pointer-events-none">GK</span>
+                    </div>
+                </div>
+            `;
+        }
 
         const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>⭐ ${p.name}</option>`).join('');
         const formationsOptionsHtml = Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('');
@@ -554,7 +557,7 @@ export function renderTeamToolTab(event) {
                                 <div class="text-[10px] text-white/50">${pPos}</div>
                             </div>
                         </div>
-                        <button onclick="unassignPlayerFromTeamSlot('${event.id}', ${teamIdx}, '${pUid}')" class="text-red-400 hover:text-red-300 font-bold px-3 py-1.5 rounded-xl text-xs bg-red-500/10 border border-red-500/30 transition">Remove</button>
+                        <button data-action="unassign-team-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-uid="${pUid}" class="text-red-400 hover:text-red-300 font-bold px-3 py-1.5 rounded-xl text-xs bg-red-500/10 border border-red-500/30 transition">Remove</button>
                     </div>
                 `;
             }).join('');
@@ -572,19 +575,19 @@ export function renderTeamToolTab(event) {
                             <label class="block text-[10px] font-bold text-white/60 uppercase">Team Color</label>
                             <div class="flex items-center gap-2.5 pt-1.5">
                                 ${defaultColors.map(col => `
-                                    <button onclick="changeTeamColor('${event.id}', ${teamIdx}, '${col}')" class="w-7 h-7 rounded-full border-2 transition ${currentTeamColor === col ? 'border-white scale-110 shadow-md' : 'border-transparent'}" style="background-color: ${col};"></button>
+                                    <button data-action="change-team-color" data-event-id="${event.id}" data-team-index="${teamIdx}" data-color="${col}" class="w-7 h-7 rounded-full border-2 transition ${currentTeamColor === col ? 'border-white scale-110 shadow-md' : 'border-transparent'}" style="background-color: ${col};"></button>
                                 `).join('')}
                             </div>
                         </div>
                         <div class="space-y-1.5">
                             <label class="block text-[10px] font-bold text-white/60 uppercase">Captain</label>
-                            <select onchange="setTeamCaptain('${event.id}', ${teamIdx}, this.value)" class="w-full bg-black/80 border border-white/20 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white">
+                            <select id="team-captain-select-${teamIdx}" data-action="set-team-captain" data-event-id="${event.id}" data-team-index="${teamIdx}" class="w-full bg-black/80 border border-white/20 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white">
                                 <option value="">Select Captain</option>
                                 ${captainOptionsHtml}
                             </select>
                         </div>
                     </div>
-                    <button onclick="saveTeamNameModal('${event.id}', ${teamIdx})" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-xs shadow-md transition mt-1">Save Team Name</button>
+                    <button data-action="save-team-name" data-event-id="${event.id}" data-team-index="${teamIdx}" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-xs shadow-md transition mt-1">Save Team Name</button>
                 </div>
 
                 <div class="relative border-2 rounded-3xl p-5 shadow-2xl overflow-hidden min-h-[480px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentTeamColor};">
@@ -592,7 +595,7 @@ export function renderTeamToolTab(event) {
 
                     <div class="flex justify-between items-center relative z-10">
                         <span class="text-white font-black text-xs px-4 py-2 rounded-2xl uppercase tracking-wider shadow-lg" style="background-color: ${currentTeamColor};">${currentTeamName}</span>
-                        <select onchange="changeTeamFormation('${event.id}', ${teamIdx}, this.value)" class="bg-black/90 text-white font-bold text-xs px-4 py-2 rounded-2xl border border-white/20 shadow-md">
+                        <select id="team-formation-select-${teamIdx}" data-action="change-team-formation" data-event-id="${event.id}" data-team-index="${teamIdx}" class="bg-black/90 text-white font-bold text-xs px-4 py-2 rounded-2xl border border-white/20 shadow-md">
                             ${formationsOptionsHtml}
                         </select>
                     </div>
@@ -614,8 +617,8 @@ export function renderTeamToolTab(event) {
                         ${squadMembersListHtml}
                     </div>
                     <div class="pt-2">
-                        <button onclick="openAssignPicker('${event.id}', ${teamIdx}, null)" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
-                            <i class="fa-solid fa-user-plus"></i> + Add Player to ${currentTeamName}
+                        <button data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="null" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
+                            <i class="fa-solid fa-user-plus pointer-events-none"></i> + Add Player to ${currentTeamName}
                         </button>
                     </div>
                 </div>
@@ -624,11 +627,11 @@ export function renderTeamToolTab(event) {
     }
 
     return `
-        <div class="space-y-6 max-w-4xl mx-auto pb-12">
+        <div class="space-y-6 max-w-4xl mx-auto pb-12 pointer-events-auto">
             <div class="bg-[#040E13]/95 backdrop-blur-md border border-emerald-500/40 rounded-3xl p-5 shadow-2xl flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <button onclick="switchModalTab('roster')" class="w-10 h-10 bg-black/50 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shadow">
-                        <i class="fa-solid fa-chevron-left text-xs"></i>
+                    <button data-action="close-standalone-modal" class="w-10 h-10 bg-black/50 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shadow">
+                        <i class="fa-solid fa-chevron-left text-xs pointer-events-none"></i>
                     </button>
                     <div>
                         <h3 class="text-base font-black uppercase text-white">🔀 Team Builder & Lineups</h3>
@@ -636,14 +639,14 @@ export function renderTeamToolTab(event) {
                     </div>
                 </div>
                 <div>
-                    <button onclick="promptRandomizeOptions('${event.id}')" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2.5 rounded-2xl text-xs shadow-md transition flex items-center gap-1.5">
-                        <i class="fa-solid fa-shuffle text-xs"></i> Randomize
+                    <button data-action="prompt-randomize" data-event-id="${event.id}" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2.5 rounded-2xl text-xs shadow-md transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-shuffle text-xs pointer-events-none"></i> Randomize
                     </button>
                 </div>
             </div>
 
             <!-- Tabs Navigation Bar -->
-            <div class="flex items-center gap-2.5 overflow-x-auto pb-2 no-scrollbar">
+            <div class="flex items-center gap-2.5 overflow-x-auto pb-2 no-scrollbar pointer-events-auto">
                 ${tabsHtml}
             </div>
 
@@ -653,23 +656,70 @@ export function renderTeamToolTab(event) {
     `;
 }
 
+// Global click and change event delegation with pointer-events check
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-action');
+    const eventId = btn.getAttribute('data-event-id');
+
+    if (action === 'close-standalone-modal') {
+        document.getElementById('standalone-team-builder-modal')?.remove();
+    } else if (action === 'prompt-randomize') {
+        window.promptRandomizeOptions(eventId);
+    } else if (action === 'switch-team-tab') {
+        const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
+        window.switchTeamTab(teamIndex);
+    } else if (action === 'change-team-color') {
+        const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
+        const color = btn.getAttribute('data-color');
+        window.changeTeamColor(eventId, teamIndex, color);
+    } else if (action === 'save-team-name') {
+        const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
+        window.saveTeamNameModal(eventId, teamIndex);
+    } else if (action === 'unassign-team-slot') {
+        const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
+        const uid = btn.getAttribute('data-uid');
+        window.unassignPlayerFromTeamSlot(eventId, teamIndex, uid);
+    } else if (action === 'open-assign-picker') {
+        const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
+        const slotAttr = btn.getAttribute('data-slot-index');
+        const slotIndex = slotAttr === 'null' ? null : parseInt(slotAttr, 10);
+        window.openAssignPicker(eventId, teamIndex, slotIndex);
+    } else if (action === 'prompt-remove-slot') {
+        const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
+        const slotIndex = parseInt(btn.getAttribute('data-slot-index'), 10);
+        const playerName = btn.getAttribute('data-player-name');
+        window.promptRemoveOrChangeSlot(eventId, teamIndex, slotIndex, playerName);
+    }
+});
+
+document.addEventListener('change', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.getAttribute('data-action');
+    const eventId = el.getAttribute('data-event-id');
+
+    if (action === 'change-team-formation') {
+        const teamIndex = parseInt(el.getAttribute('data-team-index'), 10);
+        window.changeTeamFormation(eventId, teamIndex, el.value);
+    } else if (action === 'set-team-captain') {
+        const teamIndex = parseInt(el.getAttribute('data-team-index'), 10);
+        window.setTeamCaptain(eventId, teamIndex, el.value);
+    }
+});
+
 window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
 
-    window.teamAssignments[eventId] = event.teamAssignments || {};
-    const teamRoster = window.teamAssignments[eventId][teamIndex] || [];
-    const assignedUIDsInTeam = new Set(teamRoster.map(p => String(p?.uid)));
-
+    window.teamAssignments[event.id] = event.teamAssignments || {};
+    const teamRoster = window.teamAssignments[event.id][teamIndex] || [];
     const allPlayers = getFlattenedPlayersList(event.attendees);
-    const teamRosterPlayers = allPlayers.filter(a => {
-        const matchesTeam = (a.team && a.team.toLowerCase() === (window.teamNames[eventId]?.[teamIndex] || `Team ${teamIndex + 1}`).toLowerCase()) || assignedUIDsInTeam.has(String(a.uid));
-        return matchesTeam;
-    });
 
     if (slotIndex !== null && slotIndex !== 'null') {
         const assignedPitchUIDs = new Set();
-        Object.entries(window.teamAssignments[eventId][teamIndex] || {}).forEach(([sIdx, player]) => {
+        Object.entries(window.teamAssignments[event.id][teamIndex] || {}).forEach(([sIdx, player]) => {
             if (player && player.uid && parseInt(sIdx) !== slotIndex) {
                 assignedPitchUIDs.add(String(player.uid));
             }
@@ -678,20 +728,19 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         const validTeamRoster = teamRoster.filter(p => p && p.uid);
         const unplacedPitchPlayers = validTeamRoster.filter(p => !assignedPitchUIDs.has(String(p.uid)));
         
+        let picker = document.getElementById('assign-picker-modal');
+        if (!picker) {
+            picker = document.createElement('div');
+            picker.id = 'assign-picker-modal';
+            picker.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm pointer-events-auto';
+            document.body.appendChild(picker);
+        }
+
         if (unplacedPitchPlayers.length === 0) {
             const placedPlayersWithPositions = validTeamRoster.filter(p => assignedPitchUIDs.has(String(p.uid)));
-            
-            let picker = document.getElementById('assign-picker-modal');
-            if (!picker) {
-                picker = document.createElement('div');
-                picker.id = 'assign-picker-modal';
-                picker.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
-                document.body.appendChild(picker);
-            }
-
             if (placedPlayersWithPositions.length === 0) {
                 picker.innerHTML = `
-                    <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+                    <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center pointer-events-auto">
                         <h4 class="text-xs font-black uppercase text-white">No players available</h4>
                         <p class="text-xs text-white/70">No more players available for now! Add more players to the team first.</p>
                         <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-[#00F296] text-slate-950 font-bold py-2.5 rounded-xl text-xs">OK</button>
@@ -699,91 +748,74 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                 `;
             } else {
                 picker.innerHTML = `
-                    <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+                    <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white pointer-events-auto">
                         <div class="flex items-center justify-between border-b border-white/10 pb-3">
                             <h4 class="text-xs font-black uppercase text-white">Move Player Here</h4>
                             <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
                         </div>
-                        <p class="text-[11px] text-white/70">No more players available for now! Would you like to move a player here?</p>
                         <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                             ${placedPlayersWithPositions.map(p => `
-                                <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                                    <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                                    <span class="text-xs font-bold text-white">${p.name} (Move to this position)</span>
+                                <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                                    <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
+                                    <span class="text-xs font-bold text-white">${p.name} (Move)</span>
                                 </div>
                             `).join('')}
                         </div>
-                        <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
                     </div>
                 `;
             }
             return;
         }
 
-        let picker = document.getElementById('assign-picker-modal');
-        if (!picker) {
-            picker = document.createElement('div');
-            picker.id = 'assign-picker-modal';
-            picker.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
-            document.body.appendChild(picker);
-        }
-
         picker.innerHTML = `
-            <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white pointer-events-auto">
                 <div class="flex items-center justify-between border-b border-white/10 pb-3">
                     <h4 class="text-xs font-black uppercase text-white">Assign Player to Position</h4>
                     <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                     ${unplacedPitchPlayers.map(p => `
-                        <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
                             <span class="text-xs font-bold text-white">${p.name}</span>
                         </div>
                     `).join('')}
                 </div>
-                <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
             </div>
         `;
         return;
     }
 
     const currentAssignedUIDs = new Set();
-    Object.values(window.teamAssignments[eventId]).forEach(teamArr => {
+    Object.values(window.teamAssignments[event.id] || {}).forEach(teamArr => {
         if (Array.isArray(teamArr)) {
             teamArr.forEach(p => { if (p && p.uid) currentAssignedUIDs.add(String(p.uid)); });
         }
     });
 
     const freeAgents = allPlayers.filter(a => !currentAssignedUIDs.has(String(a.uid)));
-    if (freeAgents.length === 0) {
-        if (typeof window.showToast === 'function') window.showToast("No available free agents found.", "error");
-        return;
-    }
-
     let picker = document.getElementById('assign-picker-modal');
     if (!picker) {
         picker = document.createElement('div');
         picker.id = 'assign-picker-modal';
-        picker.className = 'fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
+        picker.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm pointer-events-auto';
         document.body.appendChild(picker);
     }
 
     picker.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white pointer-events-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
                 <h4 class="text-xs font-black uppercase text-white">Add Player to Team</h4>
                 <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${freeAgents.map(a => `
-                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); assignPlayerToSlot('${eventId}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
                         <span class="text-xs font-bold text-white">${a.name}</span>
                     </div>
                 `).join('')}
             </div>
-            <button onclick="document.getElementById('assign-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
     `;
 };
@@ -793,14 +825,13 @@ window.promptRemoveOrChangeSlot = function(eventId, teamIndex, slotIndex, player
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'slot-action-modal';
-        modal.className = 'fixed inset-0 z-[170] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm';
+        modal.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm pointer-events-auto';
         document.body.appendChild(modal);
     }
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center pointer-events-auto">
             <h3 class="text-sm font-black uppercase text-white">Position: ${playerName}</h3>
-            <p class="text-[11px] text-white/60">Would you like to remove this player from the position?</p>
             <div class="space-y-2.5 pt-2">
                 <button onclick="document.getElementById('slot-action-modal').remove(); window.unassignPlayerFromSlot('${eventId}', ${teamIndex}, ${slotIndex})" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 font-black py-3 rounded-xl text-xs shadow transition">
                     Remove Player
@@ -817,68 +848,62 @@ window.promptRemoveOrChangeSlot = function(eventId, teamIndex, slotIndex, player
 };
 
 window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
     const allPlayers = getFlattenedPlayersList(event.attendees);
     const player = allPlayers.find(a => String(a.uid) === String(uid));
     if (!player) return;
 
-    window.teamAssignments[eventId] = event.teamAssignments || {};
-    window.teamAssignments[eventId][teamIndex] = window.teamAssignments[eventId][teamIndex] || [];
+    window.teamAssignments[event.id] = event.teamAssignments || {};
+    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex] || [];
 
     if (slotIndex !== null && slotIndex !== 'null') {
-        Object.entries(window.teamAssignments[eventId][teamIndex]).forEach(([sIdx, p]) => {
+        Object.entries(window.teamAssignments[event.id][teamIndex]).forEach(([sIdx, p]) => {
             if (p && String(p.uid) === String(uid)) {
-                window.teamAssignments[eventId][teamIndex][parseInt(sIdx)] = null;
+                window.teamAssignments[event.id][teamIndex][parseInt(sIdx)] = null;
             }
         });
-        window.teamAssignments[eventId][teamIndex][slotIndex] = player;
+        window.teamAssignments[event.id][teamIndex][slotIndex] = player;
     } else {
-        if (!window.teamAssignments[eventId][teamIndex].some(p => p && String(p.uid) === String(uid))) {
-            window.teamAssignments[eventId][teamIndex].push(player);
+        if (!window.teamAssignments[event.id][teamIndex].some(p => p && String(p.uid) === String(uid))) {
+            window.teamAssignments[event.id][teamIndex].push(player);
         }
     }
 
-    event.teamAssignments = window.teamAssignments[eventId];
+    event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(event.id);
     } catch (err) {
         console.error("Failed to assign player:", err);
     }
 };
 
 window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
-    if (!window.teamAssignments[eventId] || !window.teamAssignments[eventId][teamIndex]) return;
+    if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
 
-    window.teamAssignments[eventId][teamIndex][slotIndex] = null;
-    event.teamAssignments = window.teamAssignments[eventId];
+    window.teamAssignments[event.id][teamIndex][slotIndex] = null;
+    event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(event.id);
     } catch (err) {
         console.error("Failed to unassign player:", err);
     }
 };
 
 window.unassignPlayerFromTeamSlot = async function(eventId, teamIndex, uid) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
-    if (!window.teamAssignments[eventId] || !window.teamAssignments[eventId][teamIndex]) return;
+    if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
 
-    window.teamAssignments[eventId][teamIndex] = window.teamAssignments[eventId][teamIndex].filter(p => p && String(p.uid) !== String(uid));
-    event.teamAssignments = window.teamAssignments[eventId];
+    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && String(p.uid) !== String(uid));
+    event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
-        if (typeof window.renderEventDetailModalContent === 'function') {
-            window.renderEventDetailModalContent();
-        }
+        window.openTeamMakingModal(event.id);
     } catch (err) {
         console.error("Failed to remove player from team:", err);
     }

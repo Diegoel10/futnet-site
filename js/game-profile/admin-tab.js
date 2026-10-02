@@ -1,4 +1,4 @@
-// js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and add players screen
+// js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and non-blinking live timer
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc, addDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -119,10 +119,10 @@ export function renderAdminTab(event) {
     }
 
     const liveBannerHtml = liveActive ? `
-        <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 space-y-3 shadow-xl animate-pulse">
+        <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 space-y-3 shadow-xl">
             <div class="flex items-center justify-between">
                 <span class="bg-[#00F296] text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">🔴 LIVE MATCH</span>
-                <span class="text-xs font-mono font-black text-[#00F296]">
+                <span id="live-match-timer-display" class="text-xs font-mono font-black text-[#00F296]" data-start="${liveActive.startTime || Date.now()}">
                     ${liveTimerText}
                 </span>
             </div>
@@ -267,6 +267,20 @@ export function renderAdminTab(event) {
             </div>
         </div>
     `;
+}
+
+if (!window._liveTimerInterval) {
+    window._liveTimerInterval = setInterval(() => {
+        const timerEl = document.getElementById('live-match-timer-display');
+        if (!timerEl) return;
+        const startTime = parseInt(timerEl.getAttribute('data-start'), 10);
+        if (!startTime) return;
+        const diffSecs = Math.floor((Date.now() - startTime) / 1000);
+        const secs = Math.max(0, diffSecs);
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        timerEl.innerText = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }, 1000);
 }
 
 window.openAddPlayersScreen = function(eventId) {

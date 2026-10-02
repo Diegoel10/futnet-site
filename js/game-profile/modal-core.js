@@ -1,4 +1,4 @@
-// js/game-profile/modal-core.js: Complete updated file with native app UI, exact RSVP rules, and guest management
+// js/game-profile/modal-core.js: Complete updated file with native app UI, exact RSVP rules, guest management, and standalone Team Builder view
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderAdminTab } from './admin-tab.js';
@@ -53,7 +53,6 @@ window.renderInfoTab = function(event) {
     const isMine = window.currentUser && String(event.organizerId) === String(window.currentUser.uid);
     const finalHostAvatar = isMine && window.userProfile?.avatar ? window.userProfile.avatar : organizerAvatar;
 
-    // Robust attendee & host matching so creators/hosts can also leave/cancel RSVP
     const userId = window.currentUser ? String(window.currentUser.uid || window.currentUser.id || '') : '';
     const organizerId = event.organizerId ? String(event.organizerId) : '';
     const isHost = userId && organizerId && userId === organizerId;
@@ -61,10 +60,6 @@ window.renderInfoTab = function(event) {
     const isConfirmed = isHost || isConfirmedAttendee;
     const allowPlusOnes = event.allowPlusOnes || false;
 
-    // Exact RSVP button color rules:
-    // 1. When already in the list or host -> Leave Game! (Red) [Plus Manage Guests if allowed]
-    // 2. When game full -> Join Waitlist! (Yellow)
-    // 3. When not in confirmed list -> Join Game! (Green)
     let rsvpButtonHtml = '';
     if (isConfirmed) {
         if (allowPlusOnes) {
@@ -101,8 +96,6 @@ window.renderInfoTab = function(event) {
 
     return `
         <div class="space-y-4 font-sans text-white">
-            
-            <!-- 1. Organizer Card -->
             <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
                 <div class="flex items-center gap-3">
                     <img src="${finalHostAvatar}" class="w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
@@ -114,7 +107,6 @@ window.renderInfoTab = function(event) {
                 <span class="px-3.5 py-1.5 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border border-[#00F296]/40">Organizer</span>
             </div>
 
-            <!-- 2. Date, Time, Location Box with Navigate Button -->
             <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
                 <div class="space-y-3 flex-1 pr-2">
                     <div class="space-y-0.5">
@@ -146,7 +138,6 @@ window.renderInfoTab = function(event) {
                 </a>
             </div>
 
-            <!-- 3. Format, Fee & Teams Row -->
             <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-xl text-left">
                 <div class="space-y-0.5 border-r border-white/10 pr-2">
                     <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">FORMAT</span>
@@ -162,12 +153,10 @@ window.renderInfoTab = function(event) {
                 </div>
             </div>
 
-            <!-- 4. RSVP Action Button -->
             <div class="pt-1">
                 ${rsvpButtonHtml}
             </div>
 
-            <!-- 5. Expandable Game Details Card -->
             <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
                 <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
                     <div class="flex items-center gap-2.5">
@@ -178,7 +167,6 @@ window.renderInfoTab = function(event) {
                 <p class="text-xs text-white/80 leading-relaxed font-medium pl-6 pt-1">${event.description || 'Standard game. Come ready to play, have fun and respect the squad. 💪⚽'}</p>
             </div>
 
-            <!-- 6. Expandable Rules Card -->
             <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
                 <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
                     <div class="flex items-center gap-2.5">
@@ -307,30 +295,14 @@ window.openEventDetails = function(eventId) {
     window.renderEventDetailModalContent();
 };
 
-window.openTeamMakingModal = function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    window.activeModalEventId = eventId;
-    window.activeModalTab = 'teams';
-    window.activeTeamTab = 0;
-    window.currentTeamBuildingEvent = event;
-
-    if (typeof window.switchTab === 'function') {
-        window.switchTab('event-details-screen');
-    }
-    window.renderEventDetailModalContent();
-};
+// NOTE: window.openTeamMakingModal is defined in team-tool.js (do not redefine here)
 
 window.switchModalTab = function(tabName) {
     window.activeModalTab = tabName;
     window.renderEventDetailModalContent();
 };
 
-window.switchTeamTab = function(teamIndex) {
-    window.activeTeamTab = teamIndex;
-    window.renderEventDetailModalContent();
-};
+// NOTE: window.switchTeamTab is defined in team-tool.js
 
 window.switchStatsSubTab = function(subTab) {
     window.activeStatsSubTab = subTab;
@@ -393,19 +365,9 @@ window.renderEventDetailModalContent = function() {
     const safeDate = (event.date || '').replace(/'/g, "\\'");
     const safeLocation = (event.location || '').replace(/'/g, "\\'");
 
-    const teamsHeaderNav = tab === 'teams' ? `
-        <div class="bg-black/50 border border-[#00F296]/40 p-3 rounded-2xl flex items-center justify-between mb-2">
-            <button onclick="switchModalTab('roster')" class="bg-black/60 hover:bg-black text-white font-bold px-3 py-1.5 rounded-xl text-xs border border-white/20 transition flex items-center gap-1.5">
-                <i class="fa-solid fa-chevron-left text-[10px]"></i> Back to Roster
-            </button>
-            <span class="text-xs font-black uppercase text-[#00F296]">Team Builder View</span>
-        </div>
-    ` : '';
-
     container.innerHTML = `
         <div class="space-y-4 text-white relative pt-6 sm:pt-8">
             <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between relative z-30">
-...
                 <div class="flex items-center gap-3 overflow-hidden">
                     <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
                         <i class="fa-solid fa-chevron-left text-xs"></i>
@@ -442,18 +404,15 @@ window.renderEventDetailModalContent = function() {
             <div class="bg-black/40 border border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
-                <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' || tab === 'teams' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
+                <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
                 <button onclick="switchModalTab('stats')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'stats' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Stats</button>
                 <button onclick="switchModalTab('comments')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'comments' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Comments (${commentsCount})</button>
             </div>
-
-            ${teamsHeaderNav}
 
             <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
                 ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
                 ${tab === 'info' ? window.renderInfoTab(event) : ''}
                 ${tab === 'roster' ? renderRosterTab(event) : ''}
-                ${tab === 'teams' ? renderTeamToolTab(event) : ''}
                 ${tab === 'stats' ? renderStatsTab(event) : ''}
                 ${tab === 'comments' ? renderCommentsTab(event) : ''}
             </div>
