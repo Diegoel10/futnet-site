@@ -63,7 +63,7 @@ window.initEventsLiveListener = function() {
         snapshot.forEach(docSnap => {
             const evData = docSnap.data();
             if (!evData.id) evData.id = docSnap.id;
-            // Remember the REAL Firestore document id (may differ from the id field inside the data)
+            // Map the exact Firestore document ID to the event ID for precise deletion tracking
             window.eventDocIds[evData.id] = docSnap.id;
             if (!evData.attendees) evData.attendees = [];
             if (!evData.waitingList) evData.waitingList = [];
@@ -250,7 +250,7 @@ window.renderEvents = function() {
         const hostName = ev.organizer || ev.hostName || 'Organizer';
 
         return `
-            <div onclick="openEventDetails('${ev.id}')" class="relative bg-[#010A0F]/90 rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-emerald-500/60 hover:border-emerald-400 transition cursor-pointer p-4 space-y-3">
+            <div id="event-card-${ev.id}" onclick="openEventDetails('${ev.id}')" class="relative bg-[#010A0F]/90 rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-emerald-500/60 hover:border-emerald-400 transition cursor-pointer p-4 space-y-3">
                 
                 ${communityThumbnail ? `
                     <div class="absolute inset-0 z-0 opacity-20">

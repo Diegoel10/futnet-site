@@ -642,21 +642,24 @@ window.cancelGameEvent = async function(eventId) {
         // 1. Delete document from Firestore
         await deleteDoc(eventDocRef);
 
-        // 2. Remove aggressively from local window.eventsList across all ID variations
-        window.eventsList = (window.eventsList || []).filter(ev => 
-            String(ev.id) !== String(eventId) && String(ev.id) !== String(realDocId)
-        );
+        // 2. Remove aggressively from local window.eventsList across all possible ID variations
+        window.eventsList = (window.eventsList || []).filter(ev => {
+            const evIdStr = String(ev.id);
+            const targetStr = String(eventId);
+            const docStr = String(realDocId);
+            return evIdStr !== targetStr && evIdStr !== docStr;
+        });
 
         // 3. Force immediate DOM cleanup and re-render of the games grid
         if (typeof window.renderEvents === 'function') {
             window.renderEvents();
         } else {
-            const card = document.getElementById(`event-card-${eventId}`);
+            const card = document.getElementById(`event-card-${eventId}`) || document.getElementById(`event-card-${realDocId}`);
             if (card) card.remove();
         }
 
         if (window.teamAssignments) delete window.teamAssignments[eventId];
-        if (window.currentTeamBuildingEvent && String(window.currentTeamBuildingEvent.id) === String(eventId)) {
+        if (window.currentTeamBuildingEvent) {
             window.currentTeamBuildingEvent = null;
         }
         document.getElementById('standalone-team-builder-modal')?.remove();
