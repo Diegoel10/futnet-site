@@ -1,4 +1,4 @@
-// js/game-profile/modal-core.js: Complete updated file with native app UI, exact RSVP rules, guest management, and standalone Team Builder view
+// js/game-profile/modal-core.js: Complete updated file with standalone event page routing, browser back button support, and robust deletion
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderAdminTab } from './admin-tab.js';
@@ -289,11 +289,28 @@ window.openEventDetails = function(eventId) {
     window.expandedLeaderboardTeams = window.expandedLeaderboardTeams || {};
     window.expandedMatchCards = window.expandedMatchCards || {};
 
+    // Push state for browser back button support
+    history.pushState({ modalOpen: true, eventId: eventId }, "", `#event-${eventId}`);
+
     if (typeof window.switchTab === 'function') {
         window.switchTab('event-details-screen');
     }
     window.renderEventDetailModalContent();
 };
+
+// Listen to browser back button to close event profile seamlessly
+window.addEventListener('popstate', (event) => {
+    if (document.getElementById('standalone-team-builder-modal')) {
+        document.getElementById('standalone-team-builder-modal')?.remove();
+        return;
+    }
+    if (window.activeModalEventId) {
+        window.activeModalEventId = null;
+        if (typeof window.switchTab === 'function') {
+            window.switchTab('events');
+        }
+    }
+});
 
 window.switchModalTab = function(tabName) {
     window.activeModalTab = tabName;
@@ -361,42 +378,44 @@ window.renderEventDetailModalContent = function() {
     const safeDate = (event.date || '').replace(/'/g, "\\'");
     const safeLocation = (event.location || '').replace(/'/g, "\\'");
 
+    // Moved UI slightly up with pt-1 sm:pt-2
     container.innerHTML = `
-        <div class="space-y-4 text-white relative pt-6 sm:pt-8 pointer-events-auto">
-            <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between relative z-30">
-                <div class="flex items-center gap-3 overflow-hidden">
-                    <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
-                        <i class="fa-solid fa-chevron-left text-xs"></i>
+        <div class="space-y-4 text-white relative pt-1 sm:pt-2 pb-16 pointer-events-auto max-w-4xl mx-auto w-full px-4">
+            <!-- Standalone Back Button on Top -->
+            <div class="flex items-center justify-between pb-1">
+                <button onclick="closeEventModal()" class="inline-flex items-center gap-2 bg-black/60 hover:bg-black text-white px-4 py-2 rounded-2xl font-bold border border-white/20 transition shadow">
+                    <i class="fa-solid fa-chevron-left text-xs"></i> Back
+                </button>
+                <div class="relative z-50">
+                    <button onclick="toggleShareDropdown()" class="w-10 h-10 bg-black/60 hover:bg-black text-[#00F296] rounded-full flex items-center justify-center font-bold border border-[#00F296]/40 transition shadow-[0_0_10px_rgba(0,242,150,0.2)]" title="Share Game">
+                        <i class="fa-solid fa-share-nodes text-xs"></i>
                     </button>
-                    <div class="truncate">
-                        <div class="flex items-center gap-2">
-                            <h2 class="text-sm font-black tracking-tight text-white truncate">${event.title}</h2>
-                            <span class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-black text-[9px] rounded-full uppercase tracking-wider border border-emerald-500/40 shrink-0">${event.visibility || 'Public'}</span>
-                        </div>
-                        <p class="text-[10px] text-white/60 truncate flex items-center gap-1 mt-0.5"><i class="fa-solid fa-location-dot text-[#00F296]"></i> ${event.location}</p>
-                    </div>
-                </div>
-
-                <div class="flex items-center gap-2 shrink-0">
-                    <div class="relative z-50">
-                        <button onclick="toggleShareDropdown()" class="w-8 h-8 bg-black/60 hover:bg-black text-[#00F296] rounded-full flex items-center justify-center font-bold border border-[#00F296]/40 transition shadow-[0_0_10px_rgba(0,242,150,0.2)]" title="Share Game">
-                            <i class="fa-solid fa-share-nodes text-xs"></i>
+                    <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-[9999] w-48 py-2 divide-y divide-white/10 text-xs">
+                        <button onclick="shareToWhatsApp('${safeTitle}', '${safeLocation}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                            <i class="fa-brands fa-whatsapp text-emerald-400 text-base"></i> WhatsApp
                         </button>
-                        <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-[9999] w-48 py-2 divide-y divide-white/10 text-xs">
-                            <button onclick="shareToWhatsApp('${safeTitle}', '${safeLocation}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
-                                <i class="fa-brands fa-whatsapp text-emerald-400 text-base"></i> WhatsApp
-                            </button>
-                            <button onclick="shareToTwitter('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
-                                <i class="fa-brands fa-x-twitter text-white text-base"></i> X (Twitter)
-                            </button>
-                            <button onclick="copyEventLink('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
-                                <i class="fa-solid fa-link text-[#00F296] text-base"></i> Copy Link
-                            </button>
-                        </div>
+                        <button onclick="shareToTwitter('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                            <i class="fa-brands fa-x-twitter text-white text-base"></i> X (Twitter)
+                        </button>
+                        <button onclick="copyEventLink('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                            <i class="fa-solid fa-link text-[#00F296] text-base"></i> Copy Link
+                        </button>
                     </div>
                 </div>
             </div>
 
+            <!-- Page Header Info -->
+            <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-5 py-3.5 rounded-3xl shadow-lg flex items-center justify-between">
+                <div class="truncate">
+                    <div class="flex items-center gap-2.5">
+                        <h2 class="text-base font-black tracking-tight text-white truncate">${event.title}</h2>
+                        <span class="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 font-black text-[9px] rounded-full uppercase tracking-wider border border-emerald-500/40 shrink-0">${event.visibility || 'Public'}</span>
+                    </div>
+                    <p class="text-xs text-white/60 truncate flex items-center gap-1.5 mt-0.5"><i class="fa-solid fa-location-dot text-[#00F296]"></i> ${event.location}</p>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs Bar -->
             <div class="bg-black/40 border border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
@@ -405,6 +424,7 @@ window.renderEventDetailModalContent = function() {
                 <button onclick="switchModalTab('comments')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'comments' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Comments (${commentsCount})</button>
             </div>
 
+            <!-- Tab Content View -->
             <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
                 ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
                 ${tab === 'info' ? window.renderInfoTab(event) : ''}
