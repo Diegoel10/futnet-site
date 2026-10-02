@@ -4,9 +4,27 @@ export function renderRosterTab(event) {
     
     window.activeRosterSubTab = window.activeRosterSubTab !== undefined ? window.activeRosterSubTab : 0;
 
+    const waitingArr = Array.isArray(event.waitingList) ? event.waitingList : [];
+    const declinedArr = Array.isArray(event.declinedList) ? event.declinedList : [];
+    const dedupeByUid = (list) => {
+        const seen = new Set();
+        return list.filter(p => {
+            const key = String(p.uid || p.name);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
+
     const confirmedList = attendees.filter(a => (a.status || 'confirmed') === 'confirmed');
-    const waitlistList = attendees.filter(a => a.status === 'waitlist');
-    const declinedList = attendees.filter(a => a.status === 'cancelled' || a.status === 'not_going');
+    const waitlistList = dedupeByUid([
+        ...waitingArr,
+        ...attendees.filter(a => a.status === 'waitlist' || a.status === 'waiting')
+    ]);
+    const declinedList = dedupeByUid([
+        ...declinedArr,
+        ...attendees.filter(a => a.status === 'cancelled' || a.status === 'not_going')
+    ]);
 
     let totalConfirmedHeads = 0;
     confirmedList.forEach(att => {
@@ -32,33 +50,7 @@ export function renderRosterTab(event) {
         }
     });
 
-    const resolveAvatar = (att) => {
-        const currentUid = window.currentUser?.uid;
-        
-        // 1. Check if this attendee is you by UID
-        if (currentUid && att.uid && String(att.uid) === String(currentUid)) {
-            if (window.userProfile?.avatar && window.userProfile.avatar.trim() !== '') {
-                return window.userProfile.avatar;
-            }
-        }
-
-        // 2. Check global directory list by UID for your profile record
-        if (window.directoryList && Array.isArray(window.directoryList)) {
-            const foundDir = window.directoryList.find(u => (att.uid && String(u.uid) === String(u.uid)) || (currentUid && String(u.uid) === String(currentUid)));
-            if (foundDir && foundDir.avatar && foundDir.avatar.trim() !== '') {
-                return foundDir.avatar;
-            }
-        }
-
-        // 3. Fallback to direct properties if valid
-        if (att.avatar && att.avatar.trim() !== '' && !att.avatar.includes('dicebear.com/7.x/initials')) return att.avatar;
-        if (att.photoURL && att.photoURL.trim() !== '') return att.photoURL;
-        if (att.profilePicture && att.profilePicture.trim() !== '') return att.profilePicture;
-
-        // 4. Fallback to initials
-        const seedName = encodeURIComponent(att.name || att.firstName || 'Player');
-        return `https://api.dicebear.com/7.x/initials/svg?seed=${seedName}`;
-    };
+    const resolveAvatar = (att) => window.resolvePlayerAvatar(att);
 
     const currentList = window.activeRosterSubTab === 0 ? confirmedList : (window.activeRosterSubTab === 1 ? waitlistList : declinedList);
 
@@ -135,7 +127,7 @@ export function renderRosterTab(event) {
                         return `
                             <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                                 <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '${safeAvatar}')">
+                                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '')">
                                         <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                                         <div>
                                             <div class="flex items-center gap-1.5 flex-wrap">
@@ -158,6 +150,28 @@ export function renderRosterTab(event) {
     `;
 };
 
+// One shared place that decides which photo to show for a person.
+// Order: live profile photo (directory, matched by uid) > photo saved on the record > initials.
+window.resolvePlayerAvatar = function(person) {
+    const initials = () => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person?.name || person?.firstName || 'Player')}`;
+    if (!person) return initials();
+    const uid = person.uid ? String(person.uid) : '';
+    const isGenerated = (u) => typeof u === 'string' && u.includes('api.dicebear.com');
+    const usable = (u) => typeof u === 'string' && u.trim() !== '';
+
+    if (uid && window.currentUser && uid === String(window.currentUser.uid) && usable(window.userProfile?.avatar)) {
+        return window.userProfile.avatar;
+    }
+    if (uid && Array.isArray(window.directoryList)) {
+        const hit = window.directoryList.find(u => String(u.uid) === uid);
+        if (hit && usable(hit.avatar)) return hit.avatar;
+        if (hit && usable(hit.photoURL)) return hit.photoURL;
+    }
+    const own = person.avatar || person.photoURL || person.profilePicture;
+    if (usable(own) && !isGenerated(own)) return own;
+    return usable(own) ? own : initials();
+};
+
 window.switchRosterSubTab = function(subIndex) {
     window.activeRosterSubTab = subIndex;
     if (typeof window.renderEventDetailModalContent === 'function') {
@@ -167,6 +181,9 @@ window.switchRosterSubTab = function(subIndex) {
 
 window.openPlayerProfileModal = function(uid, name, avatar) {
     if (!uid || uid === window.currentUser?.uid) return;
+
+    const photo = avatar && avatar.trim() !== '' ? avatar : window.resolvePlayerAvatar({ uid, name });
+    window._popupPerson = { uid, name, avatar: photo };
 
     let modal = document.getElementById('player-profile-popup');
     if (!modal) {
@@ -182,19 +199,21 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
                 <button onclick="document.getElementById('player-profile-popup').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="flex flex-col items-center space-y-2">
-                <img src="${avatar}" class="w-20 h-20 rounded-full object-cover border-4 border-[#00F296] shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                <h3 class="text-base font-black text-white">${name}</h3>
+                <img id="player-popup-img" class="w-20 h-20 rounded-full object-cover border-4 border-[#00F296] shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                <h3 id="player-popup-name" class="text-base font-black text-white"></h3>
             </div>
             <div class="space-y-2 pt-2">
-                <button onclick="sendDirectMessageFromRoster('${uid}', '${name.replace(/'/g, "\\'")}', '${avatar}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition flex items-center justify-center gap-2">
+                <button onclick="sendDirectMessageFromRoster(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-comments"></i> Send Message
                 </button>
-                <button onclick="sendFriendRequestFromRoster('${uid}')" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-2">
+                <button onclick="sendFriendRequestFromRoster(window._popupPerson.uid)" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-user-plus"></i> Send Friend Request
                 </button>
             </div>
         </div>
     `;
+    document.getElementById('player-popup-img').src = photo;
+    document.getElementById('player-popup-name').textContent = name;
 };
 
 window.sendDirectMessageFromRoster = function(uid, name, avatar) {

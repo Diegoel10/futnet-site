@@ -42,7 +42,8 @@ function formatTimeTo12Hour(timeStr) {
 window.initEventsLiveListener = function() {
     if (eventsUnsubscribe) eventsUnsubscribe();
 
-    const eventsRef = collection(db, 'events');
+    // Same place every save goes to (see modal-core.js / admin-tab.js): artifacts/{appId}/eventsList
+    const eventsRef = collection(db, 'artifacts', appId, 'eventsList');
 
     // Connection timeout fallback to prevent infinite loading screen
     const loadTimeout = setTimeout(() => {
@@ -244,7 +245,8 @@ window.renderEvents = function() {
         
         // Dynamically prioritize directory match or active user profile avatar over any fallback badge
         const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(ev.organizerId));
-        const hostAvatar = dirMatch?.avatar || window.userProfile?.avatar || ev.organizerAvatar || ev.hostAvatar || defaultAvatar;
+        const isMine = window.currentUser && String(ev.organizerId) === String(window.currentUser.uid);
+        const hostAvatar = dirMatch?.avatar || (isMine ? window.userProfile?.avatar : '') || ev.organizerAvatar || ev.hostAvatar || defaultAvatar;
         const hostName = ev.organizer || ev.hostName || 'Organizer';
 
         return `

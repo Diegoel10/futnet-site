@@ -351,18 +351,20 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
 
     const profile = window.userProfile;
     const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
-    const avatarUrl = profile.avatar || window.currentUser.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const avatarUrl = profile.avatar || window.currentUser.photoURL || '';
+    // Only short web links are stored on the roster. Photos themselves are looked up live by uid.
+    const storedAvatar = (typeof avatarUrl === 'string' && /^https?:\/\//.test(avatarUrl) && avatarUrl.length <= 500) ? avatarUrl : '';
 
     const newAttendee = {
         uid: String(window.currentUser.uid),
         name: String(fullName || 'Player'),
-        avatar: String(avatarUrl),
         position: String(profile.position || 'Player'),
         role: 'Player',
         status: 'confirmed',
         paid: 'Unpaid',
         guests: []
     };
+    if (storedAvatar) newAttendee.avatar = storedAvatar;
 
     const totalIncomingHeads = 1 + guestsArray.length;
     const availableSpots = maxCapacity - currentConfirmedHeads;
@@ -402,7 +404,12 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         window.showToast("Roster is full. You and your guest(s) were added to the waitlist!", "info");
     }
 
-    await updateEventInFirestore(event);
+    const saved = await updateEventInFirestore(event);
+    if (!saved) {
+        // The live listener will restore the real roster; make sure the screen matches it
+        window.renderEventDetailModalContent();
+        return;
+    }
     window.renderEventDetailModalContent();
 };
 
@@ -753,12 +760,42 @@ window.openEditEventForm = function(eventId) {
     }, 150);
 };
 
+// Photos must never be stored inside a game document: a few base64 pictures push the document past
+// Firestore's 1 MB limit and then EVERY save (joining, guests, teams) silently fails.
+function stripBigPhotos(value) {
+    if (Array.isArray(value)) return value.map(stripBigPhotos);
+    if (value && typeof value === 'object') {
+        const clean = {};
+        Object.keys(value).forEach(key => {
+            const v = value[key];
+            const isPhotoKey = key === 'avatar' || key === 'photoURL' || key === 'profilePicture';
+            if (isPhotoKey && typeof v === 'string' && (v.startsWith('data:') || v.length > 500)) return; // drop it
+            if (v === undefined) return;
+            clean[key] = stripBigPhotos(v);
+        });
+        return clean;
+    }
+    return value;
+}
+
+window.stripBigPhotos = stripBigPhotos;
+
 async function updateEventInFirestore(event) {
     try {
+        const payload = stripBigPhotos(event);
+        const approxBytes = new Blob([JSON.stringify(payload)]).size;
+        if (approxBytes > 950000) {
+            console.error("Event document is too large to save:", approxBytes, "bytes");
+            if (typeof window.showToast === 'function') window.showToast("This game has too much data to save. Please contact support.", "error");
+            return false;
+        }
         const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
-        await setDoc(eventDocRef, event, { merge: true });
+        await setDoc(eventDocRef, payload, { merge: true });
+        return true;
     } catch (err) {
-        console.error("Error updating event document:", err);
+        console.error("Error updating event document:", err.code, err.message);
+        if (typeof window.showToast === 'function') window.showToast("Could not save to the game roster. Please try again.", "error");
+        return false;
     }
 }
 

@@ -37,13 +37,37 @@ window.hideAuthLoading = function() {
 
 window.selectedSignupAvatarUrl = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
+// Shrinks any picture to a small square JPEG (about 15-30 KB) so it is safe to store and fast to load
+window.shrinkImageToSquare = function(source, size = 300, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            let sw = img.width, sh = img.height, sx = 0, sy = 0;
+            if (sw > sh) { sx = (sw - sh) / 2; sw = sh; } else { sy = (sh - sw) / 2; sh = sw; }
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = reject;
+        img.src = source;
+    });
+};
+
 window.handleSignupAvatarSelection = function(event) {
     const file = event.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function(e) {
-        window.selectedSignupAvatarUrl = e.target.result;
+    reader.onload = async function(e) {
+        try {
+            window.selectedSignupAvatarUrl = await window.shrinkImageToSquare(e.target.result);
+        } catch (err) {
+            console.warn("Could not shrink the picture, using original:", err);
+            window.selectedSignupAvatarUrl = e.target.result;
+        }
         const previewImg = document.getElementById('signup-avatar-preview');
         if (previewImg) {
             previewImg.src = window.selectedSignupAvatarUrl;
@@ -272,6 +296,21 @@ getRedirectResult(auth).catch((error) => {
     }
 });
 
+// One-time cleanup: big photos saved earlier slow down the whole app. Shrink the signed-in user's own photo.
+window.shrinkMySavedAvatarIfNeeded = async function(user) {
+    try {
+        const p = window.userProfile;
+        if (!p || typeof p.avatar !== 'string' || !p.avatar.startsWith('data:') || p.avatar.length < 60000) return;
+        const small = await window.shrinkImageToSquare(p.avatar);
+        if (small.length >= p.avatar.length) return;
+        p.avatar = small;
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { avatar: small }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { avatar: small }, { merge: true });
+    } catch (err) {
+        console.warn("Could not shrink saved avatar:", err);
+    }
+};
+
 window.handleLogout = async function() {
     try {
         const activeAuth = auth || getAuth();
@@ -292,6 +331,7 @@ onAuthStateChanged(auth, async (user) => {
         try {
             const profile = await window.ensureUserProfile(user);
             if (profile) window.userProfile = profile;
+            window.shrinkMySavedAvatarIfNeeded(user);
         } catch (e) {
             console.warn("Profile fetch deferred or offline:", e.message);
         }
