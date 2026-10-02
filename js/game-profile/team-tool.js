@@ -1,4 +1,4 @@
-// js/game-profile/team-tool.js: Full Team Builder & Lineup Tool rendered as a dedicated overlay modal view with pointer-events enabled
+// js/game-profile/team-tool.js: Full Team Builder & Lineup Tool rendered as a dedicated overlay modal view with robust avatar resolution
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -9,7 +9,6 @@ window.teamNames = window.teamNames || {};
 window.teamColors = window.teamColors || {};
 window.teamCaptains = window.teamCaptains || {};
 
-// ---------- Shared team name / color helpers (also used by match-management.js) ----------
 window.TEAM_COLOR_OPTIONS = [
     { name: 'Blue',   hex: '#3b82f6' },
     { name: 'Red',    hex: '#ef4444' },
@@ -22,8 +21,6 @@ window.TEAM_COLOR_OPTIONS = [
     { name: 'Black',  hex: '#000000' }
 ];
 
-// Resolved color for every team of an event. Guarantees no two teams share a color:
-// saved colors win (first team keeps it), unset/duplicate ones get the first free palette color.
 window.getTeamColors = function(event) {
     if (!event) return [];
     const count = event.teamsCount || 3;
@@ -58,12 +55,10 @@ window.getTeamColor = function(event, teamIndex) {
     return window.getTeamColors(event)[teamIndex];
 };
 
-// Color that stays visible on the dark UI (black teams get a light-gray accent for borders/text)
 window.teamAccent = function(hex) {
     return String(hex || '').toLowerCase() === '#000000' ? '#9ca3af' : hex;
 };
 
-// Readable text color on top of a team color
 window.teamTextOn = function(hex) {
     const h = String(hex || '#000000').replace('#', '');
     const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
@@ -71,9 +66,39 @@ window.teamTextOn = function(hex) {
     return lum > 0.6 ? '#0f172a' : '#ffffff';
 };
 
+// Robust helper to resolve profile avatars across directory, attendees, and saved assignments
+function resolvePlayerAvatar(person, attendees) {
+    const fallback = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person?.name || 'Player')}`;
+    if (!person) return fallback;
+
+    const uid = person.uid ? String(person.uid) : '';
+    
+    // 1. Check directory list if available
+    if (uid && Array.isArray(window.directoryList)) {
+        const hit = window.directoryList.find(u => String(u.uid) === uid);
+        if (hit && hit.avatar && hit.avatar.trim() !== '') return hit.avatar;
+        if (hit && hit.photoURL && hit.photoURL.trim() !== '') return hit.photoURL;
+    }
+
+    // 2. Check direct attendee record
+    if (uid && Array.isArray(attendees)) {
+        const attHit = attendees.find(a => String(a.uid) === uid);
+        if (attHit && (attHit.avatar || attHit.photoURL)) {
+            return attHit.avatar || attHit.photoURL;
+        }
+    }
+
+    // 3. Use person's own avatar if valid
+    const own = person.avatar || person.photoURL;
+    if (own && typeof own === 'string' && own.trim() !== '') return own;
+
+    return fallback;
+}
+
 async function updateTeamToolFirestore(event) {
     if (!event || !event.id) return;
-    const docRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
+    const realDocId = (window.eventDocIds && window.eventDocIds[event.id]) || event.id;
+    const docRef = doc(db, 'artifacts', appId, 'eventsList', realDocId);
     
     event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
     event.teamNames = window.teamNames[event.id] || event.teamNames || {};
@@ -83,23 +108,6 @@ async function updateTeamToolFirestore(event) {
     window.eventsList = (window.eventsList || []).map(ev => ev.id === event.id ? event : ev);
     
     const cleanPayload = JSON.parse(JSON.stringify(event));
-
-    if (cleanPayload.attendees) {
-        cleanPayload.attendees.forEach(att => {
-            if (!att.avatar || att.avatar.startsWith('data:')) {
-                const dirUser = window.directoryList?.find(u => String(u.uid) === String(att.uid));
-                att.avatar = dirUser?.avatar || dirUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
-            }
-            if (att.guests) {
-                att.guests.forEach(g => {
-                    if (!g.avatar || g.avatar.startsWith('data:')) {
-                        g.avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(g.name || 'Guest')}`;
-                    }
-                });
-            }
-        });
-    }
-
     try {
         await setDoc(docRef, cleanPayload, { merge: true });
         window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
@@ -111,11 +119,7 @@ async function updateTeamToolFirestore(event) {
 function getFlattenedPlayersList(attendees) {
     const list = [];
     (attendees || []).forEach(att => {
-        let safeAvatar = att?.avatar || att?.photoURL;
-        if (!safeAvatar || safeAvatar.startsWith('data:')) {
-            const dirUser = window.directoryList?.find(u => String(u.uid) === String(att?.uid));
-            safeAvatar = dirUser?.avatar || dirUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att?.name || 'Player')}`;
-        }
+        const safeAvatar = resolvePlayerAvatar(att, attendees);
 
         list.push({
             uid: String(att?.uid || 'usr_' + Math.random().toString(36).substring(2,7)),
@@ -127,7 +131,7 @@ function getFlattenedPlayersList(attendees) {
         
         if (att?.guests && Array.isArray(att.guests)) {
             att.guests.forEach((g, gIdx) => {
-                const guestAvatar = (g && g.avatar) ? String(g.avatar) : safeAvatar;
+                const guestAvatar = (g && g.avatar && !g.avatar.startsWith('data:')) ? String(g.avatar) : safeAvatar;
                 list.push({
                     uid: `${att?.uid || 'usr'}_guest_${gIdx}`,
                     name: String(g?.name || 'Guest'),
@@ -203,7 +207,6 @@ window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
         return;
     }
 
-    // Freeze every team's current color so auto-assigned defaults don't shift around
     window.teamColors[eventId] = window.teamColors[eventId] || {};
     colors.forEach((c, i) => { window.teamColors[eventId][i] = c; });
     window.teamColors[eventId][teamIndex] = colorHex;
@@ -338,7 +341,7 @@ window.executeRandomizeTeams = async function(eventId, keepGuestsTogether, keepE
     const previous = window.teamAssignments[eventId] || event.teamAssignments || {};
     const teams = {};
     for (let i = 0; i < teamsCount; i++) {
-        teams[i] = keepExisting && Array.isArray(previous[i]) ? [...previous[i]] : [];
+        teams[i] = keepExisting && Array.isArray(previous[i]) ? previous[i].filter(Boolean) : [];
     }
 
     const placedUIDs = new Set();
@@ -353,9 +356,7 @@ window.executeRandomizeTeams = async function(eventId, keepGuestsTogether, keepE
         return arr;
     };
     const addToTeam = (i, player) => {
-        const hole = teams[i].findIndex(p => !p);
-        if (hole !== -1) teams[i][hole] = player;
-        else teams[i].push(player);
+        teams[i].push(player);
         placedUIDs.add(String(player.uid));
     };
     const pickTeam = (needed) => {
@@ -443,7 +444,10 @@ export function renderTeamToolTab(event) {
 
     window.teamAssignments[event.id] = window.teamAssignments[event.id] || {};
     for (let i = 0; i < teamsCount; i++) {
-        window.teamAssignments[event.id][i] = window.teamAssignments[event.id][i] || [];
+        window.teamAssignments[event.id][i] = (window.teamAssignments[event.id][i] || []).filter(p => p && p.uid).map(p => {
+            const freshAvatar = resolvePlayerAvatar(p, event.attendees);
+            return { ...p, avatar: freshAvatar };
+        });
     }
     window.teamNames[event.id] = window.teamNames[event.id] || {};
 
@@ -482,20 +486,20 @@ export function renderTeamToolTab(event) {
         for (let i = 0; i < teamsCount; i++) {
             const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
             const rawColor = resolvedColors[i];
-        const tColor = window.teamAccent(rawColor);
-            const teamRoster = window.teamAssignments[event.id][i] || [];
+            const tColor = window.teamAccent(rawColor);
+            const teamRoster = (window.teamAssignments[event.id][i] || []).filter(p => p && p.uid);
             const captainUid = window.teamCaptains[event.id][i];
 
             const rosterPillsHtml = teamRoster.length === 0 
                 ? '<span class="text-xs text-white/40 italic">No players assigned yet.</span>'
                 : teamRoster.map(p => {
                     const isCap = String(p?.uid) === String(captainUid);
-                    const pAvatar = p?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                    const pAvatar = resolvePlayerAvatar(p, event.attendees);
                     const pName = p?.name || 'Player';
                     const pUid = p?.uid || '';
                     return `
                         <div class="flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl border text-xs shadow-md" style="border-color: ${tColor};">
-                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20">
+                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <span class="font-bold text-white">${pName} ${isCap ? '⭐' : ''}</span>
                             <button data-action="unassign-team-slot" data-event-id="${event.id}" data-team-index="${i}" data-uid="${pUid}" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
                         </div>
@@ -527,11 +531,11 @@ export function renderTeamToolTab(event) {
         const freeAgentsPillsHtml = freeAgents.length === 0 
             ? '<span class="text-xs text-white/40 italic">All players assigned!</span>'
             : freeAgents.map(a => {
-                const aAvatar = a?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                const aAvatar = resolvePlayerAvatar(a, event.attendees);
                 const aName = a?.name || 'Player';
                 return `
                     <div class="flex items-center gap-2 bg-black/60 px-3 py-2 rounded-2xl border border-white/10 text-xs">
-                        <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover">
+                        <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="font-bold text-white">${aName}</span>
                     </div>
                 `;
@@ -553,7 +557,7 @@ export function renderTeamToolTab(event) {
         const currentTeamName = window.teamNames[event.id][teamIdx] || `Team ${teamIdx + 1}`;
         const currentTeamColor = resolvedColors[teamIdx];
         const currentAccent = window.teamAccent(currentTeamColor);
-        const currentTeamPlayers = window.teamAssignments[event.id][teamIdx] || [];
+        const currentTeamPlayers = (window.teamAssignments[event.id][teamIdx] || []).filter(p => p && p.uid);
         const currentCaptainUid = window.teamCaptains[event.id][teamIdx] || "";
         
         window.teamFormations[event.id][teamIdx] = window.teamFormations[event.id][teamIdx] || defaultFormatKey;
@@ -572,9 +576,10 @@ export function renderTeamToolTab(event) {
                 const positionName = rIdx === 0 ? "FWD" : (rIdx === displayRows.length - 1 ? "DEF" : "MID");
                 
                 if (p && p.name) {
+                    const pAvatar = resolvePlayerAvatar(p, event.attendees);
                     rowSlots += `
                         <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${(p.name || '').replace(/'/g, "\\'")}" class="flex-1 min-w-0 max-w-[7rem] h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 relative group transition hover:scale-105" style="border-color: ${currentAccent};">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate text-left leading-tight pointer-events-none">
                                 <span class="text-[6px] font-black uppercase block tracking-wider" style="color: ${currentAccent};">${positionName}</span>
                                 <span class="text-[9px] font-black text-white truncate block">${p.name}</span>
@@ -596,10 +601,11 @@ export function renderTeamToolTab(event) {
         const goalieSlotIdx = playerIndex++;
         const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
         if (goaliePlayer && goaliePlayer.name) {
+            const gAvatar = resolvePlayerAvatar(goaliePlayer, event.attendees);
             rowsHtml += `
                 <div class="flex justify-center mt-3">
                     <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${(goaliePlayer.name || '').replace(/'/g, "\\'")}" class="w-28 h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 transition hover:scale-105" style="border-color: ${currentAccent};">
-                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${gAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div class="truncate text-left leading-tight pointer-events-none">
                             <span class="text-[6px] font-black uppercase block tracking-wider text-amber-400">GK</span>
                             <span class="text-[9px] font-black text-white truncate block">${goaliePlayer.name}</span>
@@ -625,7 +631,7 @@ export function renderTeamToolTab(event) {
             ? '<span class="text-xs text-white/40 italic">No players assigned to this team yet.</span>'
             : currentTeamPlayers.map(p => {
                 const isCap = String(p?.uid) === String(currentCaptainUid);
-                const pAvatar = p?.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+                const pAvatar = resolvePlayerAvatar(p, event.attendees);
                 const pName = p?.name || 'Player';
                 const pPos = p?.position || 'Player';
                 const pUid = p?.uid || '';
@@ -672,7 +678,7 @@ export function renderTeamToolTab(event) {
                                 const usedBy = resolvedColors.findIndex((c, i) => i !== teamIdx && c.toLowerCase() === col.hex.toLowerCase());
                                 const isCurrent = currentTeamColor.toLowerCase() === col.hex.toLowerCase();
                                 if (usedBy !== -1) {
-                                    return `<span title="${col.name} - used by ${window.getTeamNames(event)[usedBy]}" class="w-8 h-8 rounded-full border-2 border-white/20 opacity-25 cursor-not-allowed" style="background-color: ${col.hex};"></span>`;
+                                    return `<span title="${col.name} - used by${window.getTeamNames(event)[usedBy]}" class="w-8 h-8 rounded-full border-2 border-white/20 opacity-25 cursor-not-allowed" style="background-color: ${col.hex};"></span>`;
                                 }
                                 return `<button data-action="change-team-color" data-event-id="${event.id}" data-team-index="${teamIdx}" data-color="${col.hex}" title="${col.name}" class="w-8 h-8 rounded-full border-2 transition ${isCurrent ? 'border-[#00F296] scale-110 shadow-md' : 'border-white/40'}" style="background-color: ${col.hex};"></button>`;
                             }).join('')}
@@ -746,7 +752,6 @@ export function renderTeamToolTab(event) {
     `;
 }
 
-// Global click and change event delegation with pointer-events check
 document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
@@ -807,7 +812,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     if (!event) return;
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
-    const teamRoster = window.teamAssignments[event.id][teamIndex] || [];
+    const teamRoster = (window.teamAssignments[event.id][teamIndex] || []).filter(p => p && p.uid);
     const allPlayers = getFlattenedPlayersList(event.attendees);
 
     if (slotIndex !== null && slotIndex !== 'null') {
@@ -818,8 +823,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
             }
         });
         
-        const validTeamRoster = teamRoster.filter(p => p && p.uid);
-        const unplacedPitchPlayers = validTeamRoster.filter(p => !assignedPitchUIDs.has(String(p.uid)));
+        const unplacedPitchPlayers = teamRoster.filter(p => !assignedPitchUIDs.has(String(p.uid)));
         
         let picker = document.getElementById('assign-picker-modal');
         if (!picker) {
@@ -830,7 +834,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
         }
 
         if (unplacedPitchPlayers.length === 0) {
-            const placedPlayersWithPositions = validTeamRoster.filter(p => assignedPitchUIDs.has(String(p.uid)));
+            const placedPlayersWithPositions = teamRoster.filter(p => assignedPitchUIDs.has(String(p.uid)));
             if (placedPlayersWithPositions.length === 0) {
                 picker.innerHTML = `
                     <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center pointer-events-auto">
@@ -847,12 +851,15 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                             <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                         <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                            ${placedPlayersWithPositions.map(p => `
-                                <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                                    <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
-                                    <span class="text-xs font-bold text-white">${p.name} (Move)</span>
-                                </div>
-                            `).join('')}
+                            ${placedPlayersWithPositions.map(p => {
+                                const pAvatar = resolvePlayerAvatar(p, event.attendees);
+                                return `
+                                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                                        <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                                        <span class="text-xs font-bold text-white">${p.name} (Move)</span>
+                                    </div>
+                                `;
+                            }).join('')}
                         </div>
                     </div>
                 `;
@@ -867,12 +874,15 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                     <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    ${unplacedPitchPlayers.map(p => `
-                        <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
-                            <span class="text-xs font-bold text-white">${p.name}</span>
-                        </div>
-                    `).join('')}
+                    ${unplacedPitchPlayers.map(p => {
+                        const pAvatar = resolvePlayerAvatar(p, event.attendees);
+                        return `
+                            <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                                <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                                <span class="text-xs font-bold text-white">${p.name}</span>
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
             </div>
         `;
@@ -902,12 +912,15 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                 <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                ${freeAgents.map(a => `
-                    <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                        <img src="${a.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover">
-                        <span class="text-xs font-bold text-white">${a.name}</span>
-                    </div>
-                `).join('')}
+                ${freeAgents.map(a => {
+                    const aAvatar = resolvePlayerAvatar(a, event.attendees);
+                    return `
+                        <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
+                            <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <span class="text-xs font-bold text-white">${a.name}</span>
+                        </div>
+                    `;
+                }).join('')}
             </div>
         </div>
     `;
@@ -948,14 +961,9 @@ window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     if (!player) return;
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
-    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex] || [];
+    window.teamAssignments[event.id][teamIndex] = (window.teamAssignments[event.id][teamIndex] || []).filter(p => p && p.uid);
 
     if (slotIndex !== null && slotIndex !== 'null') {
-        Object.entries(window.teamAssignments[event.id][teamIndex]).forEach(([sIdx, p]) => {
-            if (p && String(p.uid) === String(uid)) {
-                window.teamAssignments[event.id][teamIndex][parseInt(sIdx)] = null;
-            }
-        });
         window.teamAssignments[event.id][teamIndex][slotIndex] = player;
     } else {
         if (!window.teamAssignments[event.id][teamIndex].some(p => p && String(p.uid) === String(uid))) {
@@ -978,6 +986,7 @@ window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
     if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
 
     window.teamAssignments[event.id][teamIndex][slotIndex] = null;
+    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && p.uid);
     event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
@@ -992,7 +1001,7 @@ window.unassignPlayerFromTeamSlot = async function(eventId, teamIndex, uid) {
     if (!event) return;
     if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
 
-    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && String(p.uid) !== String(uid));
+    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && p.uid && String(p.uid) !== String(uid));
     event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
