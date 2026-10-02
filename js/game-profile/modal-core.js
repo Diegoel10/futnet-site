@@ -1,4 +1,4 @@
-// js/game-profile/modal-core.js: Complete updated file with standalone event page routing, browser back button support, and robust deletion
+// js/game-profile/modal-core.js: Complete updated file with standalone event page routing, browser back button support, and robust deletion/editing
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderAdminTab } from './admin-tab.js';
@@ -378,7 +378,6 @@ window.renderEventDetailModalContent = function() {
     const safeDate = (event.date || '').replace(/'/g, "\\'");
     const safeLocation = (event.location || '').replace(/'/g, "\\'");
 
-    // Moved UI slightly up with pt-1 sm:pt-2
     container.innerHTML = `
         <div class="space-y-4 text-white relative pt-1 sm:pt-2 pb-16 pointer-events-auto max-w-4xl mx-auto w-full px-4">
             <!-- Standalone Back Button on Top -->
@@ -695,6 +694,29 @@ window.cancelGameEvent = async function(eventId) {
     } catch (err) {
         console.error("Error cancelling game:", err);
         window.showToast("Failed to cancel game", "error");
+    }
+};
+
+window.saveEditedEvent = async function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event) return;
+
+    const titleEl = document.getElementById('ce-title');
+    const descEl = document.getElementById('ce-description');
+    const rulesEl = document.getElementById('ce-rules');
+    const dateEl = document.getElementById('ce-date');
+    const timeEl = document.getElementById('ce-time');
+
+    if (titleEl) event.title = titleEl.value.trim();
+    if (descEl) event.description = descEl.value.trim();
+    if (rulesEl) event.rules = rulesEl.value.trim();
+    if (dateEl) event.date = dateEl.value.trim();
+    if (timeEl) event.time = timeEl.value.trim();
+
+    const success = await updateEventInFirestore(event);
+    if (success) {
+        window.showToast("Event updated successfully!");
+        if (typeof window.closeEventModal === 'function') window.closeEventModal();
     }
 };
 

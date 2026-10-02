@@ -1,6 +1,6 @@
-// js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and non-blinking live timer
+// js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and correct Firestore paths
 import { db, appId } from '../firebase-config.js';
-import { doc, setDoc, deleteDoc, addDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 window.activeGameProfileTab = window.activeGameProfileTab || 'manage-event';
 
@@ -337,7 +337,8 @@ window.submitAdminAddPlayer = async function(eventId) {
     });
 
     try {
-        await setDoc(doc(db, 'events', eventId), { attendees: event.attendees }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { attendees: event.attendees }, { merge: true });
         window.showToast(`${nameVal} added to roster!`);
         document.getElementById('admin-add-players-modal')?.remove();
     } catch (e) {
@@ -553,6 +554,8 @@ window.submitTwoPageGameWizard = async function() {
         return;
     }
 
+    const realDocId = (window.eventDocIds && window.eventDocIds[d.eventId]) || d.eventId;
+
     if (d.mode === 'copy') {
         const originalEvent = (window.eventsList || []).find(ev => ev.id === d.eventId);
         const newEventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
@@ -578,7 +581,7 @@ window.submitTwoPageGameWizard = async function() {
         };
 
         try {
-            await setDoc(doc(db, 'events', newEventId), newEventPayload);
+            await setDoc(doc(db, 'artifacts', appId, 'eventsList', newEventId), newEventPayload);
             window.showToast("Game copied and published successfully!");
             document.getElementById('two-page-game-wizard-modal')?.remove();
         } catch (e) {
@@ -586,7 +589,7 @@ window.submitTwoPageGameWizard = async function() {
         }
     } else {
         try {
-            await setDoc(doc(db, 'events', d.eventId), {
+            await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), {
                 title: d.title || 'Soccer Pick-up',
                 visibility: d.visibility,
                 date: d.date,
@@ -612,7 +615,8 @@ window.submitTwoPageGameWizard = async function() {
 window.confirmCancelGame = async function(eventId) {
     if (confirm("Are you sure you want to cancel this match? All participants will be notified.")) {
         try {
-            await deleteDoc(doc(db, 'events', eventId));
+            const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+            await deleteDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId));
             window.showToast("Game cancelled successfully.");
             window.switchTab('events');
         } catch (err) {
@@ -790,7 +794,8 @@ window.saveEditedMatch = async function(eventId, matchIndex) {
     event.matches[matchIndex].isFinished = window._editMatchState.isFinished !== undefined ? window._editMatchState.isFinished : true;
 
     try {
-        await setDoc(doc(db, 'events', eventId), { matches: event.matches }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { matches: event.matches }, { merge: true });
         window.showToast("Match updated successfully!");
         const modal = document.getElementById('edit-match-admin-modal');
         if (modal) modal.remove();
@@ -804,7 +809,8 @@ window.toggleSessionEnded = async function(eventId) {
     if (!event) return;
     const newStatus = !event.isSessionEnded;
     try {
-        await setDoc(doc(db, 'events', eventId), { isSessionEnded: newStatus }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { isSessionEnded: newStatus }, { merge: true });
         window.showToast(newStatus ? "Session ended successfully." : "Session reopened.");
     } catch (e) {
         window.showToast("Failed to update session status", "error");
@@ -819,7 +825,8 @@ window.deleteMatchRecord = async function(eventId, matchIndex) {
     if (matchIndex < matches.length) {
         matches.splice(matchIndex, 1);
         try {
-            await setDoc(doc(db, 'events', eventId), { matches }, { merge: true });
+            const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+            await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { matches }, { merge: true });
             window.showToast("Match record deleted.");
         } catch (e) {
             window.showToast("Failed to delete match", "error");
@@ -833,7 +840,8 @@ window.removePlayerFromEvent = async function(eventId, uid) {
     event.attendees = (event.attendees || []).filter(a => a.uid !== uid);
     event.waitingList = (event.waitingList || []).filter(w => w.uid !== uid);
     try {
-        await setDoc(doc(db, 'events', eventId), { attendees: event.attendees, waitingList: event.waitingList }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { attendees: event.attendees, waitingList: event.waitingList }, { merge: true });
         window.showToast("Player removed.");
     } catch (e) {
         window.showToast("Failed to remove player", "error");
@@ -924,7 +932,8 @@ window.updateGuestPaidStatus = async function(eventId, attendeeUid, guestIndex, 
         return att;
     });
     try {
-        await setDoc(doc(db, 'events', eventId), { attendees: event.attendees }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { attendees: event.attendees }, { merge: true });
         window.showToast("Guest payment status updated!");
     } catch (err) {
         window.showToast("Failed to update guest payment", "error");
@@ -943,7 +952,8 @@ window.removeGuestFromAttendee = async function(eventId, uid, guestIndex) {
         return att;
     });
     try {
-        await setDoc(doc(db, 'events', eventId), { attendees: event.attendees }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { attendees: event.attendees }, { merge: true });
         window.showToast("Guest removed successfully!");
     } catch (err) {
         window.showToast("Failed to remove guest", "error");
@@ -1014,7 +1024,8 @@ window.updatePlayerPaidStatus = async function(eventId, uid, paidStatus) {
         return att;
     });
     try {
-        await setDoc(doc(db, 'events', eventId), { attendees: event.attendees }, { merge: true });
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId), { attendees: event.attendees }, { merge: true });
         window.showToast("Player payment updated!");
     } catch (e) {
         window.showToast("Failed to update payment", "error");
