@@ -1,4 +1,4 @@
-// js/game-profile/modal-core.js: Updated with embedded renderInfoTab to bypass module caching errors
+// js/game-profile/modal-core.js: Complete updated file with native app UI, exact RSVP rules, and guest management
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderAdminTab } from './admin-tab.js';
@@ -8,7 +8,6 @@ import { renderCommentsTab } from './comments-tab.js';
 import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
 
-// Embedded renderInfoTab to prevent browser module cache mismatches
 window.renderInfoTab = function(event) {
     const rawPrice = event.fee !== undefined && event.fee !== null ? String(event.fee).replace('$', '').trim() : '';
     const displayPrice = rawPrice && rawPrice !== '0' && rawPrice.toLowerCase() !== 'free' ? `$${rawPrice}` : 'Free';
@@ -27,9 +26,8 @@ window.renderInfoTab = function(event) {
     let currentGoing = 0;
     const attendeesArr = Array.isArray(event.attendees) ? event.attendees : [];
     attendeesArr.forEach(a => {
-        const guestArr = Array.isArray(a.guests) ? a.guests : (Array.isArray(a.plusOnesList) ? a.plusOnesList : []);
-        const plusOneInt = typeof a.plusOnes === 'number' ? a.plusOnes : 0;
-        currentGoing += 1 + Math.max(guestArr.length, plusOneInt);
+        const guestArr = Array.isArray(a.guests) ? a.guests : [];
+        currentGoing += 1 + guestArr.length;
     });
     if (currentGoing === 0 && attendeesArr.length === 0) currentGoing = 1;
 
@@ -55,109 +53,231 @@ window.renderInfoTab = function(event) {
     const isMine = window.currentUser && String(event.organizerId) === String(window.currentUser.uid);
     const finalHostAvatar = isMine && window.userProfile?.avatar ? window.userProfile.avatar : organizerAvatar;
 
-    return `
-        <div class="space-y-4 font-sans text-white">
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-5 space-y-4 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
-                
-                ${event.communityName ? `
-                    <div class="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-black/60 border border-[#00F296]/50 text-[#00F296] text-xs font-black w-fit">
-                        <i class="fa-solid fa-shield"></i>
-                        <span>${event.communityName} Community</span>
-                    </div>
-                ` : ''}
+    // Robust attendee & host matching so creators/hosts can also leave/cancel RSVP
+    const userId = window.currentUser ? String(window.currentUser.uid || window.currentUser.id || '') : '';
+    const organizerId = event.organizerId ? String(event.organizerId) : '';
+    const isHost = userId && organizerId && userId === organizerId;
+    const isConfirmedAttendee = userId && attendeesArr.some(a => String(a.uid || a.userId || '') === userId);
+    const isConfirmed = isHost || isConfirmedAttendee;
+    const allowPlusOnes = event.allowPlusOnes || false;
 
-                <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                    <div>
-                        <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Match Title</span>
-                        <h2 class="text-base font-black text-white">${event.title || 'Soccer Match'}</h2>
-                    </div>
-                    <span class="px-3 py-1 bg-emerald-500/20 text-[#00F296] font-black text-xs rounded-full border border-emerald-500/40">${event.visibility || 'Public'}</span>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
-                        <i class="fa-solid fa-calendar text-[#00F296] w-4"></i>
-                        <div>
-                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Date</span>
-                            <span class="text-white font-bold">${event.date || 'TBD'}</span>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
-                        <i class="fa-solid fa-clock text-[#00F296] w-4"></i>
-                        <div>
-                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Time</span>
-                            <span class="text-white font-bold">${event.time || 'TBD'}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex items-start gap-3 bg-black/40 p-3 rounded-xl border border-white/5 text-xs">
-                    <i class="fa-solid fa-location-dot text-[#00F296] w-4 mt-0.5"></i>
-                    <div>
-                        <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Location</span>
-                        <span class="text-white font-bold">${event.location || 'Location TBD'}</span>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3 text-xs">
-                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
-                        <i class="fa-solid fa-tag text-[#00F296] w-4"></i>
-                        <div>
-                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Price / Fee</span>
-                            <span class="text-white font-bold">${displayPrice}</span>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
-                        <i class="fa-solid fa-users text-[#00F296] w-4"></i>
-                        <div>
-                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Format & Capacity</span>
-                            <span class="text-white font-bold">${event.format || '7v7'} • ${teamsCountNum} Teams (${maxCapacity} max)</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
-                    <div class="flex items-center gap-3">
-                        <img src="${finalHostAvatar}" class="w-9 h-9 rounded-full object-cover border border-[#00F296]/60" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <div>
-                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Match Organizer</span>
-                            <span class="text-xs font-bold text-white">${organizerName}</span>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${isFull ? 'bg-red-500/30 border-red-500 text-red-200' : 'bg-[#00F296]/30 border-[#00F296] text-white'}">
-                        <i class="fa-solid ${isFull ? 'fa-user-xmark' : 'fa-user-check'}"></i>
-                        <span>${isFull ? 'Full' : `${currentGoing} /${maxCapacity} Going`}</span>
-                    </div>
-                </div>
-
-                <div class="space-y-3 pt-2">
-                    <div class="flex items-start gap-3 bg-black/40 p-3 rounded-xl border border-white/5 text-xs">
-                        <i class="fa-solid fa-align-left text-[#00F296] mt-0.5"></i>
-                        <div class="space-y-1">
-                            <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Description</span>
-                            <p class="text-white/90 leading-relaxed font-medium">${event.description || 'No description provided for this game.'}</p>
-                        </div>
-                    </div>
-
-                    <div class="flex items-start gap-3 bg-black/40 p-3 rounded-xl border border-white/5 text-xs">
-                        <i class="fa-solid fa-triangle-exclamation text-[#00F296] mt-0.5"></i>
-                        <div class="space-y-1">
-                            <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Rules & Guidelines</span>
-                            <p class="text-white/90 leading-relaxed font-medium">${event.rules || 'Standard pickup rules apply. Respect all players and practice good sportsmanship.'}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="pt-2">
-                    <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-futbol text-sm"></i> Join Game / RSVP
+    // Exact RSVP button color rules:
+    // 1. When already in the list or host -> Leave Game! (Red) [Plus Manage Guests if allowed]
+    // 2. When game full -> Join Waitlist! (Yellow)
+    // 3. When not in confirmed list -> Join Game! (Green)
+    let rsvpButtonHtml = '';
+    if (isConfirmed) {
+        if (allowPlusOnes) {
+            rsvpButtonHtml = `
+                <div class="grid grid-cols-2 gap-2.5">
+                    <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border border-red-500/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-user-xmark"></i> Leave Game!
+                    </button>
+                    <button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3.5 rounded-2xl text-xs border border-[#00F296]/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-users-gear"></i> Manage Guests
                     </button>
                 </div>
+            `;
+        } else {
+            rsvpButtonHtml = `
+                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border border-red-500/40 shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-user-xmark"></i> Leave Game!
+                </button>
+            `;
+        }
+    } else if (isFull) {
+        rsvpButtonHtml = `
+            <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-amber-400 hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-hourglass-half"></i> Join Waitlist!
+            </button>
+        `;
+    } else {
+        rsvpButtonHtml = `
+            <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-person-badge-plus text-sm"></i> Join Game!
+            </button>
+        `;
+    }
+
+    return `
+        <div class="space-y-4 font-sans text-white">
+            
+            <!-- 1. Organizer Card -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
+                <div class="flex items-center gap-3">
+                    <img src="${finalHostAvatar}" class="w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <div>
+                        <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">ORGANIZER</span>
+                        <span class="text-sm font-black text-white">${organizerName}</span>
+                    </div>
+                </div>
+                <span class="px-3.5 py-1.5 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border border-[#00F296]/40">Organizer</span>
+            </div>
+
+            <!-- 2. Date, Time, Location Box with Navigate Button -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
+                <div class="space-y-3 flex-1 pr-2">
+                    <div class="space-y-0.5">
+                        <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
+                            <i class="fa-solid fa-calendar text-[#00F296]"></i> DATE
+                        </div>
+                        <div class="text-xs font-bold text-white">${event.date || 'TBD'}</div>
+                    </div>
+                    <div class="space-y-0.5">
+                        <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
+                            <i class="fa-solid fa-clock text-[#00F296]"></i> TIME
+                        </div>
+                        <div class="text-xs font-bold text-white">${event.time || 'TBD'}</div>
+                    </div>
+                </div>
+
+                <div class="h-12 w-[1px] bg-white/15 mx-2"></div>
+
+                <div class="space-y-1.5 flex-[1.5] px-2">
+                    <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
+                        <i class="fa-solid fa-location-dot text-[#00F296]"></i> PARK & LOCATION
+                    </div>
+                    <div class="text-xs font-bold text-white leading-snug line-clamp-2">${event.location || 'Location TBD'}</div>
+                </div>
+
+                <a href="http://maps.apple.com/?q=${encodeURIComponent(event.location || 'Cypress Park')}" target="_blank" class="bg-[#00F296] hover:opacity-90 text-slate-950 px-3.5 py-3 rounded-2xl flex flex-col items-center justify-center shadow-[0_0_15px_rgba(0,242,150,0.4)] transition shrink-0 ml-1">
+                    <i class="fa-solid fa-location-arrow text-xs font-black"></i>
+                    <span class="text-[9px] font-black uppercase tracking-wider mt-0.5">Navigate</span>
+                </a>
+            </div>
+
+            <!-- 3. Format, Fee & Teams Row -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-xl text-left">
+                <div class="space-y-0.5 border-r border-white/10 pr-2">
+                    <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">FORMAT</span>
+                    <span class="text-xs font-bold text-white">${event.format || '7v7'}</span>
+                </div>
+                <div class="space-y-0.5 border-r border-white/10 px-2">
+                    <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">ENTRY FEE</span>
+                    <span class="text-xs font-bold text-white">${displayPrice}</span>
+                </div>
+                <div class="space-y-0.5 pl-2">
+                    <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">TEAMS</span>
+                    <span class="text-xs font-bold text-white">${teamsCountNum} Teams</span>
+                </div>
+            </div>
+
+            <!-- 4. RSVP Action Button -->
+            <div class="pt-1">
+                ${rsvpButtonHtml}
+            </div>
+
+            <!-- 5. Expandable Game Details Card -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
+                <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
+                    <div class="flex items-center gap-2.5">
+                        <i class="fa-solid fa-file-lines text-[#00F296]"></i> GAME DETAILS
+                    </div>
+                    <i class="fa-solid fa-chevron-down text-[10px] text-white/60"></i>
+                </div>
+                <p class="text-xs text-white/80 leading-relaxed font-medium pl-6 pt-1">${event.description || 'Standard game. Come ready to play, have fun and respect the squad. 💪⚽'}</p>
+            </div>
+
+            <!-- 6. Expandable Rules Card -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
+                <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
+                    <div class="flex items-center gap-2.5">
+                        <i class="fa-solid fa-list-check text-[#00F296]"></i> RULES
+                    </div>
+                    <i class="fa-solid fa-chevron-down text-[10px] text-white/60"></i>
+                </div>
+                <p class="text-xs text-white/80 leading-relaxed font-medium pl-6 pt-1">${event.rules || 'Standard fair play rules apply. Be punctual and respectful.'}</p>
             </div>
         </div>
     `;
+};
+
+window.openManageGuestsModal = function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event || !window.currentUser) return;
+
+    const attendee = (event.attendees || []).find(a => String(a.uid) === String(window.currentUser.uid));
+    const guests = attendee && Array.isArray(attendee.guests) ? [...attendee.guests] : [];
+    const maxGuests = event.plusOneLimit || 5;
+
+    let modal = document.getElementById('manage-guests-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'manage-guests-modal';
+        modal.className = 'fixed inset-0 z-[140] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-[32px] max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase tracking-wider text-white">MANAGE YOUR GUESTS</h3>
+                <button onclick="document.getElementById('manage-guests-modal').remove()" class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-white/70 hover:text-white font-bold"><i class="fa-solid fa-xmark text-xs"></i></button>
+            </div>
+            <p class="text-[11px] text-white/60 text-center">You can bring up to ${maxGuests} guest(s). Edit names or add new ones.</p>
+            
+            <div id="manage-guests-list-inputs" class="space-y-2.5 max-h-48 overflow-y-auto pr-1">
+                ${guests.map((g, idx) => `
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="manage-guest-input-${idx}" value="${g.name || ''}" class="flex-1 bg-black border border-teal-500/50 rounded-xl px-3.5 py-2.5 text-white text-xs font-medium" placeholder="Guest name...">
+                        <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-300 p-2"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `).join('')}
+            </div>
+
+            <button onclick="window.addNewGuestInputRow()" class="w-full bg-black/60 hover:bg-black text-[#00F296] font-bold py-2.5 rounded-xl text-xs border border-[#00F296]/40 transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-plus"></i> Add Another Guest
+            </button>
+
+            <button onclick="window.saveManagedGuests('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-[0_0_15px_rgba(0,242,150,0.4)] transition">
+                Save Changes
+            </button>
+        </div>
+    `;
+};
+
+window.addNewGuestInputRow = function() {
+    const container = document.getElementById('manage-guests-list-inputs');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-2';
+    div.innerHTML = `
+        <input type="text" value="" class="flex-1 bg-black border border-teal-500/50 rounded-xl px-3.5 py-2.5 text-white text-xs font-medium" placeholder="Guest name...">
+        <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-300 p-2"><i class="fa-solid fa-trash"></i></button>
+    `;
+    container.appendChild(div);
+};
+
+window.saveManagedGuests = async function(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event || !window.currentUser) return;
+
+    const container = document.getElementById('manage-guests-list-inputs');
+    if (!container) return;
+    const inputs = container.querySelectorAll('input[type="text"]');
+    const newGuests = [];
+    inputs.forEach(inp => {
+        const val = inp.value.trim();
+        if (val) {
+            newGuests.push({ name: val, paid: 'Unpaid' });
+        }
+    });
+
+    event.attendees = (event.attendees || []).map(att => {
+        if (String(att.uid) === String(window.currentUser.uid)) {
+            return { ...att, guests: newGuests };
+        }
+        return att;
+    });
+
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { attendees: event.attendees }, { merge: true });
+        window.showToast("Guests updated successfully!");
+        document.getElementById('manage-guests-modal')?.remove();
+        window.renderEventDetailModalContent();
+    } catch (e) {
+        window.showToast("Failed to update guests", "error");
+    }
 };
 
 window.openEventDetails = function(eventId) {
@@ -968,7 +1088,7 @@ window.handleRSVPAction = async function(eventId, action) {
 
     event.attendees = event.attendees || [];
     event.waitingList = event.waitingList || [];
-    event.declnedList = event.declinedList || [];
+    event.declinedList = event.declinedList || [];
 
     if (action === 'cancel') {
         event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
