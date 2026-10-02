@@ -1,4 +1,4 @@
-// js/games.js: Manages date navigation, live Firestore listeners with connection timeout fallback
+// js/games.js: Manages date navigation, live Firestore listeners with connection timeout fallback and seamless RSVP mapping
 import { db, appId } from './firebase-config.js';
 import { doc, getDoc, collection, getDocs, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -42,10 +42,8 @@ function formatTimeTo12Hour(timeStr) {
 window.initEventsLiveListener = function() {
     if (eventsUnsubscribe) eventsUnsubscribe();
 
-    // Same place every save goes to (see modal-core.js / admin-tab.js): artifacts/{appId}/eventsList
     const eventsRef = collection(db, 'artifacts', appId, 'eventsList');
 
-    // Connection timeout fallback to prevent infinite loading screen
     const loadTimeout = setTimeout(() => {
         if (!initialLoadResolved) {
             initialLoadResolved = true;
@@ -190,13 +188,13 @@ window.renderEvents = function() {
 
     if (filtered.length === 0) {
         grid.innerHTML = `
-            <div class="col-span-full bg-[#040E13]/80 border border-emerald-500/30 rounded-3xl p-10 text-center space-y-3 shadow-xl backdrop-blur-md">
-                <div class="w-16 h-16 bg-black/40 rounded-full flex items-center justify-center mx-auto text-white/50 text-2xl border border-white/10">
-                    <i class="fa-solid fa-sportscourt"></i>
+            <div class="col-span-full bg-[#040E13]/90 border border-emerald-500/40 rounded-[28px] p-8 text-center space-y-3.5 shadow-2xl backdrop-blur-md">
+                <div class="w-14 h-14 bg-black/60 rounded-full flex items-center justify-center mx-auto text-[#00F296] text-xl border border-emerald-500/30 shadow-[0_0_15px_rgba(0,242,150,0.2)]">
+                    <i class="fa-solid fa-calendar-xmark"></i>
                 </div>
-                <h3 class="text-base font-black text-white">No games scheduled for this date</h3>
-                <p class="text-white/70 text-xs">Be the first to organize a match for this day!</p>
-                <button onclick="if(window.resetCreateGameForm) window.resetCreateGameForm(); switchTab('create-event')" class="mt-2 inline-flex items-center gap-2 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs shadow-md">
+                <h3 class="text-sm font-black text-white uppercase tracking-wider">No games scheduled for this date</h3>
+                <p class="text-white/70 text-xs font-medium">Be the first to organize a match for this day!</p>
+                <button onclick="if(window.resetCreateGameForm) window.resetCreateGameForm(); switchTab('create-event')" class="mt-2 inline-flex items-center gap-2 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black px-5 py-3 rounded-xl text-xs shadow-[0_0_15px_rgba(0,242,150,0.4)] transition">
                     <i class="fa-solid fa-plus"></i> Create Game
                 </button>
             </div>
@@ -243,7 +241,6 @@ window.renderEvents = function() {
         const communityName = ev.communityName || "";
         const communityThumbnail = ev.communityThumbnail || "";
         
-        // Dynamically prioritize directory match or active user profile avatar over any fallback badge
         const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(ev.organizerId));
         const isMine = window.currentUser && String(ev.organizerId) === String(window.currentUser.uid);
         const hostAvatar = dirMatch?.avatar || (isMine ? window.userProfile?.avatar : '') || ev.organizerAvatar || ev.hostAvatar || defaultAvatar;
