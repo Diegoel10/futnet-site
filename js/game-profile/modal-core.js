@@ -1,13 +1,164 @@
-// js/game-profile/modal-core.js: Updated with Teams removed from top tabs and opened via Roster Build Teams button
+// js/game-profile/modal-core.js: Updated with embedded renderInfoTab to bypass module caching errors
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderAdminTab } from './admin-tab.js';
-import { renderInfoTab } from './info-tab.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
 import { renderCommentsTab } from './comments-tab.js';
 import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
+
+// Embedded renderInfoTab to prevent browser module cache mismatches
+window.renderInfoTab = function(event) {
+    const rawPrice = event.fee !== undefined && event.fee !== null ? String(event.fee).replace('$', '').trim() : '';
+    const displayPrice = rawPrice && rawPrice !== '0' && rawPrice.toLowerCase() !== 'free' ? `$${rawPrice}` : 'Free';
+    
+    const formatMatch = (event.format || "").match(/(\d+)/);
+    const perSide = formatMatch ? parseInt(formatMatch[1], 10) : 5;
+    let teamsCountNum = 3;
+    if (typeof event.teamsCount === 'number') {
+        teamsCountNum = event.teamsCount;
+    } else if (typeof event.teamsCount === 'string') {
+        const parsed = parseInt(event.teamsCount.match(/(\d+)/)?.[1], 10);
+        if (!isNaN(parsed)) teamsCountNum = parsed;
+    }
+    const maxCapacity = perSide * teamsCountNum;
+
+    let currentGoing = 0;
+    const attendeesArr = Array.isArray(event.attendees) ? event.attendees : [];
+    attendeesArr.forEach(a => {
+        const guestArr = Array.isArray(a.guests) ? a.guests : (Array.isArray(a.plusOnesList) ? a.plusOnesList : []);
+        const plusOneInt = typeof a.plusOnes === 'number' ? a.plusOnes : 0;
+        currentGoing += 1 + Math.max(guestArr.length, plusOneInt);
+    });
+    if (currentGoing === 0 && attendeesArr.length === 0) currentGoing = 1;
+
+    const isFull = currentGoing >= maxCapacity;
+    const organizerName = event.organizer || event.hostName || 'Organizer';
+    
+    const resolveAvatar = (person) => {
+        const initials = () => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person?.name || 'Organizer')}`;
+        if (!person) return initials();
+        const uid = person.uid ? String(person.uid) : '';
+        const usable = (u) => typeof u === 'string' && u.trim() !== '';
+        
+        if (uid && Array.isArray(window.directoryList)) {
+            const hit = window.directoryList.find(u => String(u.uid) === uid);
+            if (hit && usable(hit.avatar)) return hit.avatar;
+            if (hit && usable(hit.photoURL)) return hit.photoURL;
+        }
+        const own = person.avatar || person.photoURL || person.profilePicture;
+        return usable(own) ? own : initials();
+    };
+
+    const organizerAvatar = resolveAvatar({ uid: event.organizerId, name: organizerName, avatar: event.organizerAvatar || event.hostAvatar });
+    const isMine = window.currentUser && String(event.organizerId) === String(window.currentUser.uid);
+    const finalHostAvatar = isMine && window.userProfile?.avatar ? window.userProfile.avatar : organizerAvatar;
+
+    return `
+        <div class="space-y-4 font-sans text-white">
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-5 space-y-4 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
+                
+                ${event.communityName ? `
+                    <div class="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-black/60 border border-[#00F296]/50 text-[#00F296] text-xs font-black w-fit">
+                        <i class="fa-solid fa-shield"></i>
+                        <span>${event.communityName} Community</span>
+                    </div>
+                ` : ''}
+
+                <div class="flex items-center justify-between border-b border-white/10 pb-3">
+                    <div>
+                        <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Match Title</span>
+                        <h2 class="text-base font-black text-white">${event.title || 'Soccer Match'}</h2>
+                    </div>
+                    <span class="px-3 py-1 bg-emerald-500/20 text-[#00F296] font-black text-xs rounded-full border border-emerald-500/40">${event.visibility || 'Public'}</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                        <i class="fa-solid fa-calendar text-[#00F296] w-4"></i>
+                        <div>
+                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Date</span>
+                            <span class="text-white font-bold">${event.date || 'TBD'}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                        <i class="fa-solid fa-clock text-[#00F296] w-4"></i>
+                        <div>
+                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Time</span>
+                            <span class="text-white font-bold">${event.time || 'TBD'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-start gap-3 bg-black/40 p-3 rounded-xl border border-white/5 text-xs">
+                    <i class="fa-solid fa-location-dot text-[#00F296] w-4 mt-0.5"></i>
+                    <div>
+                        <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Location</span>
+                        <span class="text-white font-bold">${event.location || 'Location TBD'}</span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                        <i class="fa-solid fa-tag text-[#00F296] w-4"></i>
+                        <div>
+                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Price / Fee</span>
+                            <span class="text-white font-bold">${displayPrice}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                        <i class="fa-solid fa-users text-[#00F296] w-4"></i>
+                        <div>
+                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Format & Capacity</span>
+                            <span class="text-white font-bold">${event.format || '7v7'} • ${teamsCountNum} Teams (${maxCapacity} max)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
+                    <div class="flex items-center gap-3">
+                        <img src="${finalHostAvatar}" class="w-9 h-9 rounded-full object-cover border border-[#00F296]/60" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <div>
+                            <span class="text-[9px] font-bold text-white/50 uppercase tracking-wider block">Match Organizer</span>
+                            <span class="text-xs font-bold text-white">${organizerName}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${isFull ? 'bg-red-500/30 border-red-500 text-red-200' : 'bg-[#00F296]/30 border-[#00F296] text-white'}">
+                        <i class="fa-solid ${isFull ? 'fa-user-xmark' : 'fa-user-check'}"></i>
+                        <span>${isFull ? 'Full' : `${currentGoing} /${maxCapacity} Going`}</span>
+                    </div>
+                </div>
+
+                <div class="space-y-3 pt-2">
+                    <div class="flex items-start gap-3 bg-black/40 p-3 rounded-xl border border-white/5 text-xs">
+                        <i class="fa-solid fa-align-left text-[#00F296] mt-0.5"></i>
+                        <div class="space-y-1">
+                            <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Description</span>
+                            <p class="text-white/90 leading-relaxed font-medium">${event.description || 'No description provided for this game.'}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start gap-3 bg-black/40 p-3 rounded-xl border border-white/5 text-xs">
+                        <i class="fa-solid fa-triangle-exclamation text-[#00F296] mt-0.5"></i>
+                        <div class="space-y-1">
+                            <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider block">Rules & Guidelines</span>
+                            <p class="text-white/90 leading-relaxed font-medium">${event.rules || 'Standard pickup rules apply. Respect all players and practice good sportsmanship.'}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-futbol text-sm"></i> Join Game / RSVP
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+};
 
 window.openEventDetails = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
@@ -133,7 +284,6 @@ window.renderEventDetailModalContent = function() {
 
     container.innerHTML = `
         <div class="space-y-4 text-white relative">
-            <!-- Compact Top Bar with high stacking context -->
             <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between relative z-30">
                 <div class="flex items-center gap-3 overflow-hidden">
                     <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
@@ -149,7 +299,6 @@ window.renderEventDetailModalContent = function() {
                 </div>
 
                 <div class="flex items-center gap-2 shrink-0">
-                    <!-- Share Button & Dropdown with absolute topmost z-index -->
                     <div class="relative z-50">
                         <button onclick="toggleShareDropdown()" class="w-8 h-8 bg-black/60 hover:bg-black text-[#00F296] rounded-full flex items-center justify-center font-bold border border-[#00F296]/40 transition shadow-[0_0_10px_rgba(0,242,150,0.2)]" title="Share Game">
                             <i class="fa-solid fa-share-nodes text-xs"></i>
@@ -169,7 +318,6 @@ window.renderEventDetailModalContent = function() {
                 </div>
             </div>
 
-            <!-- Navigation Tabs Bar (Teams excluded) -->
             <div class="bg-black/40 border border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
@@ -180,10 +328,9 @@ window.renderEventDetailModalContent = function() {
 
             ${teamsHeaderNav}
 
-            <!-- Tab Content Routing Container -->
             <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
                 ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
-                ${tab === 'info' ? renderInfoTab(event) : ''}
+                ${tab === 'info' ? window.renderInfoTab(event) : ''}
                 ${tab === 'roster' ? renderRosterTab(event) : ''}
                 ${tab === 'teams' ? renderTeamToolTab(event) : ''}
                 ${tab === 'stats' ? renderStatsTab(event) : ''}
@@ -193,7 +340,6 @@ window.renderEventDetailModalContent = function() {
     `;
 };
 
-// 🎮 Open Join Game Guest Selection Modal Flow
 window.openJoinGameModal = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
@@ -352,7 +498,6 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
     const profile = window.userProfile;
     const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
     const avatarUrl = profile.avatar || window.currentUser.photoURL || '';
-    // Only short web links are stored on the roster. Photos themselves are looked up live by uid.
     const storedAvatar = (typeof avatarUrl === 'string' && /^https?:\/\//.test(avatarUrl) && avatarUrl.length <= 500) ? avatarUrl : '';
 
     const newAttendee = {
@@ -406,7 +551,6 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
 
     const saved = await updateEventInFirestore(event);
     if (!saved) {
-        // The live listener will restore the real roster; make sure the screen matches it
         window.renderEventDetailModalContent();
         return;
     }
@@ -760,16 +904,21 @@ window.openEditEventForm = function(eventId) {
     }, 150);
 };
 
-// Photos must never be stored inside a game document: a few base64 pictures push the document past
-// Firestore's 1 MB limit and then EVERY save (joining, guests, teams) silently fails.
 function stripBigPhotos(value) {
+    if (Array.isArray(value)) return value.app ? value : value.map(stripBigPhotos);
     if (Array.isArray(value)) return value.map(stripBigPhotos);
     if (value && typeof value === 'object') {
         const clean = {};
         Object.keys(value).forEach(key => {
             const v = value[key];
-            const isPhotoKey = key === 'avatar' || key === 'photoURL' || key === 'profilePicture';
-            if (isPhotoKey && typeof v === 'string' && (v.startsWith('data:') || v.length > 500)) return; // drop it
+            const isPhotoKey = key === 'avatar' || key === 'photoURL' || key === 'profilePicture' || key === 'image' || key === 'thumbnail';
+            
+            if (typeof v === 'string' && (v.startsWith('data:') || v.includes('base64') || v.length > 500)) {
+                return;
+            }
+            if (isPhotoKey && typeof v === 'string' && v.length > 200) {
+                return;
+            }
             if (v === undefined) return;
             clean[key] = stripBigPhotos(v);
         });
@@ -783,18 +932,25 @@ window.stripBigPhotos = stripBigPhotos;
 async function updateEventInFirestore(event) {
     try {
         const payload = stripBigPhotos(event);
-        const approxBytes = new Blob([JSON.stringify(payload)]).size;
-        if (approxBytes > 950000) {
-            console.error("Event document is too large to save:", approxBytes, "bytes");
-            if (typeof window.showToast === 'function') window.showToast("This game has too much data to save. Please contact support.", "error");
+        const jsonString = JSON.stringify(payload);
+        const approxBytes = new Blob([jsonString]).size;
+        
+        if (approxBytes > 900000) {
+            console.error("Event document payload is too large:", approxBytes, "bytes");
+            if (typeof window.showToast === 'function') {
+                window.showToast("Save failed: Document is too large. Please check player profile photos.", "error");
+            }
             return false;
         }
+
         const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
         await setDoc(eventDocRef, payload, { merge: true });
         return true;
     } catch (err) {
         console.error("Error updating event document:", err.code, err.message);
-        if (typeof window.showToast === 'function') window.showToast("Could not save to the game roster. Please try again.", "error");
+        if (typeof window.showToast === 'function') {
+            window.showToast("Could not save to the game roster. Please try again.", "error");
+        }
         return false;
     }
 }
@@ -812,7 +968,7 @@ window.handleRSVPAction = async function(eventId, action) {
 
     event.attendees = event.attendees || [];
     event.waitingList = event.waitingList || [];
-    event.declinedList = event.declinedList || [];
+    event.declnedList = event.declinedList || [];
 
     if (action === 'cancel') {
         event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
@@ -829,7 +985,7 @@ window.handleRSVPAction = async function(eventId, action) {
     }
 };
 
-window.removePlayerFromEvent = async function(eventId, uid) {
+window.removePlayerFromEvent = async function(eventId, uid, tab) {
     if (!confirm("Are you sure you want to remove this player from the roster?")) return;
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;

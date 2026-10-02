@@ -1,237 +1,200 @@
-// js/game-profile/roster-tab.js: Roster tab with reliable avatar resolution and directory mapping
-export function renderRosterTab(event) {
+// js/game-profile/info-tab.js: Compact frosted glass layout with resized navigation pills and tighter spacing
+export function renderInfoTab(event) {
+    const organizerName = event.organizer || event.hostName || 'Organizer';
+    const organizerId = event.organizerId;
+    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+
+    const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(organizerId));
+    // Only fall back to YOUR photo when you are the organizer (it used to show your face on everyone's games)
+    const organizerIsMe = window.currentUser && String(organizerId) === String(window.currentUser.uid);
+    const organizerAvatar = dirMatch?.avatar || (organizerIsMe ? window.userProfile?.avatar : '') || event.organizerAvatar || event.hostAvatar || defaultAvatar;
+
+    const currentUid = window.currentUser?.uid;
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
-    
-    window.activeRosterSubTab = window.activeRosterSubTab !== undefined ? window.activeRosterSubTab : 0;
+    const hasJoined = attendees.some(a => a.uid === currentUid && (a.status === 'confirmed' || !a.status));
+    const allowPlusOnes = event.allowPlusOnes === true || event.allowPlusOnes === 'yes';
 
-    const waitingArr = Array.isArray(event.waitingList) ? event.waitingList : [];
-    const declinedArr = Array.isArray(event.declinedList) ? event.declinedList : [];
-    const dedupeByUid = (list) => {
-        const seen = new Set();
-        return list.filter(p => {
-            const key = String(p.uid || p.name);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-    };
-
-    const confirmedList = attendees.filter(a => (a.status || 'confirmed') === 'confirmed');
-    const waitlistList = dedupeByUid([
-        ...waitingArr,
-        ...attendees.filter(a => a.status === 'waitlist' || a.status === 'waiting')
-    ]);
-    const declinedList = dedupeByUid([
-        ...declinedArr,
-        ...attendees.filter(a => a.status === 'cancelled' || a.status === 'not_going')
-    ]);
-
-    let totalConfirmedHeads = 0;
-    confirmedList.forEach(att => {
-        totalConfirmedHeads += 1;
-        if (att.guests && Array.isArray(att.guests)) {
-            totalConfirmedHeads += att.guests.length;
-        }
-    });
-
-    let totalWaitlistHeads = 0;
-    waitlistList.forEach(w => {
-        totalWaitlistHeads += 1;
-        if (w.guests && Array.isArray(w.guests)) {
-            totalWaitlistHeads += w.guests.length;
-        }
-    });
-
-    let totalNotGoingHeads = 0;
-    declinedList.forEach(d => {
-        totalNotGoingHeads += 1;
-        if (d.guests && Array.isArray(d.guests)) {
-            totalNotGoingHeads += d.guests.length;
-        }
-    });
-
-    const resolveAvatar = (att) => window.resolvePlayerAvatar(att);
-
-    const currentList = window.activeRosterSubTab === 0 ? confirmedList : (window.activeRosterSubTab === 1 ? waitlistList : declinedList);
+    const formatVal = event.format || '11v11';
+    const feeVal = event.fee !== undefined ? event.fee : '$6';
+    const teamsVal = event.teamsCount ? `${event.teamsCount} Teams` : '3 Teams';
+    const descText = event.description || "Test";
+    const rulesText = event.rules || "Test";
 
     return `
-        <div class="space-y-4 font-sans text-white">
-            <!-- Team Building Tool Banner -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 flex items-center justify-between shadow-[0_0_20px_rgba(0,180,174,0.2)]">
-                <div class="flex items-center gap-3">
-                    <i class="fa-solid fa-shuffle text-[#00F296] text-lg"></i>
+        <div class="space-y-3 font-sans text-white pt-1">
+            <!-- 1. Organizer Card -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[20px] p-3.5 flex items-center justify-between shadow-[0_0_20px_rgba(0,180,174,0.2)]">
+                <div onclick="openPlayerProfileModal('${organizerId}', '${organizerName.replace(/'/g, "\\'")}', '')" class="flex items-center gap-3 cursor-pointer group">
+                    <img src="${organizerAvatar}" class="w-10 h-10 rounded-full object-cover border-2 border-[#00F296] shadow-md group-hover:scale-105 transition">
                     <div>
-                        <div class="text-[9px] font-black text-[#00F296] uppercase tracking-wider">TEAM BUILDER TOOL</div>
-                        <p class="text-[11px] text-white/70">Format: ${event.format || '11v11'} • Teams: ${event.teamsCount || 3}</p>
+                        <div class="text-[8px] font-black uppercase text-white/50 tracking-wider">ORGANIZER</div>
+                        <h4 class="text-xs font-black text-white group-hover:text-[#00F296] transition mt-0.5">${organizerName}</h4>
                     </div>
                 </div>
-                <button onclick="openTeamMakingModal('${event.id}')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-[0_0_15px_rgba(0,242,150,0.4)] transition">
-                    Build Teams
+                <div class="flex items-center gap-2">
+                    <button onclick="window.shareGameLink('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] border border-[#00F296]/50 px-3 py-1.5 rounded-full text-[10px] font-black transition flex items-center gap-1.5 shadow-[0_0_10px_rgba(0,242,150,0.2)]">
+                        <i class="fa-solid fa-share-nodes"></i> Share Link
+                    </button>
+                    <span class="text-[9px] font-bold px-3 py-1 rounded-full bg-[#00F296]/15 text-[#00F296] border border-[#00F296]/50 shadow-[0_0_12px_rgba(0,242,150,0.3)]">Organizer</span>
+                </div>
+            </div>
+
+            <!-- 2. Date, Time & Location Box -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[20px] p-3.5 flex items-center justify-between gap-3 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
+                <div class="space-y-2.5 flex-1">
+                    <div class="space-y-0.5">
+                        <span class="text-[8px] font-black text-white/50 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-calendar text-[#00F296] text-[9px]"></i> Date
+                        </span>
+                        <p class="text-[11px] font-black text-white tracking-wide">${event.date || '2026-09-30'}</p>
+                    </div>
+                    <div class="space-y-0.5">
+                        <span class="text-[8px] font-black text-white/50 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-clock text-[#00F296] text-[9px]"></i> Time
+                        </span>
+                        <p class="text-[11px] font-black text-white tracking-wide">${event.time || '8:00 PM'}</p>
+                    </div>
+                </div>
+
+                <div class="w-[1px] h-12 bg-white/15"></div>
+
+                <div class="space-y-1 flex-[1.6]">
+                    <span class="text-[8px] font-black text-white/50 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-location-dot text-[#00F296] text-[9px]"></i> Park & Location
+                    </span>
+                    <p class="text-[11px] font-black text-white leading-snug">${event.location || ''}</p>
+                </div>
+
+                <button onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location || '')}', '_blank')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-3 rounded-xl text-xs shadow-[0_0_15px_rgba(0,242,150,0.4)] transition flex flex-col items-center justify-center gap-0.5 shrink-0">
+                    <i class="fa-solid fa-location-arrow text-xs"></i>
+                    <span class="text-[7px] uppercase font-black tracking-wider">Navigate</span>
                 </button>
             </div>
 
-            <!-- Roster Container with 3 Sub-Tabs -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 space-y-4 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
-                <!-- Sub-tab Bar -->
-                <div class="grid grid-cols-3 gap-2 bg-black/40 p-1.5 rounded-xl border border-white/10">
-                    <button onclick="switchRosterSubTab(0)" class="py-2 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition ${window.activeRosterSubTab === 0 ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
-                        Confirmed (${totalConfirmedHeads})
-                    </button>
-                    <button onclick="switchRosterSubTab(1)" class="py-2 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition ${window.activeRosterSubTab === 1 ? 'bg-amber-400/25 text-amber-300 border border-amber-400/50 shadow' : 'text-white/60 hover:text-white'}">
-                        Waitlist (${totalWaitlistHeads})
-                    </button>
-                    <button onclick="switchRosterSubTab(2)" class="py-2 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition ${window.activeRosterSubTab === 2 ? 'bg-red-500/25 text-red-400 border border-red-500/50 shadow' : 'text-white/60 hover:text-white'}">
-                        Not Going (${totalNotGoingHeads})
-                    </button>
+            <!-- 3. Format, Fee & Teams Split Row -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[20px] p-3.5 grid grid-cols-3 gap-2 shadow-[0_0_20px_rgba(0,180,174,0.2)] text-center">
+                <div class="space-y-1 border-r border-white/15 pr-1">
+                    <span class="text-[8px] font-black text-white/50 uppercase tracking-wider">Format</span>
+                    <p class="text-[11px] font-black text-white">${formatVal}</p>
                 </div>
+                <div class="space-y-1 border-r border-white/15 px-1">
+                    <span class="text-[8px] font-black text-white/50 uppercase tracking-wider">Entry Fee</span>
+                    <p class="text-[11px] font-black text-white">${feeVal}</p>
+                </div>
+                <div class="space-y-1 pl-1">
+                    <span class="text-[8px] font-black text-white/50 uppercase tracking-wider">Teams</span>
+                    <p class="text-[11px] font-black text-white">${teamsVal}</p>
+                </div>
+            </div>
 
-                <!-- Sub-tab Content List -->
-                <div class="space-y-2.5 pr-1">
-                    ${currentList.length === 0 ? `
-                        <div class="text-center text-xs text-white/40 py-8">
-                            ${window.activeRosterSubTab === 0 ? 'No confirmed players on the roster yet.' : (window.activeRosterSubTab === 1 ? 'Waitlist is empty.' : 'No declined responses.')}
-                        </div>
-                    ` : ''}
+            <!-- 4. Dynamic Action Button -->
+            ${hasJoined ? `
+                ${allowPlusOnes ? `
+                    <div class="flex gap-2.5">
+                        <button onclick="handleCancelRsvp('${event.id}')" class="flex-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500 text-red-400 font-black py-3 rounded-xl transition text-[11px] uppercase tracking-wider shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                            Cancel RSVP
+                        </button>
+                        <button onclick="handleManageGuests('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl transition text-[11px] uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)]">
+                            Manage Guests
+                        </button>
+                    </div>
+                ` : `
+                    <button onclick="handleCancelRsvp('${event.id}')" class="w-full bg-red-500/20 hover:bg-red-500/30 border border-red-500 text-red-400 font-black py-3 rounded-xl transition text-[11px] uppercase tracking-wider shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                        Cancel RSVP
+                    </button>
+                `}
+            ` : `
+                <button onclick="handleJoinGame('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl transition text-[11px] uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-user-plus text-xs"></i>
+                    <span>Join Game Roster</span>
+                </button>
+            `}
 
-                    ${currentList.map(att => {
-                        const isPaid = att.paid === 'Paid';
-                        const safeAvatar = resolveAvatar(att);
-                        const rawName = att.name || att.firstName || att.displayName || att.fullName || 'Player';
-                        const safeName = rawName.replace(/'/g, "\\'");
-                        const isOrganizer = att.uid === event.organizerId;
+            <!-- 5. Expandable Game Details Card -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[20px] p-3.5 shadow-[0_0_20px_rgba(0,180,174,0.2)] space-y-2">
+                <div class="flex items-center justify-between cursor-pointer" onclick="toggleSection('game-details-content', 'game-details-chevron')">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-file-lines text-[#00F296] text-xs"></i>
+                        <span class="text-[11px] font-black text-white tracking-wider uppercase">Game Details</span>
+                    </div>
+                    <i id="game-details-chevron" class="fa-solid fa-chevron-down text-white/50 text-xs transition-transform"></i>
+                </div>
+                <div id="game-details-content" class="text-[11px] text-white/80 font-medium pt-2 leading-relaxed border-t border-white/15">
+                    ${descText}
+                </div>
+            </div>
 
-                        let guestsHtml = '';
-                        if (att.guests && att.guests.length > 0) {
-                            guestsHtml = att.guests.map((g, gIdx) => `
-                                <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-xl border border-white/5 ml-8">
-                                    <div class="flex items-center gap-2.5">
-                                        <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-[#00F296] font-black flex items-center justify-center text-[10px] border border-emerald-500/40">
-                                            ${(g.name || 'G').charAt(0).toUpperCase()}
-                                        </div>
-                                        <div>
-                                            <span class="text-white/90 font-bold">${g.name || 'Guest'}</span>
-                                            <span class="text-[9px] text-[#00F296] block">guest of ${rawName}</span>
-                                        </div>
-                                    </div>
-                                    <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/40 text-white/60 border border-white/10">${g.paid || 'Unpaid'}</span>
-                                </div>
-                            `).join('');
-                        }
-
-                        const statusBadgeClass = window.activeRosterSubTab === 0 
-                            ? (isPaid ? 'bg-emerald-500/20 text-[#00F296] border-emerald-500/40' : 'bg-black/40 text-white/70 border-white/15')
-                            : (window.activeRosterSubTab === 1 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40');
-                        
-                        const statusLabel = window.activeRosterSubTab === 0 ? (att.paid || 'Unpaid') : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
-
-                        return `
-                            <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '')">
-                                        <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                                        <div>
-                                            <div class="flex items-center gap-1.5 flex-wrap">
-                                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${rawName}</span>${isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : ''}
-                                            </div>
-                                            ${att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : ''}
-                                        </div>
-                                    </div>
-                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full border ${statusBadgeClass}">
-                                        ${statusLabel}
-                                    </span>
-                                </div>
-                                ${guestsHtml}
-                            </div>
-                        `;
-                    }).join('')}
+            <!-- 6. Expandable Rules Card -->
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[20px] p-3.5 shadow-[0_0_20px_rgba(0,180,174,0.2)] space-y-2">
+                <div class="flex items-center justify-between cursor-pointer" onclick="toggleSection('game-rules-content', 'game-rules-chevron')">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-list-check text-[#00F296] text-xs"></i>
+                        <span class="text-[11px] font-black text-white tracking-wider uppercase">Rules & Guidelines</span>
+                    </div>
+                    <i id="game-rules-chevron" class="fa-solid fa-chevron-down text-white/50 text-xs transition-transform"></i>
+                </div>
+                <div id="game-rules-content" class="text-[11px] text-white/80 font-medium pt-2 leading-relaxed border-t border-white/15">
+                    ${rulesText}
                 </div>
             </div>
         </div>
     `;
 };
 
-// One shared place that decides which photo to show for a person.
-// Order: live profile photo (directory, matched by uid) > photo saved on the record > initials.
-window.resolvePlayerAvatar = function(person) {
-    const initials = () => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person?.name || person?.firstName || 'Player')}`;
-    if (!person) return initials();
-    const uid = person.uid ? String(person.uid) : '';
-    const isGenerated = (u) => typeof u === 'string' && u.includes('api.dicebear.com');
-    const usable = (u) => typeof u === 'string' && u.trim() !== '';
+window.shareGameLink = function(eventId) {
+    const cleanPath = window.location.pathname.replace(/index\.html$/, '');
+    const shareUrl = `${window.location.origin}${cleanPath}#event=${encodeURIComponent(eventId)}`;
+    const ev = (window.eventsList || []).find(e => String(e.id) === String(eventId));
+    const title = ev?.title || ev?.name || 'FutNet game';
 
-    if (uid && window.currentUser && uid === String(window.currentUser.uid) && usable(window.userProfile?.avatar)) {
-        return window.userProfile.avatar;
-    }
-    if (uid && Array.isArray(window.directoryList)) {
-        const hit = window.directoryList.find(u => String(u.uid) === uid);
-        if (hit && usable(hit.avatar)) return hit.avatar;
-        if (hit && usable(hit.photoURL)) return hit.photoURL;
-    }
-    const own = person.avatar || person.photoURL || person.profilePicture;
-    if (usable(own) && !isGenerated(own)) return own;
-    return usable(own) ? own : initials();
-};
+    const copyLink = () => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                window.showToast("📋 Game link copied to clipboard!");
+            }).catch(() => {
+                prompt("Copy game link:", shareUrl);
+            });
+        } else {
+            prompt("Copy game link:", shareUrl);
+        }
+    };
 
-window.switchRosterSubTab = function(subIndex) {
-    window.activeRosterSubTab = subIndex;
-    if (typeof window.renderEventDetailModalContent === 'function') {
-        window.renderEventDetailModalContent();
-    }
-};
-
-window.openPlayerProfileModal = function(uid, name, avatar) {
-    if (!uid || uid === window.currentUser?.uid) return;
-
-    const photo = avatar && avatar.trim() !== '' ? avatar : window.resolvePlayerAvatar({ uid, name });
-    window._popupPerson = { uid, name, avatar: photo };
-
-    let modal = document.getElementById('player-profile-popup');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'player-profile-popup';
-        modal.className = 'fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
-        document.body.appendChild(modal);
-    }
-
-    modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center animate-in fade-in zoom-in duration-200">
-            <div class="flex justify-end">
-                <button onclick="document.getElementById('player-profile-popup').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="flex flex-col items-center space-y-2">
-                <img id="player-popup-img" class="w-20 h-20 rounded-full object-cover border-4 border-[#00F296] shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                <h3 id="player-popup-name" class="text-base font-black text-white"></h3>
-            </div>
-            <div class="space-y-2 pt-2">
-                <button onclick="sendDirectMessageFromRoster(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-comments"></i> Send Message
-                </button>
-                <button onclick="sendFriendRequestFromRoster(window._popupPerson.uid)" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-user-plus"></i> Send Friend Request
-                </button>
-            </div>
-        </div>
-    `;
-    document.getElementById('player-popup-img').src = photo;
-    document.getElementById('player-popup-name').textContent = name;
-};
-
-window.sendDirectMessageFromRoster = function(uid, name, avatar) {
-    const modal = document.getElementById('player-profile-popup');
-    if (modal) modal.remove();
-    if (typeof window.openChatThread === 'function') {
-        window.openChatThread({ uid, name, avatar });
+    // On phones this opens the normal share sheet (WhatsApp, iMessage, etc.)
+    if (navigator.share) {
+        navigator.share({ title, text: `Join me at ${title} on FutNet!`, url: shareUrl })
+            .catch((err) => { if (err && err.name !== 'AbortError') copyLink(); });
     } else {
-        window.switchTab('chat');
+        copyLink();
     }
 };
 
-window.sendFriendRequestFromRoster = function(uid) {
-    const modal = document.getElementById('player-profile-popup');
-    if (modal) modal.remove();
-    if (typeof window.sendFriendRequest === 'function') {
-        window.sendFriendRequest(uid);
+window.toggleSection = function(contentId, chevronId) {
+    const content = document.getElementById(contentId);
+    const chevron = document.getElementById(chevronId);
+    if (content && chevron) {
+        content.classList.toggle('hidden');
+        chevron.classList.toggle('rotate-180');
+    }
+};
+
+window.handleJoinGame = function(eventId) {
+    if (!window.currentUser) {
+        window.showToast("Please sign in to join games", "error");
+        return;
+    }
+    if (typeof window.openJoinGameModal === 'function') {
+        window.openJoinGameModal(eventId);
     } else {
-        window.showToast("Friend request sent successfully!");
+        window.showToast("Successfully joined roster!");
+    }
+};
+
+window.handleCancelRsvp = function(eventId) {
+    if (confirm("Are you sure you want to cancel your RSVP for this game?")) {
+        if (typeof window.handleRSVPAction === 'function') {
+            window.handleRSVPAction(eventId, 'cancel');
+        } else {
+            window.showToast("RSVP cancelled successfully.");
+        }
     }
 };
