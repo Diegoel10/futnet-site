@@ -403,8 +403,9 @@ window.renderEventDetailModalContent = function() {
     ` : '';
 
     container.innerHTML = `
-        <div class="space-y-4 text-white relative">
+        <div class="space-y-4 text-white relative pt-6 sm:pt-8">
             <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between relative z-30">
+...
                 <div class="flex items-center gap-3 overflow-hidden">
                     <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
                         <i class="fa-solid fa-chevron-left text-xs"></i>

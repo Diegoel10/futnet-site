@@ -1,4 +1,4 @@
-// js/game-profile/add-players-modal.js: Dedicated screen with smart sorting and manual fallback for private/incognito users
+// js/game-profile/add-players-modal.js: Dedicated screen with sticky bottom action button and dynamic count matching native app
 import { db, appId } from '../firebase-config.js';
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -12,36 +12,30 @@ window.openAddPlayersScreen = async function(eventId) {
     }
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border-t border-emerald-500/40 rounded-t-[32px] p-6 space-y-4 max-w-lg w-full mx-auto shadow-2xl text-white max-h-[85vh] overflow-y-auto" onclick="event.stopPropagation()">
-            <div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-2"></div>
-            <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <div class="bg-[#040E13] border-t border-emerald-500/40 rounded-t-[32px] p-6 space-y-4 max-w-lg w-full mx-auto shadow-2xl text-white max-h-[85vh] flex flex-col" onclick="event.stopPropagation()">
+            <div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-1 shrink-0"></div>
+            <div class="flex items-center justify-between border-b border-white/10 pb-3 shrink-0">
                 <h3 class="text-base font-black text-white uppercase tracking-wider">Add Players to Roster</h3>
                 <button onclick="document.getElementById('add-players-screen-modal').remove()" class="text-white/50 hover:text-white text-sm font-bold"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
 
             <!-- Search Bar -->
-            <div class="relative">
+            <div class="relative shrink-0">
                 <input type="text" id="add-players-search" oninput="filterAddPlayersList('${eventId}')" placeholder="Search registered app users..." class="w-full bg-black/60 border border-teal-500/50 rounded-xl pl-9 pr-3 py-2.5 text-white text-xs focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-emerald-400 text-xs"></i>
             </div>
 
-            <!-- Manual Add Section for Private/Incognito Users -->
-            <div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
-                <span class="text-[10px] font-bold text-white/60 uppercase">Add Private / Unlisted Player</span>
-                <div class="flex gap-2">
-                    <input type="text" id="manual-add-player-name" placeholder="Enter player's full name..." class="flex-1 bg-black/80 border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00F296]">
-                    <button onclick="submitManualAddPlayer('${eventId}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black px-4 py-2 rounded-xl text-xs border border-[#00F296]/50 transition">Add</button>
-                </div>
-            </div>
-
-            <!-- Users Selection List Container -->
-            <div id="add-players-list-container" class="space-y-2 max-h-50 overflow-y-auto pr-1 divide-y divide-white/10">
+            <!-- Users Selection List Container (Scrollable) -->
+            <div id="add-players-list-container" class="space-y-2 overflow-y-auto pr-1 flex-1 divide-y divide-white/10 min-h-[200px]">
                 <!-- Rendered dynamically -->
             </div>
 
-            <button onclick="submitBatchAddPlayers('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition">
-                Add Selected Players
-            </button>
+            <!-- Sticky Bottom Action Button -->
+            <div class="pt-2 shrink-0">
+                <button id="submit-batch-add-btn" onclick="submitBatchAddPlayers('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-md transition">
+                    Add Selected Players (0)
+                </button>
+            </div>
         </div>
     `;
 
@@ -102,7 +96,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     });
 
     if (filtered.length === 0) {
-        container.innerHTML = `<div class="text-center text-xs text-white/50 py-4">No other directory users found. Use manual add above.</div>`;
+        container.innerHTML = `<div class="text-center text-xs text-white/50 py-4">No other directory users found.</div>`;
         return;
     }
 
@@ -130,7 +124,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
                         </div>
                     </div>
                 </div>
-                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer pointer-events-none">
+                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" onchange="updateSelectedPlayerCounter()" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
             </div>
         `;
     }).join('');
@@ -150,41 +144,15 @@ window.toggleAddPlayerSelection = function(rowEl, uid) {
         } else {
             rowEl.classList.remove('bg-emerald-950/30', 'border', 'border-emerald-500/30');
         }
+        updateSelectedPlayerCounter();
     }
 };
 
-window.submitManualAddPlayer = async function(eventId) {
-    const inputEl = document.getElementById('manual-add-player-name');
-    if (!inputEl) return;
-    const name = inputEl.value.trim();
-    if (!name) {
-        window.showToast("Please enter a player name.", "error");
-        return;
-    }
-
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    let attendees = Array.isArray(event.attendees) ? event.attendees : [];
-    const newUid = 'usr_manual_' + Math.random().toString(36).substring(2, 9);
-    
-    attendees.push({
-        uid: newUid,
-        name: name,
-        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,
-        role: 'Player',
-        status: 'confirmed',
-        paid: 'Unpaid',
-        guests: []
-    });
-
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { attendees }, { merge: true });
-        window.showToast(`Added ${name} successfully!`);
-        inputEl.value = '';
-        renderAddPlayersList(eventId, document.getElementById('add-players-search')?.value || '');
-    } catch (e) {
-        window.showToast("Failed to add player", "error");
+window.updateSelectedPlayerCounter = function() {
+    const checkedCount = document.querySelectorAll('.add-player-checkbox:checked').length;
+    const btn = document.getElementById('submit-batch-add-btn');
+    if (btn) {
+        btn.innerText = `Add Selected Players (${checkedCount})`;
     }
 };
 

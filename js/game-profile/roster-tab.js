@@ -54,6 +54,66 @@ export function renderRosterTab(event) {
 
     const currentList = window.activeRosterSubTab === 0 ? confirmedList : (window.activeRosterSubTab === 1 ? waitlistList : declinedList);
 
+    const renderAttendeeCard = (att) => {
+        const isPaid = att.paid === 'Paid';
+        const safeAvatar = resolveAvatar(att);
+        const rawName = att.name || att.firstName || att.displayName || att.fullName || 'Player';
+        const safeName = rawName.replace(/'/g, "\\'");
+        const isOrganizer = att.uid === event.organizerId;
+
+        let guestsHtml = '';
+        if (att.guests && att.guests.length > 0) {
+            guestsHtml = att.guests.map((g) => `
+                <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-xl border border-white/5 ml-8">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-[#00F296] font-black flex items-center justify-center text-[10px] border border-emerald-500/40">
+                            ${(g.name || 'G').charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                            <span class="text-white/90 font-bold">${g.name || 'Guest'}</span>
+                            <span class="text-[9px] text-[#00F296] block">guest of ${rawName}</span>
+                        </div>
+                    </div>
+                    <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/40 text-white/60 border border-white/10">${g.paid || 'Unpaid'}</span>
+                </div>
+            `).join('');
+        }
+
+        const statusBadgeClass = window.activeRosterSubTab === 0 
+            ? (isPaid ? 'bg-emerald-500/20 text-[#00F296] border-emerald-500/40' : 'bg-black/40 text-white/70 border-white/15')
+            : (window.activeRosterSubTab === 1 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40');
+        
+        const statusLabel = window.activeRosterSubTab === 0 ? (att.paid || 'Unpaid') : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
+        const organizerBadge = isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : '';
+        const plusOnesBadge = att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
+
+        return `
+            <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '')">
+                        <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <div>
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${rawName}</span>
+                                ${organizerBadge}
+                            </div>
+                            ${plusOnesBadge}
+                        </div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full border ${statusBadgeClass}">
+                        ${statusLabel}
+                    </span>
+                </div>
+                ${guestsHtml}
+            </div>
+        `;
+    };
+
+    const emptyMessage = window.activeRosterSubTab === 0 ? 'No confirmed players on the roster yet.' : (window.activeRosterSubTab === 1 ? 'Waitlist is empty.' : 'No declined responses.');
+    const listContentHtml = currentList.length === 0 
+        ? `<div class="text-center text-xs text-white/40 py-8">${emptyMessage}</div>`
+        : currentList.map(att => renderAttendeeCard(att)).join('');
+
     return `
         <div class="space-y-4 font-sans text-white">
             <!-- Team Building Tool Banner -->
@@ -87,71 +147,13 @@ export function renderRosterTab(event) {
 
                 <!-- Sub-tab Content List -->
                 <div class="space-y-2.5 pr-1">
-                    ${currentList.length === 0 ? `
-                        <div class="text-center text-xs text-white/40 py-8">
-                            ${window.activeRosterSubTab === 0 ? 'No confirmed players on the roster yet.' : (window.activeRosterSubTab === 1 ? 'Waitlist is empty.' : 'No declined responses.')}
-                        </div>
-                    ` : ''}
-
-                    ${currentList.map(att => {
-                        const isPaid = att.paid === 'Paid';
-                        const safeAvatar = resolveAvatar(att);
-                        const rawName = att.name || att.firstName || att.displayName || att.fullName || 'Player';
-                        const safeName = rawName.replace(/'/g, "\\'");
-                        const isOrganizer = att.uid === event.organizerId;
-
-                        let guestsHtml = '';
-                        if (att.guests && att.guests.length > 0) {
-                            guestsHtml = att.guests.map((g, gIdx) => `
-                                <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-xl border border-white/5 ml-8">
-                                    <div class="flex items-center gap-2.5">
-                                        <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-[#00F296] font-black flex items-center justify-center text-[10px] border border-emerald-500/40">
-                                            ${(g.name || 'G').charAt(0).toUpperCase()}
-                                        </div>
-                                        <div>
-                                            <span class="text-white/90 font-bold">${g.name || 'Guest'}</span>
-                                            <span class="text-[9px] text-[#00F296] block">guest of ${rawName}</span>
-                                        </div>
-                                    </div>
-                                    <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/40 text-white/60 border border-white/10">${g.paid || 'Unpaid'}</span>
-                                </div>
-                            `).join('');
-                        }
-
-                        const statusBadgeClass = window.activeRosterSubTab === 0 
-                            ? (isPaid ? 'bg-emerald-500/20 text-[#00F296] border-emerald-500/40' : 'bg-black/40 text-white/70 border-white/15')
-                            : (window.activeRosterSubTab === 1 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40');
-                        
-                        const statusLabel = window.activeRosterSubTab === 0 ? (att.paid || 'Unpaid') : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
-
-                        return `
-                            <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '')">
-                                        <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                                        <div>
-                                            <div class="flex items-center gap-1.5 flex-wrap">
-                                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${rawName}</span>${isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : ''}
-                                            </div>
-                                            ${att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : ''}
-                                        </div>
-                                    </div>
-                                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full border ${statusBadgeClass}">
-                                        ${statusLabel}
-                                    </span>
-                                </div>
-                                ${guestsHtml}
-                            </div>
-                        `;
-                    }).join('')}
+                    ${listContentHtml}
                 </div>
             </div>
         </div>
     `;
 };
 
-// One shared place that decides which photo to show for a person.
-// Order: live profile photo (directory, matched by uid) > photo saved on the record > initials.
 window.resolvePlayerAvatar = function(person) {
     const initials = () => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person?.name || person?.firstName || 'Player')}`;
     if (!person) return initials();

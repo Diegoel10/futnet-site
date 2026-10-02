@@ -198,16 +198,19 @@ export function renderAdminTab(event) {
         }).join('');
 
     const pillsNavHtml = `
-        <div class="grid grid-cols-3 gap-2 bg-black/40 p-1.5 rounded-xl border border-white/10">
-            <button onclick="switchGameProfileTab('manage-event')" class="py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition whitespace-nowrap text-center ${currentTab === 'manage-event' ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
-                Manage Event
-            </button>
-            <button onclick="switchGameProfileTab('manage-players')" class="py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition whitespace-nowrap text-center ${currentTab === 'manage-players' ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
-                Manage Players
-            </button>
-            <button onclick="switchGameProfileTab('manage-matches')" class="py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition whitespace-nowrap text-center ${currentTab === 'manage-matches' ? 'bg-[#00F296]/25 text-[#00F296] border border-[#00F296]/50 shadow' : 'text-white/60 hover:text-white'}">
-                Manage Matches
-            </button>
+        <div class="space-y-2 bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-3 shadow-xl">
+            <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block px-1">MANAGE</span>
+            <div class="grid grid-cols-3 gap-2 bg-black/50 p-1.5 rounded-xl border border-white/10">
+                <button onclick="switchGameProfileTab('manage-event')" class="py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition text-center truncate ${currentTab === 'manage-event' ? 'bg-[#00F296] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'text-white/70 hover:text-white'}">
+                    Event
+                </button>
+                <button onclick="switchGameProfileTab('manage-players')" class="py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition text-center truncate ${currentTab === 'manage-players' ? 'bg-[#00F296] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'text-white/70 hover:text-white'}">
+                    Players
+                </button>
+                <button onclick="switchGameProfileTab('manage-matches')" class="py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition text-center truncate ${currentTab === 'manage-matches' ? 'bg-[#00F296] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'text-white/70 hover:text-white'}">
+                    Matches
+                </button>
+            </div>
         </div>
     `;
 
@@ -266,7 +269,6 @@ export function renderAdminTab(event) {
     `;
 }
 
-// Add Players Modal Screen
 window.openAddPlayersScreen = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
@@ -596,7 +598,6 @@ window.submitTwoPageGameWizard = async function() {
 window.confirmCancelGame = async function(eventId) {
     if (confirm("Are you sure you want to cancel this match? All participants will be notified.")) {
         try {
-            // Fixed delete path pointing directly to top-level 'events' collection
             await deleteDoc(doc(db, 'events', eventId));
             window.showToast("Game cancelled successfully.");
             window.switchTab('events');
