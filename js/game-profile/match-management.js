@@ -2,6 +2,22 @@
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+// Team names/colors come from team-tool.js (single source of truth). Fallbacks only if it isn't loaded yet.
+const MM_FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
+function mmTeamNames(event) {
+    if (window.getTeamNames) return window.getTeamNames(event);
+    const saved = (window.teamNames && window.teamNames[event.id]) || event.teamNames || {};
+    return Array.from({ length: event.teamsCount || 3 }, (_, i) => saved[i] || `Team ${i + 1}`);
+}
+function mmTeamColors(event) {
+    if (window.getTeamColors) return window.getTeamColors(event);
+    const saved = (window.teamColors && window.teamColors[event.id]) || event.teamColors || {};
+    return Array.from({ length: event.teamsCount || 3 }, (_, i) => saved[i] || MM_FALLBACK_COLORS[i % MM_FALLBACK_COLORS.length]);
+}
+function mmAccent(hex) {
+    return window.teamAccent ? window.teamAccent(hex) : hex;
+}
+
 window.liveMatchTimerInterval = null;
 window.liveMatchMode = 'timer'; // 'stopwatch' or 'timer'
 window.liveMatchAlarmEnabled = true;
@@ -35,29 +51,18 @@ window.openStartMatchScreen = function(eventId) {
         document.body.appendChild(modal);
     }
 
-    const teamsCount = event.teamsCount || 3;
-    const teamNamesArr = [];
-    const defaultColors = ['#00F296', '#ef4444', '#3b82f6', '#eab308', '#a855f7'];
-    const teamColorsMap = {};
-
-    const activeTeamNames = (window.teamNames && window.teamNames[event.id]) || event.teamNames || {};
-    const activeTeamColors = (window.teamColors && window.teamColors[event.id]) || event.teamColors || {};
-
-    for (let i = 0; i < teamsCount; i++) {
-        const tName = activeTeamNames[i] || `Team ${i + 1}`;
-        const tColor = activeTeamColors[i] || defaultColors[i % defaultColors.length];
-        teamNamesArr.push(tName);
-        teamColorsMap[tName] = tColor;
-    }
-
-    const defaultTeamA = teamNamesArr[0] || 'Team 1';
-    const defaultTeamB = teamNamesArr[1] || 'Team 2';
+    const teamNamesArr = mmTeamNames(event);
+    const teamColorsArr = mmTeamColors(event);
+    const teamCount = teamNamesArr.length;
 
     let active = event.liveMatchActive;
+    let needsSync = false;
     if (!active) {
         active = {
-            teamA: defaultTeamA,
-            teamB: defaultTeamB,
+            teamA: teamNamesArr[0],
+            teamB: teamNamesArr[1] || teamNamesArr[0],
+            teamAIndex: 0,
+            teamBIndex: teamCount > 1 ? 1 : 0,
             team1Goals: [],
             team2Goals: [],
             durationSeconds: 10 * 60,
@@ -66,9 +71,31 @@ window.openStartMatchScreen = function(eventId) {
             elapsedSeconds: 10 * 60,
             lastUpdatedTimestamp: Date.now()
         };
-        event.liveMatchActive = active;
-        syncLiveMatchState(eventId, active);
+        needsSync = true;
     }
+
+    // Always resolve the two teams by INDEX so the name + color match the Team Builder, even after renames/recolors
+    const pickIdx = (idx, name, fallback) => {
+        if (Number.isInteger(idx) && idx >= 0 && idx < teamCount) return idx;
+        const byName = teamNamesArr.indexOf(name);
+        return byName !== -1 ? byName : fallback;
+    };
+    let idxA = pickIdx(active.teamAIndex, active.teamA, 0);
+    let idxB = pickIdx(active.teamBIndex, active.teamB, teamCount > 1 ? 1 : 0);
+    if (idxA === idxB && teamCount > 1) idxB = (idxA + 1) % teamCount;
+
+    const nextState = {
+        teamAIndex: idxA,
+        teamBIndex: idxB,
+        teamA: teamNamesArr[idxA],
+        teamB: teamNamesArr[idxB],
+        teamAColor: teamColorsArr[idxA],
+        teamBColor: teamColorsArr[idxB]
+    };
+    Object.keys(nextState).forEach(k => { if (active[k] !== nextState[k]) { active[k] = nextState[k]; needsSync = true; } });
+
+    event.liveMatchActive = active;
+    if (needsSync) syncLiveMatchState(eventId, active);
 
     window.liveMatchState = active;
     window.liveMatchMode = active.mode || 'timer';
@@ -79,8 +106,8 @@ window.openStartMatchScreen = function(eventId) {
     const initialS = currentSecs % 60;
     const initialDisplay = `${String(initialM).padStart(2, '0')}:${String(initialS).padStart(2, '0')}`;
 
-    const colorA = teamColorsMap[active.teamA] || '#00F296';
-    const colorB = teamColorsMap[active.teamB] || '#ef4444';
+    const colorA = mmAccent(teamColorsArr[idxA]);
+    const colorB = mmAccent(teamColorsArr[idxB]);
 
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-[#00B4AE]/50 rounded-3xl p-6 space-y-4 max-w-lg w-full mx-auto shadow-2xl text-white relative max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
@@ -133,14 +160,14 @@ window.openStartMatchScreen = function(eventId) {
                 <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1">
                         <label class="block text-[9px] font-black text-white/60 uppercase">Team 1</label>
-                        <select id="live-match-teamA" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full bg-black/80 border border-teal-500/50 rounded-xl px-3 py-2 text-white text-xs font-bold">
-                            ${teamNamesArr.map(t => `<option value="${t}" ${t === active.teamA ? 'selected' : ''}>${t}</option>`).join('')}
+                        <select id="live-match-teamA" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full bg-black/80 border-2 rounded-xl px-3 py-2 text-white text-xs font-bold" style="border-color: ${colorA};">
+                            ${teamNamesArr.map((t, i) => `<option value="${i}" ${i === idxA ? 'selected' : ''} ${i === idxB ? 'disabled' : ''}>${t}</option>`).join('')}
                         </select>
                     </div>
                     <div class="space-y-1">
                         <label class="block text-[9px] font-black text-white/60 uppercase">Team 2</label>
-                        <select id="live-match-teamB" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full bg-black/80 border border-red-500/50 rounded-xl px-3 py-2 text-white text-xs font-bold">
-                            ${teamNamesArr.map(t => `<option value="${t}" ${t === active.teamB ? 'selected' : ''}>${t}</option>`).join('')}
+                        <select id="live-match-teamB" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full bg-black/80 border-2 rounded-xl px-3 py-2 text-white text-xs font-bold" style="border-color: ${colorB};">
+                            ${teamNamesArr.map((t, i) => `<option value="${i}" ${i === idxB ? 'selected' : ''} ${i === idxA ? 'disabled' : ''}>${t}</option>`).join('')}
                         </select>
                     </div>
                 </div>
@@ -328,14 +355,26 @@ async function syncLiveMatchState(eventId, activeState) {
 }
 
 window.updateLiveMatchTeamNames = async function(eventId) {
-    const tA = document.getElementById('live-match-teamA').value;
-    const tB = document.getElementById('live-match-teamB').value;
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !event.liveMatchActive) return;
 
-    event.liveMatchActive.teamA = tA;
-    event.liveMatchActive.teamB = tB;
-    
+    const iA = parseInt(document.getElementById('live-match-teamA').value, 10);
+    const iB = parseInt(document.getElementById('live-match-teamB').value, 10);
+    if (iA === iB) {
+        if (typeof window.showToast === 'function') window.showToast("A team can't play against itself.", "error");
+        window.openStartMatchScreen(eventId);
+        return;
+    }
+
+    const names = mmTeamNames(event);
+    const colors = mmTeamColors(event);
+    event.liveMatchActive.teamAIndex = iA;
+    event.liveMatchActive.teamBIndex = iB;
+    event.liveMatchActive.teamA = names[iA];
+    event.liveMatchActive.teamB = names[iB];
+    event.liveMatchActive.teamAColor = colors[iA];
+    event.liveMatchActive.teamBColor = colors[iB];
+
     window.openStartMatchScreen(eventId);
     await syncLiveMatchState(eventId, event.liveMatchActive);
 };
@@ -344,20 +383,23 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !event.liveMatchActive) return;
 
-    const teamName = teamKey === 'A' ? event.liveMatchActive.teamA : event.liveMatchActive.teamB;
+    let teamName = teamKey === 'A' ? event.liveMatchActive.teamA : event.liveMatchActive.teamB;
     
     let assignedPlayers = [];
     const assignments = event.teamAssignments || window.teamAssignments?.[eventId] || {};
     const configuredNames = (window.teamNames && window.teamNames[eventId]) || event.teamNames || {};
 
-    let teamIndex = -1;
-    for (let i = 0; i < (event.teamsCount || 3); i++) {
+    let teamIndex = teamKey === 'A' ? event.liveMatchActive.teamAIndex : event.liveMatchActive.teamBIndex;
+    if (!Number.isInteger(teamIndex)) teamIndex = -1;
+    for (let i = 0; teamIndex === -1 && i < (event.teamsCount || 3); i++) {
         const cName = configuredNames[i] || `Team ${i + 1}`;
         if (cName === teamName) {
             teamIndex = i;
             break;
         }
     }
+
+    if (teamIndex !== -1) teamName = mmTeamNames(event)[teamIndex] || teamName;
 
     if (teamIndex !== -1 && assignments[teamIndex] && Array.isArray(assignments[teamIndex])) {
         assignedPlayers = assignments[teamIndex].filter(p => p && p.name);
@@ -437,9 +479,18 @@ window.saveLiveMatchResult = async function(eventId) {
     if (!event || !event.liveMatchActive) return;
 
     let matches = Array.isArray(event.matches) ? [...event.matches] : [];
+    const live = event.liveMatchActive;
+    const namesNow = mmTeamNames(event);
+    const colorsNow = mmTeamColors(event);
+    const iA = Number.isInteger(live.teamAIndex) ? live.teamAIndex : namesNow.indexOf(live.teamA);
+    const iB = Number.isInteger(live.teamBIndex) ? live.teamBIndex : namesNow.indexOf(live.teamB);
     matches.push({
-        teamA: event.liveMatchActive.teamA,
-        teamB: event.liveMatchActive.teamB,
+        teamA: iA >= 0 ? namesNow[iA] : live.teamA,
+        teamB: iB >= 0 ? namesNow[iB] : live.teamB,
+        teamAIndex: iA >= 0 ? iA : null,
+        teamBIndex: iB >= 0 ? iB : null,
+        teamAColor: iA >= 0 ? colorsNow[iA] : (live.teamAColor || null),
+        teamBColor: iB >= 0 ? colorsNow[iB] : (live.teamBColor || null),
         team1Goals: event.liveMatchActive.team1Goals || [],
         team2Goals: event.liveMatchActive.team2Goals || [],
         isFinished: true,

@@ -59,9 +59,12 @@ window.initEventsLiveListener = function() {
         initialLoadResolved = true;
         clearTimeout(loadTimeout);
         const list = [];
+        window.eventDocIds = {};
         snapshot.forEach(docSnap => {
             const evData = docSnap.data();
             if (!evData.id) evData.id = docSnap.id;
+            // Remember the REAL Firestore document id (may differ from the id field inside the data)
+            window.eventDocIds[evData.id] = docSnap.id;
             if (!evData.attendees) evData.attendees = [];
             if (!evData.waitingList) evData.waitingList = [];
             if (!evData.declinedList) evData.declinedList = [];

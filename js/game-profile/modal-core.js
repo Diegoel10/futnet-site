@@ -295,14 +295,10 @@ window.openEventDetails = function(eventId) {
     window.renderEventDetailModalContent();
 };
 
-// NOTE: window.openTeamMakingModal is defined in team-tool.js (do not redefine here)
-
 window.switchModalTab = function(tabName) {
     window.activeModalTab = tabName;
     window.renderEventDetailModalContent();
 };
-
-// NOTE: window.switchTeamTab is defined in team-tool.js
 
 window.switchStatsSubTab = function(subTab) {
     window.activeStatsSubTab = subTab;
@@ -366,7 +362,7 @@ window.renderEventDetailModalContent = function() {
     const safeLocation = (event.location || '').replace(/'/g, "\\'");
 
     container.innerHTML = `
-        <div class="space-y-4 text-white relative pt-6 sm:pt-8">
+        <div class="space-y-4 text-white relative pt-6 sm:pt-8 pointer-events-auto">
             <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-4 py-3 rounded-2xl shadow-lg flex items-center justify-between relative z-30">
                 <div class="flex items-center gap-3 overflow-hidden">
                     <button onclick="closeEventModal()" class="w-8 h-8 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shrink-0">
@@ -640,10 +636,39 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
 window.cancelGameEvent = async function(eventId) {
     if (!confirm("Are you sure you want to cancel and delete this game?")) return;
     try {
-        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
+        const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
+        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', realDocId);
+        
+        // 1. Delete document from Firestore
         await deleteDoc(eventDocRef);
+
+        // 2. Remove aggressively from local window.eventsList across all ID variations
+        window.eventsList = (window.eventsList || []).filter(ev => 
+            String(ev.id) !== String(eventId) && String(ev.id) !== String(realDocId)
+        );
+
+        // 3. Force immediate DOM cleanup and re-render of the games grid
+        if (typeof window.renderEvents === 'function') {
+            window.renderEvents();
+        } else {
+            const card = document.getElementById(`event-card-${eventId}`);
+            if (card) card.remove();
+        }
+
+        if (window.teamAssignments) delete window.teamAssignments[eventId];
+        if (window.currentTeamBuildingEvent && String(window.currentTeamBuildingEvent.id) === String(eventId)) {
+            window.currentTeamBuildingEvent = null;
+        }
+        document.getElementById('standalone-team-builder-modal')?.remove();
+
         window.showToast("Game cancelled and deleted.");
-        closeEventModal();
+        
+        // 4. Close the details screen
+        if (typeof window.closeEventModal === 'function') {
+            window.closeEventModal();
+        } else if (typeof window.switchTab === 'function') {
+            window.switchTab('events');
+        }
     } catch (err) {
         console.error("Error cancelling game:", err);
         window.showToast("Failed to cancel game", "error");
@@ -1023,7 +1048,8 @@ async function updateEventInFirestore(event) {
             return false;
         }
 
-        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
+        const realDocId = (window.eventDocIds && window.eventDocIds[event.id]) || event.id;
+        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', realDocId);
         await setDoc(eventDocRef, payload, { merge: true });
         return true;
     } catch (err) {

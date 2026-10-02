@@ -9,6 +9,68 @@ window.teamNames = window.teamNames || {};
 window.teamColors = window.teamColors || {};
 window.teamCaptains = window.teamCaptains || {};
 
+// ---------- Shared team name / color helpers (also used by match-management.js) ----------
+window.TEAM_COLOR_OPTIONS = [
+    { name: 'Blue',   hex: '#3b82f6' },
+    { name: 'Red',    hex: '#ef4444' },
+    { name: 'Yellow', hex: '#eab308' },
+    { name: 'Green',  hex: '#22c55e' },
+    { name: 'Purple', hex: '#a855f7' },
+    { name: 'Pink',   hex: '#ec4899' },
+    { name: 'Orange', hex: '#f97316' },
+    { name: 'White',  hex: '#ffffff' },
+    { name: 'Black',  hex: '#000000' }
+];
+
+// Resolved color for every team of an event. Guarantees no two teams share a color:
+// saved colors win (first team keeps it), unset/duplicate ones get the first free palette color.
+window.getTeamColors = function(event) {
+    if (!event) return [];
+    const count = event.teamsCount || 3;
+    const saved = (window.teamColors && window.teamColors[event.id]) || event.teamColors || {};
+    const palette = window.TEAM_COLOR_OPTIONS.map(c => c.hex);
+    const result = new Array(count).fill(null);
+    const used = new Set();
+    for (let i = 0; i < count; i++) {
+        const c = saved[i];
+        if (c && !used.has(String(c).toLowerCase())) {
+            result[i] = c;
+            used.add(String(c).toLowerCase());
+        }
+    }
+    for (let i = 0; i < count; i++) {
+        if (result[i]) continue;
+        const free = palette.find(p => !used.has(p.toLowerCase())) || palette[i % palette.length];
+        result[i] = free;
+        used.add(free.toLowerCase());
+    }
+    return result;
+};
+
+window.getTeamNames = function(event) {
+    if (!event) return [];
+    const count = event.teamsCount || 3;
+    const saved = (window.teamNames && window.teamNames[event.id]) || event.teamNames || {};
+    return Array.from({ length: count }, (_, i) => saved[i] || `Team ${i + 1}`);
+};
+
+window.getTeamColor = function(event, teamIndex) {
+    return window.getTeamColors(event)[teamIndex];
+};
+
+// Color that stays visible on the dark UI (black teams get a light-gray accent for borders/text)
+window.teamAccent = function(hex) {
+    return String(hex || '').toLowerCase() === '#000000' ? '#9ca3af' : hex;
+};
+
+// Readable text color on top of a team color
+window.teamTextOn = function(hex) {
+    const h = String(hex || '#000000').replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.6 ? '#0f172a' : '#ffffff';
+};
+
 async function updateTeamToolFirestore(event) {
     if (!event || !event.id) return;
     const docRef = doc(db, 'artifacts', appId, 'eventsList', event.id);
@@ -130,13 +192,25 @@ window.changeTeamFormation = async function(eventId, teamIndex, formationKey) {
 };
 
 window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
-    window.teamColors[eventId] = window.teamColors[eventId] || {};
-    window.teamColors[eventId][teamIndex] = colorHex;
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (event) {
-        await updateTeamToolFirestore(event);
-        window.openTeamMakingModal(eventId);
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
+    if (!event) return;
+
+    const colors = window.getTeamColors(event);
+    const names = window.getTeamNames(event);
+    const clash = colors.findIndex((c, i) => i !== teamIndex && String(c).toLowerCase() === String(colorHex).toLowerCase());
+    if (clash !== -1) {
+        if (typeof window.showToast === 'function') window.showToast(`${names[clash]} already uses that color.`, 'error');
+        return;
     }
+
+    // Freeze every team's current color so auto-assigned defaults don't shift around
+    window.teamColors[eventId] = window.teamColors[eventId] || {};
+    colors.forEach((c, i) => { window.teamColors[eventId][i] = c; });
+    window.teamColors[eventId][teamIndex] = colorHex;
+
+    event.teamColors = window.teamColors[eventId];
+    await updateTeamToolFirestore(event);
+    window.openTeamMakingModal(eventId);
 };
 
 window.setTeamCaptain = async function(eventId, teamIndex, captainUid) {
@@ -156,21 +230,25 @@ window.saveTeamNameModal = async function(eventId, teamIndex) {
     const newName = inputEl.value.trim();
     if (!newName) return;
 
+    const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
+    if (!event) return;
+
+    const names = window.getTeamNames(event);
+    const clash = names.findIndex((n, i) => i !== teamIndex && n.trim().toLowerCase() === newName.toLowerCase());
+    if (clash !== -1) {
+        if (typeof window.showToast === 'function') window.showToast(`Another team is already named "${names[clash]}".`, 'error');
+        return;
+    }
+
     window.teamNames[eventId] = window.teamNames[eventId] || {};
     window.teamNames[eventId][teamIndex] = newName;
-
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (event) {
-        event.teamNames = window.teamNames[eventId];
-        try {
-            await updateTeamToolFirestore(event);
-            if (typeof window.showToast === 'function') {
-                window.showToast(`Team name updated to "${newName}"!`);
-            }
-            window.openTeamMakingModal(eventId);
-        } catch (err) {
-            console.error("Failed to save team name:", err);
-        }
+    event.teamNames = window.teamNames[eventId];
+    try {
+        await updateTeamToolFirestore(event);
+        if (typeof window.showToast === 'function') window.showToast(`Team name updated to "${newName}"!`);
+        window.openTeamMakingModal(eventId);
+    } catch (err) {
+        console.error("Failed to save team name:", err);
     }
 };
 
@@ -342,7 +420,7 @@ export function renderTeamToolTab(event) {
     window.currentTeamBuildingEvent = event;
     const teamsCount = event.teamsCount || 3;
     const format = event.format || '7v7';
-    const defaultColors = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7'];
+    const resolvedColors = window.getTeamColors(event);
 
     const formationOptions = {
         '3v3': { '2-1': [2, 1], '1-2': [1, 2] },
@@ -388,10 +466,11 @@ export function renderTeamToolTab(event) {
         const tIdx = i + 1;
         const isActive = activeTab === tIdx;
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
-        const tColor = window.teamColors[event.id][i] || defaultColors[i % defaultColors.length];
+        const rawColor = resolvedColors[i];
+        const tColor = window.teamAccent(rawColor);
         tabsHtml += `
             <button data-action="switch-team-tab" data-team-index="${tIdx}" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
-                <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle" style="background-color: ${tColor};"></span> ${tName}
+                <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle border border-white/40" style="background-color: ${rawColor};"></span> ${tName}
             </button>
         `;
     }
@@ -402,7 +481,8 @@ export function renderTeamToolTab(event) {
         let teamsSummaryHtml = '';
         for (let i = 0; i < teamsCount; i++) {
             const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
-            const tColor = window.teamColors[event.id][i] || defaultColors[i % defaultColors.length];
+            const rawColor = resolvedColors[i];
+        const tColor = window.teamAccent(rawColor);
             const teamRoster = window.teamAssignments[event.id][i] || [];
             const captainUid = window.teamCaptains[event.id][i];
 
@@ -427,7 +507,7 @@ export function renderTeamToolTab(event) {
                     <div class="space-y-3">
                         <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="w-3.5 h-3.5 rounded-full" style="background-color: ${tColor};"></span>
+                                <span class="w-3.5 h-3.5 rounded-full border border-white/40" style="background-color: ${rawColor};"></span>
                                 <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
                             </div>
                         </div>
@@ -471,7 +551,8 @@ export function renderTeamToolTab(event) {
     } else {
         const teamIdx = activeTab - 1;
         const currentTeamName = window.teamNames[event.id][teamIdx] || `Team ${teamIdx + 1}`;
-        const currentTeamColor = window.teamColors[event.id]?.[teamIdx] || defaultColors[teamIdx % defaultColors.length];
+        const currentTeamColor = resolvedColors[teamIdx];
+        const currentAccent = window.teamAccent(currentTeamColor);
         const currentTeamPlayers = window.teamAssignments[event.id][teamIdx] || [];
         const currentCaptainUid = window.teamCaptains[event.id][teamIdx] || "";
         
@@ -492,24 +573,24 @@ export function renderTeamToolTab(event) {
                 
                 if (p && p.name) {
                     rowSlots += `
-                        <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${(p.name || '').replace(/'/g, "\\'")}" class="w-36 h-14 bg-black/90 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 relative group transition hover:scale-105" style="border-color: ${currentTeamColor};">
-                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${(p.name || '').replace(/'/g, "\\'")}" class="flex-1 min-w-0 max-w-[7rem] h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 relative group transition hover:scale-105" style="border-color: ${currentAccent};">
+                            <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate text-left leading-tight pointer-events-none">
-                                <span class="text-[7px] font-black uppercase block tracking-wider" style="color: ${currentTeamColor};">${positionName}</span>
-                                <span class="text-[10px] font-black text-white truncate block">${p.name}</span>
+                                <span class="text-[6px] font-black uppercase block tracking-wider" style="color: ${currentAccent};">${positionName}</span>
+                                <span class="text-[9px] font-black text-white truncate block">${p.name}</span>
                             </div>
                         </div>
                     `;
                 } else {
                     rowSlots += `
-                        <div data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" class="w-36 h-14 bg-black/60 border-2 border-dashed rounded-full px-3 py-1 text-center cursor-pointer hover:bg-black/80 transition flex items-center justify-center gap-2 shadow" style="border-color: ${currentTeamColor};">
+                        <div data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" class="flex-1 min-w-0 max-w-[7rem] h-10 bg-black/60 border-2 border-dashed rounded-full px-2 text-center cursor-pointer hover:bg-black/80 transition flex items-center justify-center gap-1.5 shadow" style="border-color: ${currentAccent};">
                             <i class="fa-solid fa-shirt text-white/80 text-xs pointer-events-none"></i>
                             <span class="text-[10px] font-black uppercase text-white/90 tracking-wider pointer-events-none">${positionName}</span>
                         </div>
                     `;
                 }
             }
-            rowsHtml += `<div class="flex justify-center gap-3 mb-4">${rowSlots}</div>`;
+            rowsHtml += `<div class="flex justify-center gap-2 mb-3 w-full px-1">${rowSlots}</div>`;
         });
 
         const goalieSlotIdx = playerIndex++;
@@ -517,11 +598,11 @@ export function renderTeamToolTab(event) {
         if (goaliePlayer && goaliePlayer.name) {
             rowsHtml += `
                 <div class="flex justify-center mt-3">
-                    <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${(goaliePlayer.name || '').replace(/'/g, "\\'")}" class="w-40 h-14 bg-black/90 border-2 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
-                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${(goaliePlayer.name || '').replace(/'/g, "\\'")}" class="w-28 h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 transition hover:scale-105" style="border-color: ${currentAccent};">
+                        <img src="${goaliePlayer.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div class="truncate text-left leading-tight pointer-events-none">
-                            <span class="text-[7px] font-black uppercase block tracking-wider text-amber-400">GK</span>
-                            <span class="text-[10px] font-black text-white truncate block">${goaliePlayer.name}</span>
+                            <span class="text-[6px] font-black uppercase block tracking-wider text-amber-400">GK</span>
+                            <span class="text-[9px] font-black text-white truncate block">${goaliePlayer.name}</span>
                         </div>
                     </div>
                 </div>
@@ -529,7 +610,7 @@ export function renderTeamToolTab(event) {
         } else {
             rowsHtml += `
                 <div class="flex justify-center mt-3">
-                    <div data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" class="w-40 h-14 border-2 border-dashed bg-black/60 rounded-full px-3 py-1 text-center cursor-pointer shadow-lg flex items-center gap-2.5 transition hover:scale-105" style="border-color: ${currentTeamColor};">
+                    <div data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" class="w-28 h-10 border-2 border-dashed bg-black/60 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center justify-center gap-1.5 transition hover:scale-105" style="border-color: ${currentAccent};">
                         <i class="fa-solid fa-hand text-amber-300 text-sm ml-2 pointer-events-none"></i>
                         <span class="text-[10px] font-black uppercase text-amber-300 tracking-wider ml-1 pointer-events-none">GK</span>
                     </div>
@@ -564,43 +645,52 @@ export function renderTeamToolTab(event) {
 
         contentHtml = `
             <div class="space-y-5 pb-16">
-                <div class="bg-[#040E13]/95 border border-white/10 p-5 rounded-3xl space-y-4 shadow-xl">
-                    <h4 class="text-xs font-black text-white/70 uppercase tracking-wider">Team Configuration</h4>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                        <div class="space-y-1.5">
-                            <label class="block text-[10px] font-bold text-white/60 uppercase">Team Name</label>
-                            <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="w-full bg-black/80 border border-white/20 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
-                        </div>
-                        <div class="space-y-1.5">
-                            <label class="block text-[10px] font-bold text-white/60 uppercase">Team Color</label>
-                            <div class="flex items-center gap-2.5 pt-1.5">
-                                ${defaultColors.map(col => `
-                                    <button data-action="change-team-color" data-event-id="${event.id}" data-team-index="${teamIdx}" data-color="${col}" class="w-7 h-7 rounded-full border-2 transition ${currentTeamColor === col ? 'border-white scale-110 shadow-md' : 'border-transparent'}" style="background-color: ${col};"></button>
-                                `).join('')}
+                <div class="bg-[#040E13]/95 border border-white/10 p-3 rounded-3xl shadow-xl">
+                    <div class="flex items-end gap-2">
+                        <div class="flex-1 min-w-0 space-y-1">
+                            <label class="block text-[9px] font-bold text-white/60 uppercase">Team</label>
+                            <div class="flex items-center gap-1">
+                                <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="flex-1 min-w-0 bg-black/80 border border-white/20 rounded-xl px-2.5 py-2 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
+                                <button data-action="save-team-name" data-event-id="${event.id}" data-team-index="${teamIdx}" title="Save team name" class="w-8 h-8 shrink-0 bg-[#00F296] text-slate-950 rounded-xl text-xs flex items-center justify-center shadow"><i class="fa-solid fa-check pointer-events-none"></i></button>
                             </div>
                         </div>
-                        <div class="space-y-1.5">
-                            <label class="block text-[10px] font-bold text-white/60 uppercase">Captain</label>
-                            <select id="team-captain-select-${teamIdx}" data-action="set-team-captain" data-event-id="${event.id}" data-team-index="${teamIdx}" class="w-full bg-black/80 border border-white/20 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white">
-                                <option value="">Select Captain</option>
+                        <div class="shrink-0 space-y-1">
+                            <label class="block text-[9px] font-bold text-white/60 uppercase text-center">Color</label>
+                            <button data-action="toggle-color-palette" data-team-index="${teamIdx}" title="Tap to change color" class="block w-8 h-8 rounded-full border-2 border-white/70 shadow transition hover:scale-110" style="background-color: ${currentTeamColor};"></button>
+                        </div>
+                        <div class="w-[34%] shrink-0 space-y-1">
+                            <label class="block text-[9px] font-bold text-white/60 uppercase">Captain</label>
+                            <select id="team-captain-select-${teamIdx}" data-action="set-team-captain" data-event-id="${event.id}" data-team-index="${teamIdx}" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2 text-xs font-bold text-white">
+                                <option value="">None</option>
                                 ${captainOptionsHtml}
                             </select>
                         </div>
                     </div>
-                    <button data-action="save-team-name" data-event-id="${event.id}" data-team-index="${teamIdx}" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-xs shadow-md transition mt-1">Save Team Name</button>
+                    <div id="team-color-palette-${teamIdx}" class="hidden">
+                        <div class="flex flex-wrap items-center gap-2.5 pt-3 mt-3 border-t border-white/10">
+                            ${window.TEAM_COLOR_OPTIONS.map(col => {
+                                const usedBy = resolvedColors.findIndex((c, i) => i !== teamIdx && c.toLowerCase() === col.hex.toLowerCase());
+                                const isCurrent = currentTeamColor.toLowerCase() === col.hex.toLowerCase();
+                                if (usedBy !== -1) {
+                                    return `<span title="${col.name} - used by ${window.getTeamNames(event)[usedBy]}" class="w-8 h-8 rounded-full border-2 border-white/20 opacity-25 cursor-not-allowed" style="background-color: ${col.hex};"></span>`;
+                                }
+                                return `<button data-action="change-team-color" data-event-id="${event.id}" data-team-index="${teamIdx}" data-color="${col.hex}" title="${col.name}" class="w-8 h-8 rounded-full border-2 transition ${isCurrent ? 'border-[#00F296] scale-110 shadow-md' : 'border-white/40'}" style="background-color: ${col.hex};"></button>`;
+                            }).join('')}
+                        </div>
+                    </div>
                 </div>
 
-                <div class="relative border-2 rounded-3xl p-5 shadow-2xl overflow-hidden min-h-[480px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentTeamColor};">
+                <div class="relative border-2 rounded-3xl p-3 shadow-2xl overflow-hidden min-h-[440px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentAccent};">
                     <div class="absolute inset-0 bg-black/50 pointer-events-none"></div>
 
                     <div class="flex justify-between items-center relative z-10">
-                        <span class="text-white font-black text-xs px-4 py-2 rounded-2xl uppercase tracking-wider shadow-lg" style="background-color: ${currentTeamColor};">${currentTeamName}</span>
+                        <span class="font-black text-xs px-3 py-1.5 rounded-2xl uppercase tracking-wider shadow-lg border border-white/30" style="background-color: ${currentTeamColor}; color: ${window.teamTextOn(currentTeamColor)};">${currentTeamName}</span>
                         <select id="team-formation-select-${teamIdx}" data-action="change-team-formation" data-event-id="${event.id}" data-team-index="${teamIdx}" class="bg-black/90 text-white font-bold text-xs px-4 py-2 rounded-2xl border border-white/20 shadow-md">
                             ${formationsOptionsHtml}
                         </select>
                     </div>
 
-                    <div class="relative z-10 my-6 flex flex-col items-center justify-center">
+                    <div class="relative z-10 my-4 flex flex-col items-center justify-center w-full">
                         ${rowsHtml}
                     </div>
 
@@ -628,18 +718,18 @@ export function renderTeamToolTab(event) {
 
     return `
         <div class="space-y-6 max-w-4xl mx-auto pb-12 pointer-events-auto">
-            <div class="bg-[#040E13]/95 backdrop-blur-md border border-emerald-500/40 rounded-3xl p-5 shadow-2xl flex items-center justify-between">
+            <div class="bg-[#040E13]/95 backdrop-blur-md border border-emerald-500/40 rounded-2xl px-3 py-2 shadow-2xl flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <button data-action="close-standalone-modal" class="w-10 h-10 bg-black/50 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shadow">
+                    <button data-action="close-standalone-modal" class="w-8 h-8 bg-black/50 hover:bg-black text-white rounded-full flex items-center justify-center font-bold border border-white/20 transition shadow">
                         <i class="fa-solid fa-chevron-left text-xs pointer-events-none"></i>
                     </button>
                     <div>
-                        <h3 class="text-base font-black uppercase text-white">🔀 Team Builder & Lineups</h3>
-                        <p class="text-[11px] text-white/70 font-medium">Format: ${format} • Squad Setup</p>
+                        <h3 class="text-sm font-black uppercase text-white leading-tight">Team Builder</h3>
+                        <p class="text-[10px] text-white/60 font-medium leading-tight">Format: ${format}</p>
                     </div>
                 </div>
                 <div>
-                    <button data-action="prompt-randomize" data-event-id="${event.id}" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-4 py-2.5 rounded-2xl text-xs shadow-md transition flex items-center gap-1.5">
+                    <button data-action="prompt-randomize" data-event-id="${event.id}" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-[11px] shadow-md transition flex items-center gap-1.5">
                         <i class="fa-solid fa-shuffle text-xs pointer-events-none"></i> Randomize
                     </button>
                 </div>
@@ -670,6 +760,9 @@ document.addEventListener('click', (e) => {
     } else if (action === 'switch-team-tab') {
         const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
         window.switchTeamTab(teamIndex);
+    } else if (action === 'toggle-color-palette') {
+        const teamIndex = btn.getAttribute('data-team-index');
+        document.getElementById(`team-color-palette-${teamIndex}`)?.classList.toggle('hidden');
     } else if (action === 'change-team-color') {
         const teamIndex = parseInt(btn.getAttribute('data-team-index'), 10);
         const color = btn.getAttribute('data-color');
