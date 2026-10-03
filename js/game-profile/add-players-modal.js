@@ -1,6 +1,5 @@
 // js/game-profile/add-players-modal.js: Dedicated screen with sticky bottom action button and dynamic count matching native app
-import { db, appId } from '../firebase-config.js';
-import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { mutateEvent, escapeHtml, safeAvatar } from './event-store.js';
 
 window.openAddPlayersScreen = async function(eventId) {
     let modal = document.getElementById('add-players-screen-modal');
@@ -114,17 +113,17 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         }
 
         return `
-            <div class="flex items-center justify-between py-2.5 px-3 hover:bg-black/50 rounded-xl cursor-pointer transition select-none" onclick="toggleAddPlayerSelection(this, '${u.uid}')">
+            <div class="flex items-center justify-between py-2.5 px-3 hover:bg-black/50 rounded-xl cursor-pointer transition select-none" onclick="toggleAddPlayerSelection(this, '${escapeHtml(u.uid)}')">
                 <div class="flex items-center gap-3">
-                    <img src="${avatar}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <img src="${escapeHtml(avatar)}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                     <div>
                         <div class="text-xs font-bold text-white flex items-center gap-2">
-                            ${name}
+                            ${escapeHtml(name)}
                             ${badgeText}
                         </div>
                     </div>
                 </div>
-                <input type="checkbox" value="${u.uid}" data-name="${name}" data-avatar="${avatar}" onchange="updateSelectedPlayerCounter()" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
+                <input type="checkbox" value="${escapeHtml(u.uid)}" data-name="${escapeHtml(name)}" data-avatar="${escapeHtml(avatar)}" onchange="updateSelectedPlayerCounter()" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
             </div>
         `;
     }).join('');
@@ -163,28 +162,31 @@ window.submitBatchAddPlayers = async function(eventId) {
         return;
     }
 
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    let attendees = Array.isArray(event.attendees) ? event.attendees : [];
-    checkboxes.forEach(cb => {
-        attendees.push({
-            uid: cb.value,
+    const picked = Array.from(checkboxes).map(cb => {
+        const uid = cb.value;
+        const known = (window.directoryList || []).find(u => String(u.uid) === String(uid)) || {};
+        return {
+            uid,
             name: cb.getAttribute('data-name'),
-            avatar: cb.getAttribute('data-avatar'),
-            role: 'Player',
-            status: 'confirmed',
-            paid: 'Unpaid',
-            guests: []
-        });
+            avatar: safeAvatar(cb.getAttribute('data-avatar')),
+            position: known.position || 'Player'
+        };
     });
 
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { attendees }, { merge: true });
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = Array.isArray(draft.attendees) ? draft.attendees : [];
+        picked.forEach(pl => {
+            if (draft.attendees.some(a => String(a.uid) === String(pl.uid))) return;
+            const entry = { uid: pl.uid, name: pl.name, position: pl.position, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [] };
+            if (pl.avatar) entry.avatar = pl.avatar;
+            draft.attendees.push(entry);
+            draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(pl.uid));
+            draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== String(pl.uid));
+        });
+    });
+    if (res.ok) {
         window.showToast("Players added successfully!");
         const modal = document.getElementById('add-players-screen-modal');
         if (modal) modal.remove();
-    } catch (e) {
-        window.showToast("Failed to add players", "error");
     }
 };

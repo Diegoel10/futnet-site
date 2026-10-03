@@ -1,6 +1,7 @@
 // js/game-profile/modal-core.js: Complete updated file with standalone event page routing, browser back button support, and robust deletion/editing
 import { db, appId } from '../firebase-config.js';
-import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { mutateEvent, pruneTeamsForUid, safeAvatar, escapeHtml } from './event-store.js';
 import { renderAdminTab } from './admin-tab.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
@@ -235,20 +236,20 @@ window.saveManagedGuests = async function(eventId) {
         }
     });
 
-    event.attendees = (event.attendees || []).map(att => {
-        if (String(att.uid) === String(window.currentUser.uid)) {
-            return { ...att, guests: newGuests };
-        }
-        return att;
+    const myUid = String(window.currentUser.uid);
+    const res = await mutateEvent(eventId, (draft) => {
+        const me = (draft.attendees || []).find(att => String(att.uid) === myUid);
+        if (!me) return false;
+        const old = me.guests || [];
+        me.guests = newGuests.map((g, i) => (old[i] && old[i].name === g.name) ? old[i] : g);
+        pruneTeamsForUid(draft, myUid, { keepHost: true, keepGuests: me.guests.length });
     });
-
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { attendees: event.attendees }, { merge: true });
+    if (res.ok && !res.aborted) {
         window.showToast("Guests updated successfully!");
         document.getElementById('manage-guests-modal')?.remove();
         window.renderEventDetailModalContent();
-    } catch (e) {
-        window.showToast("Failed to update guests", "error");
+    } else if (res.ok) {
+        window.showToast("Join the game first to add guests.", "error");
     }
 };
 
@@ -364,17 +365,13 @@ window.renderEventDetailModalContent = function() {
     const mapsUrl = event.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(event.location) : '';
 
     container.innerHTML = `
-        <div class="space-y-4 text-white relative pt-1 sm:pt-2 pb-16 pointer-events-auto max-w-4xl mx-auto w-full px-4">
-            <!-- Back chevron -->
-            <div class="flex items-center">
-                <button onclick="closeEventModal()" aria-label="Back" title="Back" class="w-10 h-10 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center border-2 border-white/20 transition shadow">
-                    <i class="fa-solid fa-chevron-left text-sm"></i>
-                </button>
-            </div>
-
+        <div class="space-y-3 text-white relative pt-0 pb-16 pointer-events-auto max-w-4xl mx-auto w-full px-4">
             <!-- Page Header: title, location, navigate + share -->
             <div class="relative z-30 bg-[#040E13]/90 backdrop-blur-md border-2 border-emerald-500/30 px-5 py-3.5 rounded-3xl shadow-lg flex items-center justify-between gap-3">
-                <div class="min-w-0">
+                <button onclick="closeEventModal()" aria-label="Back" title="Back" class="w-9 h-9 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center border border-white/20 transition shadow shrink-0">
+                    <i class="fa-solid fa-chevron-left text-xs"></i>
+                </button>
+                <div class="min-w-0 flex-1">
                     <div class="flex items-center gap-2.5">
                         <h2 class="text-base font-black tracking-tight text-white truncate">${event.title}</h2>
                         <span class="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 font-black text-[9px] rounded-full uppercase tracking-wider border border-emerald-500/40 shrink-0">${event.visibility || 'Public'}</span>
@@ -427,6 +424,18 @@ window.renderEventDetailModalContent = function() {
 };
 
 window.openJoinGameModal = function(eventId) {
+    const _ev = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (_ev && _ev.communityId && _ev.openToNonMembers !== true && window.checkCommunityGameAccess) {
+        window.checkCommunityGameAccess(_ev).then(ok => {
+            if (ok) window._openJoinGameModalCore(eventId);
+            else window.showToast('This game is for community members only. Join the community first.', 'error');
+        });
+        return;
+    }
+    window._openJoinGameModalCore(eventId);
+};
+
+window._openJoinGameModalCore = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
@@ -551,94 +560,72 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         window.showToast("You must be logged in to join a game", "error");
         return;
     }
-
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    event.attendees = event.attendees || [];
-    event.waitingList = event.waitingList || [];
-    event.declinedList = event.declinedList || [];
-
-    event.declinedList = event.declinedList.filter(d => String(d.uid) !== String(window.currentUser.uid));
-
-    const formatMatch = (event.format || "").match(/(\d+)/);
-    const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
-    
-    let teamsCountNum = 3;
-    if (typeof event.teamsCount === 'number') {
-        teamsCountNum = event.teamsCount;
-    } else if (typeof event.teamsCount === 'string') {
-        const parsed = parseInt(event.teamsCount.match(/(\d+)/)?.[1], 10);
-        if (!isNaN(parsed)) teamsCountNum = parsed;
-    }
-    const maxCapacity = playersPerTeam * teamsCountNum;
-
-    event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
-    event.waitingList = event.waitingList.filter(w => String(w.uid) !== String(window.currentUser.uid));
-
-    let currentConfirmedHeads = 0;
-    event.attendees.forEach(a => {
-        currentConfirmedHeads += 1 + (a.guests ? a.guests.length : 0);
-    });
-
+    const uid = String(window.currentUser.uid);
     const profile = window.userProfile;
     const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
-    const avatarUrl = profile.avatar || window.currentUser.photoURL || '';
-    const storedAvatar = (typeof avatarUrl === 'string' && /^https?:\/\//.test(avatarUrl) && avatarUrl.length <= 500) ? avatarUrl : '';
+    const storedAvatar = safeAvatar(profile.avatar || window.currentUser.photoURL || '');
+    let outcome = 'full';
+    let acceptedCount = 0;
 
-    const newAttendee = {
-        uid: String(window.currentUser.uid),
-        name: String(fullName || 'Player'),
-        position: String(profile.position || 'Player'),
-        role: 'Player',
-        status: 'confirmed',
-        paid: 'Unpaid',
-        guests: []
-    };
-    if (storedAvatar) newAttendee.avatar = storedAvatar;
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = draft.attendees || [];
+        draft.waitingList = draft.waitingList || [];
+        draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== uid);
 
-    const totalIncomingHeads = 1 + guestsArray.length;
-    const availableSpots = maxCapacity - currentConfirmedHeads;
+        const formatMatch = (draft.format || "").match(/(\d+)/);
+        const playersPerTeam = formatMatch ? parseInt(formatMatch[1], 10) : 7;
+        let teamsCountNum = 3;
+        if (typeof draft.teamsCount === 'number') teamsCountNum = draft.teamsCount;
+        else if (typeof draft.teamsCount === 'string') {
+            const parsed = parseInt(draft.teamsCount.match(/(\d+)/)?.[1], 10);
+            if (!isNaN(parsed)) teamsCountNum = parsed;
+        }
+        const maxCapacity = playersPerTeam * teamsCountNum;
 
-    if (availableSpots >= totalIncomingHeads) {
-        newAttendee.guests = guestsArray;
-        event.attendees.push(newAttendee);
-        window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
-    } else if (availableSpots > 0) {
-        let remainingSpots = availableSpots - 1; 
-        const acceptedGuests = [];
-        const waitlistedGuests = [];
+        const previous = draft.attendees.find(a => String(a.uid) === uid);
+        const keepRole = previous && previous.role ? previous.role : 'Player';
+        draft.attendees = draft.attendees.filter(a => String(a.uid) !== uid);
+        draft.waitingList = draft.waitingList.filter(w => String(w.uid) !== uid);
 
-        guestsArray.forEach(g => {
-            if (remainingSpots > 0) {
-                acceptedGuests.push(g);
-                remainingSpots--;
-            } else {
-                waitlistedGuests.push(g);
-            }
-        });
+        let confirmedHeads = 0;
+        draft.attendees.forEach(a => { confirmedHeads += 1 + (a.guests ? a.guests.length : 0); });
 
-        newAttendee.guests = acceptedGuests;
-        event.attendees.push(newAttendee);
-
-        const waitAttendee = {
-            ...newAttendee,
-            status: 'waiting',
-            guests: waitlistedGuests
+        const me = {
+            uid, name: String(fullName || 'Player'), position: String(profile.position || 'Player'),
+            role: keepRole, status: 'confirmed', paid: 'Unpaid', guests: []
         };
-        event.waitingList.push(waitAttendee);
-        window.showToast(`Roster capacity reached! Accepted player + ${acceptedGuests.length} guest(s); remaining guest(s) placed on waitlist.`, "info");
-    } else {
-        newAttendee.status = 'waiting';
-        newAttendee.guests = guestsArray;
-        event.waitingList.push(newAttendee);
-        window.showToast("Roster is full. You and your guest(s) were added to the waitlist!", "info");
-    }
+        if (storedAvatar) me.avatar = storedAvatar;
 
-    const saved = await updateEventInFirestore(event);
-    if (!saved) {
-        window.renderEventDetailModalContent();
-        return;
+        const incoming = 1 + guestsArray.length;
+        const available = maxCapacity - confirmedHeads;
+        if (available >= incoming) {
+            me.guests = guestsArray;
+            draft.attendees.push(me);
+            outcome = 'in';
+        } else if (available > 0) {
+            let remaining = available - 1;
+            const accepted = [], waitlisted = [];
+            guestsArray.forEach(g => { if (remaining > 0) { accepted.push(g); remaining--; } else waitlisted.push(g); });
+            me.guests = accepted;
+            acceptedCount = accepted.length;
+            draft.attendees.push(me);
+            draft.waitingList.push({ ...me, status: 'waiting', guests: waitlisted });
+            outcome = 'partial';
+        } else {
+            me.status = 'waiting';
+            me.guests = guestsArray;
+            draft.waitingList.push(me);
+            outcome = 'full';
+        }
+        const kept = (draft.attendees.find(a => String(a.uid) === uid)?.guests || []).length;
+        if (outcome === 'full') pruneTeamsForUid(draft, uid);
+        else pruneTeamsForUid(draft, uid, { keepHost: true, keepGuests: kept });
+    });
+
+    if (res.ok) {
+        if (outcome === 'in') window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
+        else if (outcome === 'partial') window.showToast(`Roster capacity reached! Accepted player + ${acceptedCount} guest(s); remaining guest(s) placed on waitlist.`, "info");
+        else window.showToast("Roster is full. You and your guest(s) were added to the waitlist!", "info");
     }
     window.renderEventDetailModalContent();
 };
@@ -689,23 +676,20 @@ window.cancelGameEvent = async function(eventId) {
 };
 
 window.saveEditedEvent = async function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
     const titleEl = document.getElementById('ce-title');
     const descEl = document.getElementById('ce-description');
     const rulesEl = document.getElementById('ce-rules');
     const dateEl = document.getElementById('ce-date');
     const timeEl = document.getElementById('ce-time');
 
-    if (titleEl) event.title = titleEl.value.trim();
-    if (descEl) event.description = descEl.value.trim();
-    if (rulesEl) event.rules = rulesEl.value.trim();
-    if (dateEl) event.date = dateEl.value.trim();
-    if (timeEl) event.time = timeEl.value.trim();
-
-    const success = await updateEventInFirestore(event);
-    if (success) {
+    const res = await mutateEvent(eventId, (draft) => {
+        if (titleEl) draft.title = titleEl.value.trim();
+        if (descEl) draft.description = descEl.value.trim();
+        if (rulesEl) draft.rules = rulesEl.value.trim();
+        if (dateEl) draft.date = dateEl.value.trim();
+        if (timeEl) draft.time = timeEl.value.trim();
+    });
+    if (res.ok) {
         window.showToast("Event updated successfully!");
         if (typeof window.closeEventModal === 'function') window.closeEventModal();
     }
@@ -724,7 +708,7 @@ window.openNewGameSetupModal = function(eventId) {
     let teamOptionsHtml = '';
     for (let i = 0; i < teamsCount; i++) {
         const tName = window.teamNames[event.id][i] || `Team ${i + 1}`;
-        teamOptionsHtml += `<option value="${tName}">${tName}</option>`;
+        teamOptionsHtml += `<option value="${escapeHtml(tName)}">${escapeHtml(tName)}</option>`;
     }
 
     let modal = document.getElementById('new-game-setup-modal');
@@ -764,9 +748,6 @@ window.openNewGameSetupModal = function(eventId) {
 };
 
 window.confirmCreateNewGame = async function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
     const teamA = document.getElementById('setup-team-a').value;
     const teamB = document.getElementById('setup-team-b').value;
 
@@ -775,20 +756,14 @@ window.confirmCreateNewGame = async function(eventId) {
         return;
     }
 
-    event.matches = event.matches || [];
-    event.matches.push({
-        teamA: teamA,
-        teamB: teamB,
-        team1Goals: [],
-        team2Goals: [],
-        isFinished: false
-    });
-
     const modal = document.getElementById('new-game-setup-modal');
     if (modal) modal.remove();
 
-    await updateEventInFirestore(event);
-    window.showToast(`Game started between ${teamA} and ${teamB}!`);
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.matches = draft.matches || [];
+        draft.matches.push({ teamA: teamA, teamB: teamB, team1Goals: [], team2Goals: [], isFinished: false });
+    });
+    if (res.ok) window.showToast(`Game started between ${teamA} and ${teamB}!`);
 };
 
 window.promptTeamGoal = function(eventId, mIndex, teamNum) {
@@ -830,14 +805,14 @@ window.promptTeamGoal = function(eventId, mIndex, teamNum) {
     picker.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h4 class="text-sm font-black uppercase text-white">⚽ Goal Scorer (${targetTeamName})</h4>
+                <h4 class="text-sm font-black uppercase text-white">⚽ Goal Scorer (${escapeHtml(targetTeamName)})</h4>
                 <button onclick="document.getElementById('goal-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${teamPlayers.map(player => `
-                    <div onclick="selectGoalScorer('${event.id}',${mIndex}, ${teamNum}, '${(player.name || player).replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black border border-white/10 hover:border-emerald-500/50 rounded-2xl cursor-pointer transition shadow-sm">
-                        <img src="${player.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-8 h-8 rounded-full object-cover border border-white/20 shadow-sm">
-                        <span class="text-xs font-bold text-white">${player.name || player}</span>
+                    <div data-name="${escapeHtml(player.name || player)}" onclick="selectGoalScorer('${event.id}',${mIndex}, ${teamNum}, this.dataset.name)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black border border-white/10 hover:border-emerald-500/50 rounded-2xl cursor-pointer transition shadow-sm">
+                        <img src="${escapeHtml(safeAvatar(player.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-8 h-8 rounded-full object-cover border border-white/20 shadow-sm">
+                        <span class="text-xs font-bold text-white">${escapeHtml(player.name || player)}</span>
                     </div>
                 `).join('')}
             </div>
@@ -847,54 +822,49 @@ window.promptTeamGoal = function(eventId, mIndex, teamNum) {
 };
 
 window.selectGoalScorer = async function(eventId, mIndex, teamNum, playerName) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    event.matches[mIndex] = event.matches[mIndex] || { team1Goals: [], team2Goals: [] };
-    if (teamNum === 1) {
-        event.matches[mIndex].team1Goals = event.matches[mIndex].team1Goals || [];
-        event.matches[mIndex].team1Goals.push(playerName);
-    } else {
-        event.matches[mIndex].team2Goals = event.matches[mIndex].team2Goals || [];
-        event.matches[mIndex].team2Goals.push(playerName);
-    }
-
     const picker = document.getElementById('goal-picker-modal');
     if (picker) picker.remove();
 
-    await updateEventInFirestore(event);
-    window.showToast(`Goal added for ${playerName}!`);
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.matches = draft.matches || [];
+        const m = draft.matches[mIndex];
+        if (!m) return false;
+        const key = teamNum === 1 ? 'team1Goals' : 'team2Goals';
+        m[key] = m[key] || [];
+        m[key].push(playerName);
+    });
+    if (res.ok && !res.aborted) window.showToast(`Goal added for ${playerName}!`);
 };
 
 window.toggleMatchFinished = async function(eventId, mIndex) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    event.matches[mIndex].isFinished = !event.matches[mIndex].isFinished;
-    await updateEventInFirestore(event);
-    window.showToast(event.matches[mIndex].isFinished ? "Game marked as finished!" : "Game reopened.");
+    let nowFinished = false;
+    const res = await mutateEvent(eventId, (draft) => {
+        const m = (draft.matches || [])[mIndex];
+        if (!m) return false;
+        m.isFinished = !m.isFinished;
+        nowFinished = m.isFinished;
+    });
+    if (res.ok && !res.aborted) window.showToast(nowFinished ? "Game marked as finished!" : "Game reopened.");
 };
 
 window.toggleSessionEnded = async function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    event.isSessionEnded = !event.isSessionEnded;
-    await updateEventInFirestore(event);
-    window.showToast(event.isSessionEnded ? "Session ended successfully!" : "Session reopened.");
+    let ended = false;
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.isSessionEnded = !draft.isSessionEnded;
+        ended = draft.isSessionEnded;
+    });
+    if (res.ok) window.showToast(ended ? "Session ended successfully!" : "Session reopened.");
 };
 
 window.removeTeamGoal = async function(eventId, mIndex, teamNum, gIdx) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    if (!event.matches[mIndex]) return;
-
-    if (teamNum === 1) {
-        event.matches[mIndex].team1Goals.splice(gIdx, 1);
-    } else {
-        event.matches[mIndex].team2Goals.splice(gIdx, 1);
-    }
-
-    await updateEventInFirestore(event);
-    window.showToast("Goal removed.");
+    const res = await mutateEvent(eventId, (draft) => {
+        const m = (draft.matches || [])[mIndex];
+        if (!m) return false;
+        const arr = teamNum === 1 ? m.team1Goals : m.team2Goals;
+        if (!arr || gIdx >= arr.length) return false;
+        arr.splice(gIdx, 1);
+    });
+    if (res.ok && !res.aborted) window.showToast("Goal removed.");
 };
 
 window.toggleShareDropdown = function() {
@@ -920,55 +890,47 @@ window.copyEventLink = function(title) {
 };
 
 window.updatePlayerPaidStatus = async function(eventId, uid, paidStatus) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    event.attendees = (event.attendees || []).map(a => a.uid === uid ? { ...a, paid: paidStatus } : a);
-    await updateEventInFirestore(event);
-    window.showToast("Player payment status updated!");
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = (draft.attendees || []).map(a => String(a.uid) === String(uid) ? { ...a, paid: paidStatus } : a);
+    });
+    if (res.ok) window.showToast("Player payment status updated!");
 };
 
 window.assignTeamCaptain = async function(eventId, uid, teamIndexStr) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
     if (teamIndexStr === "") return;
-
     const teamIndex = parseInt(teamIndexStr);
-
-    event.attendees = (event.attendees || []).map(a => {
-        if (a.captainTeamIndex === teamIndex) {
-            return { ...a, isCaptain: false, captainTeamIndex: undefined };
-        }
-        if (a.uid === uid) {
-            return { ...a, isCaptain: true, captainTeamIndex: teamIndex };
-        }
-        return a;
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = (draft.attendees || []).map(a => {
+            if (a.captainTeamIndex === teamIndex) return { ...a, isCaptain: false, captainTeamIndex: undefined };
+            if (String(a.uid) === String(uid)) return { ...a, isCaptain: true, captainTeamIndex: teamIndex };
+            return a;
+        });
+        draft.teamCaptains = draft.teamCaptains || {};
+        draft.teamCaptains[teamIndex] = String(uid);
     });
-
-    await updateEventInFirestore(event);
-    const tName = (window.teamNames[event.id] && window.teamNames[event.id][teamIndex]) || `Team ${teamIndex + 1}`;
-    window.showToast(`Captain assigned to ${tName}!`);
-    renderEventDetailModalContent();
+    if (res.ok) {
+        const tName = (window.teamNames[eventId] && window.teamNames[eventId][teamIndex]) || `Team ${teamIndex + 1}`;
+        window.showToast(`Captain assigned to ${tName}!`);
+        window.renderEventDetailModalContent();
+    }
 };
 
 window.addNewMatchSession = async function(eventId) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    if (event.isSessionEnded) {
-        window.showToast("Session is ended. No more games can be added.", "error");
-        return;
-    }
-    event.matches = event.matches || [];
-    event.matches.push({ team1Goals: [], team2Goals: [], isFinished: false });
-    await updateEventInFirestore(event);
+    const res = await mutateEvent(eventId, (draft) => {
+        if (draft.isSessionEnded) return false;
+        draft.matches = draft.matches || [];
+        draft.matches.push({ team1Goals: [], team2Goals: [], isFinished: false });
+    });
+    if (res.ok && res.aborted) window.showToast("Session is ended. No more games can be added.", "error");
 };
 
 window.removeMatchSession = async function(eventId, mIndex) {
     if (!confirm("Are you sure you want to delete this game session?")) return;
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-    event.matches.splice(mIndex, 1);
-    await updateEventInFirestore(event);
-    window.showToast("Game session deleted.");
+    const res = await mutateEvent(eventId, (draft) => {
+        if (!(draft.matches || [])[mIndex]) return false;
+        draft.matches.splice(mIndex, 1);
+    });
+    if (res.ok && !res.aborted) window.showToast("Game session deleted.");
 };
 
 window.openEditEventForm = function(eventId) {
@@ -1070,33 +1032,6 @@ function stripBigPhotos(value) {
 
 window.stripBigPhotos = stripBigPhotos;
 
-async function updateEventInFirestore(event) {
-    try {
-        const payload = stripBigPhotos(event);
-        const jsonString = JSON.stringify(payload);
-        const approxBytes = new Blob([jsonString]).size;
-        
-        if (approxBytes > 900000) {
-            console.error("Event document payload is too large:", approxBytes, "bytes");
-            if (typeof window.showToast === 'function') {
-                window.showToast("Save failed: Document is too large. Please check player profile photos.", "error");
-            }
-            return false;
-        }
-
-        const realDocId = (window.eventDocIds && window.eventDocIds[event.id]) || event.id;
-        const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', realDocId);
-        await setDoc(eventDocRef, payload, { merge: true });
-        return true;
-    } catch (err) {
-        console.error("Error updating event document:", err.code, err.message);
-        if (typeof window.showToast === 'function') {
-            window.showToast("Could not save to the game roster. Please try again.", "error");
-        }
-        return false;
-    }
-}
-
 window.closeEventModal = function() {
     window.activeModalEventId = null;
     if (typeof window.switchTab === 'function') {
@@ -1105,35 +1040,29 @@ window.closeEventModal = function() {
 };
 
 window.handleRSVPAction = async function(eventId, action) {
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event || !window.currentUser) return;
-
-    event.attendees = event.attendees || [];
-    event.waitingList = event.waitingList || [];
-    event.declinedList = event.declinedList || [];
-
-    if (action === 'cancel') {
-        event.attendees = event.attendees.filter(a => String(a.uid) !== String(window.currentUser.uid));
-        event.waitingList = event.waitingList.filter(w => String(w.uid) !== String(window.currentUser.uid));
-
-        if (!event.declinedList.some(d => String(d.uid) === String(window.currentUser.uid))) {
-            const profile = window.userProfile || {};
-            const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
-            event.declinedList.push({ uid: String(window.currentUser.uid), name: fullName });
-        }
+    if (!window.currentUser || action !== 'cancel') return;
+    const uid = String(window.currentUser.uid);
+    const profile = window.userProfile || {};
+    const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== uid);
+        draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== uid);
+        draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== uid);
+        draft.declinedList.push({ uid, name: fullName });
+        pruneTeamsForUid(draft, uid);
+    });
+    if (res.ok) {
         window.showToast("You have left the game.");
-        await updateEventInFirestore(event);
         window.renderEventDetailModalContent();
     }
 };
 
 window.removePlayerFromEvent = async function(eventId, uid, tab) {
     if (!confirm("Are you sure you want to remove this player from the roster?")) return;
-    const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    event.attendees = (event.attendees || []).filter(a => String(a.uid) !== String(uid));
-    event.waitingList = (event.waitingList || []).filter(w => String(w.uid) !== String(uid));
-    await updateEventInFirestore(event);
-    window.showToast("Player removed from roster.");
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== String(uid));
+        draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(uid));
+        pruneTeamsForUid(draft, uid);
+    });
+    if (res.ok) window.showToast("Player removed from roster.");
 };

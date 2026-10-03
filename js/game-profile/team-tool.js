@@ -1,6 +1,6 @@
 // js/game-profile/team-tool.js: Full Team Builder & Lineup Tool rendered as a dedicated overlay modal view with robust avatar resolution
 import { db, appId } from '../firebase-config.js';
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { mutateEvent, escapeHtml, safeAvatar } from './event-store.js';
 
 window.activeTeamTab = window.activeTeamTab !== undefined ? window.activeTeamTab : 0;
 window.teamAssignments = window.teamAssignments || {};
@@ -97,23 +97,27 @@ function resolvePlayerAvatar(person, attendees) {
 
 async function updateTeamToolFirestore(event) {
     if (!event || !event.id) return;
-    const realDocId = (window.eventDocIds && window.eventDocIds[event.id]) || event.id;
-    const docRef = doc(db, 'artifacts', appId, 'eventsList', realDocId);
-    
+
     event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
     event.teamNames = window.teamNames[event.id] || event.teamNames || {};
     event.teamColors = window.teamColors[event.id] || event.teamColors || {};
     event.teamCaptains = window.teamCaptains[event.id] || event.teamCaptains || {};
-    
-    window.eventsList = (window.eventsList || []).map(ev => ev.id === event.id ? event : ev);
-    
-    const cleanPayload = JSON.parse(JSON.stringify(event));
-    try {
-        await setDoc(docRef, cleanPayload, { merge: true });
-        window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
-    } catch (err) {
-        console.error("Failed to update team tool in Firestore:", err);
-    }
+    event.teamFormations = window.teamFormations[event.id] || event.teamFormations || {};
+
+    // Only the team fields are written, on top of the freshest copy of the game, so joins,
+    // goals and comments made by other people in the meantime are never overwritten.
+    const teamFields = {};
+    ['teamAssignments', 'teamNames', 'teamColors', 'teamCaptains', 'teamFormations'].forEach(k => {
+        teamFields[k] = JSON.parse(JSON.stringify(event[k] || {}));
+    });
+    // Players are stored without photos (the avatar is looked up from the directory when drawn).
+    Object.keys(teamFields.teamAssignments).forEach(k => {
+        const arr = teamFields.teamAssignments[k];
+        if (Array.isArray(arr)) arr.forEach(p => { if (p && !safeAvatar(p.avatar)) delete p.avatar; });
+    });
+
+    const res = await mutateEvent(event.id, (draft) => { Object.assign(draft, teamFields); });
+    if (res.ok) window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
 }
 
 function getFlattenedPlayersList(attendees) {
@@ -474,7 +478,7 @@ export function renderTeamToolTab(event) {
         const tColor = window.teamAccent(rawColor);
         tabsHtml += `
             <button data-action="switch-team-tab" data-team-index="${tIdx}" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
-                <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle border border-white/40" style="background-color: ${rawColor};"></span> ${tName}
+                <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle border border-white/40" style="background-color: ${rawColor};"></span> ${escapeHtml(tName)}
             </button>
         `;
     }
@@ -500,7 +504,7 @@ export function renderTeamToolTab(event) {
                     return `
                         <div class="flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl border text-xs shadow-md" style="border-color: ${tColor};">
                             <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                            <span class="font-bold text-white">${pName} ${isCap ? '⭐' : ''}</span>
+                            <span class="font-bold text-white">${escapeHtml(pName)} ${isCap ? '⭐' : ''}</span>
                             <button data-action="unassign-team-slot" data-event-id="${event.id}" data-team-index="${i}" data-uid="${pUid}" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     `;
@@ -512,7 +516,7 @@ export function renderTeamToolTab(event) {
                         <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
                             <div class="flex items-center gap-2.5">
                                 <span class="w-3.5 h-3.5 rounded-full border border-white/40" style="background-color: ${rawColor};"></span>
-                                <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${tName} (${teamRoster.length})</h4>
+                                <h4 class="text-xs font-black uppercase tracking-wider" style="color: ${tColor};">${escapeHtml(tName)} (${teamRoster.length})</h4>
                             </div>
                         </div>
                         <div class="flex flex-wrap gap-2.5">
@@ -521,7 +525,7 @@ export function renderTeamToolTab(event) {
                     </div>
                     <div class="pt-3 border-t border-white/10">
                         <button data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${i}" data-slot-index="null" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
-                            <i class="fa-solid fa-user-plus"></i> + Add Player to ${tName}
+                            <i class="fa-solid fa-user-plus"></i> + Add Player to ${escapeHtml(tName)}
                         </button>
                     </div>
                 </div>
@@ -536,7 +540,7 @@ export function renderTeamToolTab(event) {
                 return `
                     <div class="flex items-center gap-2 bg-black/60 px-3 py-2 rounded-2xl border border-white/10 text-xs">
                         <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="font-bold text-white">${aName}</span>
+                        <span class="font-bold text-white">${escapeHtml(aName)}</span>
                     </div>
                 `;
             }).join('');
@@ -578,11 +582,11 @@ export function renderTeamToolTab(event) {
                 if (p && p.name) {
                     const pAvatar = resolvePlayerAvatar(p, event.attendees);
                     rowSlots += `
-                        <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${(p.name || '').replace(/'/g, "\\'")}" class="flex-1 min-w-0 max-w-[7rem] h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 relative group transition hover:scale-105" style="border-color: ${currentAccent};">
+                        <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${escapeHtml(p.name || '')}" class="flex-1 min-w-0 max-w-[7rem] h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 relative group transition hover:scale-105" style="border-color: ${currentAccent};">
                             <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate text-left leading-tight pointer-events-none">
                                 <span class="text-[6px] font-black uppercase block tracking-wider" style="color: ${currentAccent};">${positionName}</span>
-                                <span class="text-[9px] font-black text-white truncate block">${p.name}</span>
+                                <span class="text-[9px] font-black text-white truncate block">${escapeHtml(p.name)}</span>
                             </div>
                         </div>
                     `;
@@ -604,11 +608,11 @@ export function renderTeamToolTab(event) {
             const gAvatar = resolvePlayerAvatar(goaliePlayer, event.attendees);
             rowsHtml += `
                 <div class="flex justify-center mt-3">
-                    <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${(goaliePlayer.name || '').replace(/'/g, "\\'")}" class="w-28 h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 transition hover:scale-105" style="border-color: ${currentAccent};">
+                    <div data-action="prompt-remove-slot" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${escapeHtml(goaliePlayer.name || '')}" class="w-28 h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 transition hover:scale-105" style="border-color: ${currentAccent};">
                         <img src="${gAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div class="truncate text-left leading-tight pointer-events-none">
                             <span class="text-[6px] font-black uppercase block tracking-wider text-amber-400">GK</span>
-                            <span class="text-[9px] font-black text-white truncate block">${goaliePlayer.name}</span>
+                            <span class="text-[9px] font-black text-white truncate block">${escapeHtml(goaliePlayer.name)}</span>
                         </div>
                     </div>
                 </div>
@@ -624,7 +628,7 @@ export function renderTeamToolTab(event) {
             `;
         }
 
-        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>⭐ ${p.name}</option>`).join('');
+        const captainOptionsHtml = currentTeamPlayers.filter(p => p && p.name).map(p => `<option value="${p.uid}" ${p.uid === currentCaptainUid ? 'selected' : ''}>⭐ ${escapeHtml(p.name)}</option>`).join('');
         const formationsOptionsHtml = Object.keys(availableFormations).map(f => `<option value="${f}" ${f === currentFormationKey ? 'selected' : ''}>Formation: ${f}</option>`).join('');
 
         const squadMembersListHtml = currentTeamPlayers.length === 0 
@@ -640,7 +644,7 @@ export function renderTeamToolTab(event) {
                         <div class="flex items-center gap-3">
                             <img src="${pAvatar}" class="w-8 h-8 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div>
-                                <div class="font-bold text-white">${pName} ${isCap ? '⭐ (Captain)' : ''}</div>
+                                <div class="font-bold text-white">${escapeHtml(pName)} ${isCap ? '⭐ (Captain)' : ''}</div>
                                 <div class="text-[10px] text-white/50">${pPos}</div>
                             </div>
                         </div>
@@ -656,7 +660,7 @@ export function renderTeamToolTab(event) {
                         <div class="flex-1 min-w-0 space-y-1">
                             <label class="block text-[9px] font-bold text-white/60 uppercase">Team</label>
                             <div class="flex items-center gap-1">
-                                <input type="text" id="team-name-input-${teamIdx}" value="${currentTeamName}" class="flex-1 min-w-0 bg-black/80 border border-white/20 rounded-xl px-2.5 py-2 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
+                                <input type="text" id="team-name-input-${teamIdx}" value="${escapeHtml(currentTeamName)}" class="flex-1 min-w-0 bg-black/80 border border-white/20 rounded-xl px-2.5 py-2 text-xs font-bold text-white focus:outline-none focus:border-[#00F296]">
                                 <button data-action="save-team-name" data-event-id="${event.id}" data-team-index="${teamIdx}" title="Save team name" class="w-8 h-8 shrink-0 bg-[#00F296] text-slate-950 rounded-xl text-xs flex items-center justify-center shadow"><i class="fa-solid fa-check pointer-events-none"></i></button>
                             </div>
                         </div>
@@ -690,7 +694,7 @@ export function renderTeamToolTab(event) {
                     <div class="absolute inset-0 bg-black/50 pointer-events-none"></div>
 
                     <div class="flex justify-between items-center relative z-10">
-                        <span class="font-black text-xs px-3 py-1.5 rounded-2xl uppercase tracking-wider shadow-lg border border-white/30" style="background-color: ${currentTeamColor}; color: ${window.teamTextOn(currentTeamColor)};">${currentTeamName}</span>
+                        <span class="font-black text-xs px-3 py-1.5 rounded-2xl uppercase tracking-wider shadow-lg border border-white/30" style="background-color: ${currentTeamColor}; color: ${window.teamTextOn(currentTeamColor)};">${escapeHtml(currentTeamName)}</span>
                         <select id="team-formation-select-${teamIdx}" data-action="change-team-formation" data-event-id="${event.id}" data-team-index="${teamIdx}" class="bg-black/90 text-white font-bold text-xs px-4 py-2 rounded-2xl border border-white/20 shadow-md">
                             ${formationsOptionsHtml}
                         </select>
@@ -714,7 +718,7 @@ export function renderTeamToolTab(event) {
                     </div>
                     <div class="pt-2">
                         <button data-action="open-assign-picker" data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="null" class="w-full bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3 px-4 rounded-2xl text-xs border border-[#00F296]/50 transition flex items-center justify-center gap-2 shadow">
-                            <i class="fa-solid fa-user-plus pointer-events-none"></i> + Add Player to ${currentTeamName}
+                            <i class="fa-solid fa-user-plus pointer-events-none"></i> + Add Player to ${escapeHtml(currentTeamName)}
                         </button>
                     </div>
                 </div>
@@ -856,7 +860,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                                 return `
                                     <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
                                         <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                                        <span class="text-xs font-bold text-white">${p.name} (Move)</span>
+                                        <span class="text-xs font-bold text-white">${escapeHtml(p.name)} (Move)</span>
                                     </div>
                                 `;
                             }).join('')}
@@ -879,7 +883,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                         return `
                             <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
                                 <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                                <span class="text-xs font-bold text-white">${p.name}</span>
+                                <span class="text-xs font-bold text-white">${escapeHtml(p.name)}</span>
                             </div>
                         `;
                     }).join('')}
@@ -917,7 +921,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                     return `
                         <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
                             <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                            <span class="text-xs font-bold text-white">${a.name}</span>
+                            <span class="text-xs font-bold text-white">${escapeHtml(a.name)}</span>
                         </div>
                     `;
                 }).join('')}
@@ -937,7 +941,7 @@ window.promptRemoveOrChangeSlot = function(eventId, teamIndex, slotIndex, player
 
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center pointer-events-auto">
-            <h3 class="text-sm font-black uppercase text-white">Position: ${playerName}</h3>
+            <h3 class="text-sm font-black uppercase text-white">Position: ${escapeHtml(playerName)}</h3>
             <div class="space-y-2.5 pt-2">
                 <button onclick="document.getElementById('slot-action-modal').remove(); window.unassignPlayerFromSlot('${eventId}', ${teamIndex}, ${slotIndex})" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 font-black py-3 rounded-xl text-xs shadow transition">
                     Remove Player

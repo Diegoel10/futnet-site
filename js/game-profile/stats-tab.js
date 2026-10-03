@@ -1,4 +1,5 @@
 // js/game-profile/stats-tab.js: Dark-mode themed Game Stats with goalscorers displayed on match cards, live points, and live top scorers
+import { escapeHtml, jsArg } from './event-store.js';
 export function renderStatsTab(event) {
     const subTab = window.activeStatsSubTab || 'matches';
     const teamsCount = event.teamsCount || 3;
@@ -217,7 +218,7 @@ export function renderStatsTab(event) {
                                             <td class="p-3 font-bold text-white">
                                                 <div class="flex items-center gap-2">
                                                     ${st.isLive ? '<span class="w-2.5 h-2.5 rounded-full bg-[#00F296] inline-block animate-ping shrink-0" title="Team currently playing live"></span>' : ''}
-                                                    <span>#${idx + 1} ${st.name}</span>
+                                                    <span>#${idx + 1} ${escapeHtml(st.name)}</span>
                                                     <button onclick="toggleLeaderboardTeamRoster('${teamKey}')" class="text-white/40 hover:text-white p-1 transition" title="View Team Players">
                                                         <i class="fa-solid fa-chevron-${isExpanded ? 'up' : 'down'} text-[10px]"></i>
                                                     </button>
@@ -226,8 +227,8 @@ export function renderStatsTab(event) {
                                                     <div class="flex flex-wrap gap-1.5 pt-2 pb-1">
                                                         ${teamPlayers.length === 0 ? '<span class="text-[10px] text-white/40 italic">No players assigned</span>' : teamPlayers.map(p => `
                                                             <div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full">
-                                                                <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-5 h-5 rounded-full object-cover">
-                                                                <span class="text-[10px] font-bold text-white">${p.name.split(' ')[0]}</span>
+                                                                <img src="${escapeHtml(p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-5 h-5 rounded-full object-cover">
+                                                                <span class="text-[10px] font-bold text-white">${escapeHtml(String(p.name || '').split(' ')[0])}</span>
                                                             </div>
                                                         `).join('')}
                                                     </div>
@@ -280,8 +281,8 @@ export function renderStatsTab(event) {
                                         <tr class="hover:bg-white/5 transition">
                                             <td class="p-3 font-bold text-white flex items-center gap-2.5">
                                                 <span class="text-white/40 font-black">#${idx + 1}</span>
-                                                <img src="${avatarUrl}" class="w-7 h-7 rounded-full object-cover border border-white/20">
-                                                <span>${name}</span>
+                                                <img src="${escapeHtml(avatarUrl)}" class="w-7 h-7 rounded-full object-cover border border-white/20">
+                                                <span>${escapeHtml(name)}</span>
                                             </td>
                                             <td class="p-3 text-right font-black text-[#00F296]">⚽ ${count}</td>
                                         </tr>

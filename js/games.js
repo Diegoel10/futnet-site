@@ -1,6 +1,7 @@
 // js/games.js: Manages date navigation, live Firestore listeners with connection timeout fallback and seamless RSVP mapping
 import { db, appId } from './firebase-config.js';
 import { doc, getDoc, collection, getDocs, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { escapeHtml, jsArg } from './game-profile/event-store.js';
 
 window.selectedDateStr = (() => {
     const d = new Date();
@@ -241,8 +242,9 @@ window.renderEvents = function() {
         const displayPrice = rawPrice > 0 ? `$${rawPrice.toFixed(2)}` : "Free";
         const formattedTime = formatTimeTo12Hour(ev.time);
 
-        const communityName = ev.communityName || "";
-        const communityThumbnail = ev.communityThumbnail || "";
+        const _comm = (window.communitiesCache || {})[ev.communityId] || null;
+        const communityName = ev.communityName || _comm?.name || "";
+        const communityThumbnail = ev.communityThumbnail || _comm?.thumbnail || "";
         
         const dirMatch = (window.directoryList || []).find(u => String(u.uid) === String(ev.organizerId));
         const isMine = window.currentUser && String(ev.organizerId) === String(window.currentUser.uid);
@@ -254,7 +256,7 @@ window.renderEvents = function() {
                 
                 ${communityThumbnail ? `
                     <div class="absolute inset-0 z-0 opacity-20">
-                        <img src="${communityThumbnail}" class="w-full h-full object-cover">
+                        <img src="${escapeHtml(communityThumbnail)}" class="w-full h-full object-cover">
                     </div>
                 ` : ''}
 
@@ -263,7 +265,7 @@ window.renderEvents = function() {
                         <div class="flex justify-center">
                             <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-[#00F296]/50 text-[#00F296] text-[10px] font-black">
                                 <i class="fa-solid fa-shield"></i>
-                                <span>${communityName} Community</span>
+                                <span>${escapeHtml(communityName)} Community</span>
                             </div>
                         </div>
                     ` : ''}
@@ -280,7 +282,7 @@ window.renderEvents = function() {
                         </div>
                     </div>
 
-                    ${ev.title ? `<h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${ev.title}</h3>` : ''}
+                    ${ev.title ? `<h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${escapeHtml(ev.title)}</h3>` : ''}
 
                     <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                         <div class="flex items-center space-x-2">
@@ -293,7 +295,7 @@ window.renderEvents = function() {
                         </div>
                         <div class="flex items-center space-x-2">
                             <i class="fa-solid fa-location-dot text-[#00F296] w-3.5"></i>
-                            <span class="truncate">${ev.location || ''}</span>
+                            <span class="truncate">${escapeHtml(ev.location || '')}</span>
                         </div>
                     </div>
 
@@ -302,7 +304,7 @@ window.renderEvents = function() {
                             <img src="${hostAvatar}" class="w-6 h-6 rounded-full object-cover border border-[#00F296]/60 shadow-sm">
                             <div>
                                 <div class="text-[7px] font-bold text-white/60 uppercase leading-none">BY</div>
-                                <div class="text-[10px] font-bold text-white group-hover:text-[#00F296] transition">${hostName}</div>
+                                <div class="text-[10px] font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(hostName)}</div>
                             </div>
                         </div>
 

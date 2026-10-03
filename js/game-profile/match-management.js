@@ -1,6 +1,5 @@
 // js/game-profile/match-management.js: Live match tracker with direct team builder roster lookups and custom team color styling
-import { db, appId } from '../firebase-config.js';
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { mutateEvent } from './event-store.js';
 
 // Team names/colors come from team-tool.js (single source of truth). Fallbacks only if it isn't loaded yet.
 const MM_FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
@@ -344,14 +343,8 @@ window.resetLiveMatchTimer = async function(eventId) {
 
 async function syncLiveMatchState(eventId, activeState) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
-    event.liveMatchActive = activeState;
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), { liveMatchActive: activeState }, { merge: true });
-    } catch (e) {
-        console.error("Failed to sync live match timestamp:", e);
-    }
+    if (event) event.liveMatchActive = activeState;
+    await mutateEvent(eventId, (draft) => { draft.liveMatchActive = activeState; });
 }
 
 window.updateLiveMatchTeamNames = async function(eventId) {
@@ -478,13 +471,12 @@ window.saveLiveMatchResult = async function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !event.liveMatchActive) return;
 
-    let matches = Array.isArray(event.matches) ? [...event.matches] : [];
     const live = event.liveMatchActive;
     const namesNow = mmTeamNames(event);
     const colorsNow = mmTeamColors(event);
     const iA = Number.isInteger(live.teamAIndex) ? live.teamAIndex : namesNow.indexOf(live.teamA);
     const iB = Number.isInteger(live.teamBIndex) ? live.teamBIndex : namesNow.indexOf(live.teamB);
-    matches.push({
+    const finishedMatch = {
         teamA: iA >= 0 ? namesNow[iA] : live.teamA,
         teamB: iB >= 0 ? namesNow[iB] : live.teamB,
         teamAIndex: iA >= 0 ? iA : null,
@@ -495,29 +487,22 @@ window.saveLiveMatchResult = async function(eventId) {
         team2Goals: event.liveMatchActive.team2Goals || [],
         isFinished: true,
         timestamp: new Date().toISOString()
-    });
+    };
 
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), {
-            matches,
-            liveMatchActive: null
-        }, { merge: true });
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.matches = Array.isArray(draft.matches) ? draft.matches : [];
+        draft.matches.push(finishedMatch);
+        draft.liveMatchActive = null;
+    });
+    if (res.ok) {
         window.showToast("Match saved and recorded!");
         const modal = document.getElementById('start-match-screen-modal');
         if (modal) modal.remove();
-    } catch (e) {
-        window.showToast("Failed to save match result", "error");
     }
 };
 
 window.discardLiveMatch = async function(eventId) {
     if (!confirm("Are you sure you want to discard this live match?")) return;
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'eventsList', eventId), {
-            liveMatchActive: null
-        }, { merge: true });
-        window.showToast("Live match discarded.");
-    } catch (e) {
-        window.showToast("Failed to discard match", "error");
-    }
+    const res = await mutateEvent(eventId, (draft) => { draft.liveMatchActive = null; });
+    if (res.ok) window.showToast("Live match discarded.");
 };

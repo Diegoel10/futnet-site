@@ -611,6 +611,7 @@
         import './js/game-profile/match-management.js';
         import './js/friends.js';
         import './js/chat.js';
+        import './js/communities.js';
         import './js/profile.js';
         import './js/leaderboard.js';
         import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -642,10 +643,6 @@
         window.closeCreateActionSheet = function() {
             const sheet = document.getElementById('create-action-sheet');
             if (sheet) sheet.classList.add('hidden');
-        };
-
-        window.showCommunityCreation = function() {
-            window.showToast("Community creation hub coming online!");
         };
 
         window.switchTab = function(tabName, pushHistory = true) {
@@ -685,7 +682,7 @@
             if (tabName === 'event-details-screen' && window.renderEventDetailModalContent) {
                 window.renderEventDetailModalContent();
             }
-            if (tabName === 'hub' && window.renderHomeScreen) window.renderHomeScreen();
+            if (tabName === 'hub' && window.renderHubTab) window.renderHubTab();
             if (tabName === 'chat' && window.renderChatsList) window.renderChatsList();
             if (tabName === 'profile' && window.renderProfileTab) window.renderProfileTab();
         };

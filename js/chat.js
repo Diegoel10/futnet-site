@@ -2,6 +2,8 @@
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 window.activeChatThreadId = null;
 window.chatsThreads = [];
 let chatUnsubscribe = null;
@@ -77,6 +79,10 @@ window.renderChatsList = async function() {
         activeThreads = activeThreads.filter(th => th.messages && th.messages.length > 0);
     }
 
+    // Community group chats (messages live in communities/{id}/messages)
+    const commThreads = (window.communityChatThreads || []).filter(t => !query || (t.name || '').toLowerCase().includes(query));
+    activeThreads = [...commThreads, ...activeThreads];
+
     if (activeThreads.length === 0) {
         container.innerHTML = `<div class="p-6 text-center text-xs text-slate-500 italic">No conversations found. Search above to start chatting with anyone!</div>`;
         return;
@@ -84,21 +90,21 @@ window.renderChatsList = async function() {
 
     container.innerHTML = activeThreads.map(th => {
         const hasMessages = th.messages && th.messages.length > 0;
-        const lastMsg = hasMessages ? th.messages[th.messages.length - 1].text : 'Click to start conversation';
+        const lastMsg = th.isCommunity ? 'Community chat' : (hasMessages ? th.messages[th.messages.length - 1].text : 'Click to start conversation');
         const lastTime = hasMessages ? th.messages[th.messages.length - 1].time : '';
         
         // Check live directory cache for freshest avatar/name
-        const liveUser = (window.cachedDirectoryList || []).find(d => d.uid === th.id);
+        const liveUser = th.isCommunity ? null : (window.cachedDirectoryList || []).find(d => d.uid === th.id);
         const avatarSrc = (liveUser && liveUser.avatar) ? liveUser.avatar : (th.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100');
         const displayName = (liveUser && (liveUser.name || liveUser.firstName)) ? (liveUser.name || `${liveUser.firstName} ${liveUser.lastName || ''}`) : th.name;
 
         return `
-            <div onclick="openChatThread('${th.id}')" class="p-3.5 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition ${window.activeChatThreadId === th.id ? 'bg-slate-50' : ''}">
+            <div onclick="openChatThread('${esc(th.id)}')" class="p-3.5 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition ${window.activeChatThreadId === th.id ? 'bg-slate-50' : ''}">
                 <div class="flex items-center gap-3 truncate">
-                    <img src="${avatarSrc}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200">
+                    <img src="${esc(avatarSrc)}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200">
                     <div class="truncate">
-                        <h3 class="text-xs font-black text-slate-900 truncate">${displayName}</h3>
-                        <p class="text-[11px] text-slate-500 mt-0.5 truncate">${lastMsg}</p>
+                        <h3 class="text-xs font-black text-slate-900 truncate">${esc(displayName)}</h3>
+                        <p class="text-[11px] text-slate-500 mt-0.5 truncate">${esc(lastMsg)}</p>
                     </div>
                 </div>
                 <span class="text-[9px] text-slate-400 shrink-0 ml-2">${lastTime}</span>
@@ -108,6 +114,8 @@ window.renderChatsList = async function() {
 };
 
 window.openChatThread = function(id) {
+    if (String(id).startsWith('community:')) { window.openCommunityChatThread(id); return; }
+    if (window.stopCommunityChat) window.stopCommunityChat();
     window.activeChatThreadId = id;
     let th = (window.chatsThreads || []).find(t => t.id === id);
 
@@ -233,6 +241,7 @@ window.initTypingListener = function(partnerUid) {
 
 window.handleChatInputKeypress = function() {
     if (!window.currentUser || !window.activeChatThreadId) return;
+    if (String(window.activeChatThreadId).startsWith('community:')) return;
 
     // Document ID format: myUid_partnerUid
     const typingRef = doc(db, 'artifacts', appId, 'typing', `${window.currentUser.uid}_${window.activeChatThreadId}`);
@@ -299,9 +308,9 @@ window.renderActiveChatMessages = function() {
             return `
                 <div class="flex items-end justify-end gap-2 my-2">
                     <div class="bg-[#14cc80] text-slate-900 px-4 py-2.5 rounded-2xl rounded-tr-sm max-w-md shadow-sm text-xs relative">
-                        <p class="pr-14 pb-3 break-words font-normal">${m.text}</p>
+                        <p class="pr-14 pb-3 break-words font-normal">${esc(m.text)}</p>
                         <div class="absolute bottom-1 right-2.5 flex items-center gap-1 select-none">
-                            <span class="text-[9px] text-slate-700 font-medium">${m.time}</span>
+                            <span class="text-[9px] text-slate-700 font-medium">${esc(m.time)}</span>
                             <span class="text-[11px] ${checkColor} font-bold tracking-tighter">✓✓</span>
                         </div>
                     </div>
@@ -310,12 +319,12 @@ window.renderActiveChatMessages = function() {
         } else {
             return `
                 <div class="flex items-end gap-2 my-2">
-                    <img src="${avatarUrl}" class="w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200">
+                    <img src="${esc(avatarUrl)}" class="w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200">
                     <div class="bg-white border border-slate-200 text-slate-900 px-4 py-2.5 rounded-2xl rounded-tl-sm max-w-md shadow-sm text-xs relative">
-                        <p class="text-[10px] font-bold text-emerald-600 mb-0.5">${senderDisplayName}</p>
-                        <p class="pr-12 pb-3 break-words font-normal">${m.text}</p>
+                        <p class="text-[10px] font-bold text-emerald-600 mb-0.5">${esc(senderDisplayName)}</p>
+                        <p class="pr-12 pb-3 break-words font-normal">${esc(m.text)}</p>
                         <div class="absolute bottom-1 right-2.5 flex items-center gap-1 select-none">
-                            <span class="text-[9px] text-slate-400 font-medium">${m.time}</span>
+                            <span class="text-[9px] text-slate-400 font-medium">${esc(m.time)}</span>
                         </div>
                     </div>
                 </div>
@@ -331,6 +340,12 @@ window.handleSendActiveChatMessage = async function(e) {
     if (!input) return;
     const text = input.value.trim();
     if (!text || !window.activeChatThreadId || !window.currentUser) return;
+
+    if (String(window.activeChatThreadId).startsWith('community:')) {
+        input.value = '';
+        window.sendCommunityChatMessage(text);
+        return;
+    }
 
     let th = window.chatsThreads.find(t => t.id === window.activeChatThreadId);
     if (!th) {

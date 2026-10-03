@@ -1,4 +1,5 @@
 // js/game-profile/roster-tab.js: Roster tab with reliable avatar resolution and directory mapping
+import { escapeHtml, jsArg } from './event-store.js';
 export function renderRosterTab(event) {
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
     
@@ -67,11 +68,11 @@ export function renderRosterTab(event) {
                 <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-xl border border-white/5 ml-8">
                     <div class="flex items-center gap-2.5">
                         <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-[#00F296] font-black flex items-center justify-center text-[10px] border border-emerald-500/40">
-                            ${(g.name || 'G').charAt(0).toUpperCase()}
+                            ${escapeHtml((g.name || 'G').charAt(0).toUpperCase())}
                         </div>
                         <div>
-                            <span class="text-white/90 font-bold">${g.name || 'Guest'}</span>
-                            <span class="text-[9px] text-[#00F296] block">guest of ${rawName}</span>
+                            <span class="text-white/90 font-bold">${escapeHtml(g.name || 'Guest')}</span>
+                            <span class="text-[9px] text-[#00F296] block">guest of ${escapeHtml(rawName)}</span>
                         </div>
                     </div>
                     <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/40 text-white/60 border border-white/10">${g.paid || 'Unpaid'}</span>
@@ -90,11 +91,11 @@ export function renderRosterTab(event) {
         return `
             <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                 <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${att.uid || ''}', '${safeName}', '')">
-                        <img src="${safeAvatar}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${jsArg(att.uid || '')}', '${jsArg(rawName)}', '')">
+                        <img src="${escapeHtml(safeAvatar)}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div>
                             <div class="flex items-center gap-1.5 flex-wrap">
-                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${rawName}</span>
+                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(rawName)}</span>
                                 ${organizerBadge}
                             </div>
                             ${plusOnesBadge}
