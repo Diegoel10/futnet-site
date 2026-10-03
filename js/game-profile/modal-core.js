@@ -65,17 +65,17 @@ window.renderInfoTab = function(event) {
         if (allowPlusOnes) {
             rsvpButtonHtml = `
                 <div class="grid grid-cols-2 gap-2.5">
-                    <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border border-red-500/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
+                    <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border-2 border-red-500/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
                         <i class="fa-solid fa-user-xmark"></i> Leave Game!
                     </button>
-                    <button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3.5 rounded-2xl text-xs border border-[#00F296]/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
+                    <button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3.5 rounded-2xl text-xs border-2 border-[#00F296]/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
                         <i class="fa-solid fa-users-gear"></i> Manage Guests
                     </button>
                 </div>
             `;
         } else {
             rsvpButtonHtml = `
-                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border border-red-500/40 shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
+                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border-2 border-red-500/40 shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-user-xmark"></i> Leave Game!
                 </button>
             `;
@@ -96,7 +96,7 @@ window.renderInfoTab = function(event) {
 
     return `
         <div class="space-y-4 font-sans text-white">
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
                 <div class="flex items-center gap-3">
                     <img src="${finalHostAvatar}" class="w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                     <div>
@@ -104,41 +104,25 @@ window.renderInfoTab = function(event) {
                         <span class="text-sm font-black text-white">${organizerName}</span>
                     </div>
                 </div>
-                <span class="px-3.5 py-1.5 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border border-[#00F296]/40">Organizer</span>
+                <span class="px-3.5 py-1.5 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border-2 border-[#00F296]/40">Organizer</span>
             </div>
 
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
-                <div class="space-y-3 flex-1 pr-2">
-                    <div class="space-y-0.5">
-                        <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                            <i class="fa-solid fa-calendar text-[#00F296]"></i> DATE
-                        </div>
-                        <div class="text-xs font-bold text-white">${event.date || 'TBD'}</div>
-                    </div>
-                    <div class="space-y-0.5">
-                        <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                            <i class="fa-solid fa-clock text-[#00F296]"></i> TIME
-                        </div>
-                        <div class="text-xs font-bold text-white">${event.time || 'TBD'}</div>
-                    </div>
-                </div>
-
-                <div class="h-12 w-[1px] bg-white/15 mx-2"></div>
-
-                <div class="space-y-1.5 flex-[1.5] px-2">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] px-4 py-3.5 grid grid-cols-2 gap-2 shadow-xl text-left">
+                <div class="space-y-0.5 border-r border-white/15 pr-2">
                     <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                        <i class="fa-solid fa-location-dot text-[#00F296]"></i> PARK & LOCATION
+                        <i class="fa-solid fa-calendar text-[#00F296]"></i> DATE
                     </div>
-                    <div class="text-xs font-bold text-white leading-snug line-clamp-2">${event.location || 'Location TBD'}</div>
+                    <div class="text-xs font-bold text-white">${event.date || 'TBD'}</div>
                 </div>
-
-                <a href="http://maps.apple.com/?q=${encodeURIComponent(event.location || 'Cypress Park')}" target="_blank" class="bg-[#00F296] hover:opacity-90 text-slate-950 px-3.5 py-3 rounded-2xl flex flex-col items-center justify-center shadow-[0_0_15px_rgba(0,242,150,0.4)] transition shrink-0 ml-1">
-                    <i class="fa-solid fa-location-arrow text-xs font-black"></i>
-                    <span class="text-[9px] font-black uppercase tracking-wider mt-0.5">Navigate</span>
-                </a>
+                <div class="space-y-0.5 pl-2">
+                    <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
+                        <i class="fa-solid fa-clock text-[#00F296]"></i> TIME
+                    </div>
+                    <div class="text-xs font-bold text-white">${event.time || 'TBD'}</div>
+                </div>
             </div>
 
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-xl text-left">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-xl text-left">
                 <div class="space-y-0.5 border-r border-white/10 pr-2">
                     <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">FORMAT</span>
                     <span class="text-xs font-bold text-white">${event.format || '7v7'}</span>
@@ -157,7 +141,7 @@ window.renderInfoTab = function(event) {
                 ${rsvpButtonHtml}
             </div>
 
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
                 <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
                     <div class="flex items-center gap-2.5">
                         <i class="fa-solid fa-file-lines text-[#00F296]"></i> GAME DETAILS
@@ -167,7 +151,7 @@ window.renderInfoTab = function(event) {
                 <p class="text-xs text-white/80 leading-relaxed font-medium pl-6 pt-1">${event.description || 'Standard game. Come ready to play, have fun and respect the squad. 💪⚽'}</p>
             </div>
 
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
                 <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
                     <div class="flex items-center gap-2.5">
                         <i class="fa-solid fa-list-check text-[#00F296]"></i> RULES
@@ -377,45 +361,52 @@ window.renderEventDetailModalContent = function() {
     const safeTitle = (event.title || 'Soccer Match').replace(/'/g, "\\'");
     const safeDate = (event.date || '').replace(/'/g, "\\'");
     const safeLocation = (event.location || '').replace(/'/g, "\\'");
+    const mapsUrl = event.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(event.location) : '';
 
     container.innerHTML = `
         <div class="space-y-4 text-white relative pt-1 sm:pt-2 pb-16 pointer-events-auto max-w-4xl mx-auto w-full px-4">
-            <!-- Standalone Back Button on Top -->
-            <div class="flex items-center justify-between pb-1">
-                <button onclick="closeEventModal()" class="inline-flex items-center gap-2 bg-black/60 hover:bg-black text-white px-4 py-2 rounded-2xl font-bold border border-white/20 transition shadow">
-                    <i class="fa-solid fa-chevron-left text-xs"></i> Back
+            <!-- Back chevron -->
+            <div class="flex items-center">
+                <button onclick="closeEventModal()" aria-label="Back" title="Back" class="w-10 h-10 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center border-2 border-white/20 transition shadow">
+                    <i class="fa-solid fa-chevron-left text-sm"></i>
                 </button>
-                <div class="relative z-50">
-                    <button onclick="toggleShareDropdown()" class="w-10 h-10 bg-black/60 hover:bg-black text-[#00F296] rounded-full flex items-center justify-center font-bold border border-[#00F296]/40 transition shadow-[0_0_10px_rgba(0,242,150,0.2)]" title="Share Game">
-                        <i class="fa-solid fa-share-nodes text-xs"></i>
-                    </button>
-                    <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-[9999] w-48 py-2 divide-y divide-white/10 text-xs">
-                        <button onclick="shareToWhatsApp('${safeTitle}', '${safeLocation}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
-                            <i class="fa-brands fa-whatsapp text-emerald-400 text-base"></i> WhatsApp
-                        </button>
-                        <button onclick="shareToTwitter('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
-                            <i class="fa-brands fa-x-twitter text-white text-base"></i> X (Twitter)
-                        </button>
-                        <button onclick="copyEventLink('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
-                            <i class="fa-solid fa-link text-[#00F296] text-base"></i> Copy Link
-                        </button>
-                    </div>
-                </div>
             </div>
 
-            <!-- Page Header Info -->
-            <div class="bg-[#040E13]/90 backdrop-blur-md border border-emerald-500/30 px-5 py-3.5 rounded-3xl shadow-lg flex items-center justify-between">
-                <div class="truncate">
+            <!-- Page Header: title, location, navigate + share -->
+            <div class="relative z-30 bg-[#040E13]/90 backdrop-blur-md border-2 border-emerald-500/30 px-5 py-3.5 rounded-3xl shadow-lg flex items-center justify-between gap-3">
+                <div class="min-w-0">
                     <div class="flex items-center gap-2.5">
                         <h2 class="text-base font-black tracking-tight text-white truncate">${event.title}</h2>
                         <span class="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 font-black text-[9px] rounded-full uppercase tracking-wider border border-emerald-500/40 shrink-0">${event.visibility || 'Public'}</span>
                     </div>
                     <p class="text-xs text-white/60 truncate flex items-center gap-1.5 mt-0.5"><i class="fa-solid fa-location-dot text-[#00F296]"></i> ${event.location}</p>
                 </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    ${mapsUrl ? `
+                    <a href="${mapsUrl}" target="_blank" rel="noopener" title="Navigate" aria-label="Navigate" class="w-9 h-9 bg-[#00F296] hover:opacity-90 text-slate-950 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(0,242,150,0.4)] transition">
+                        <i class="fa-solid fa-location-arrow text-xs"></i>
+                    </a>` : ''}
+                    <div class="relative">
+                        <button onclick="toggleShareDropdown()" title="Share Game" aria-label="Share" class="w-9 h-9 bg-[#00F296] hover:opacity-90 text-slate-950 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(0,242,150,0.4)] transition">
+                            <i class="fa-solid fa-share-nodes text-xs"></i>
+                        </button>
+                        <div id="share-dropdown" class="hidden absolute right-0 top-full mt-2 bg-[#040E13] border border-emerald-500/40 rounded-xl shadow-2xl z-[9999] w-48 py-2 divide-y divide-white/10 text-xs">
+                            <button onclick="shareToWhatsApp('${safeTitle}', '${safeLocation}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                                <i class="fa-brands fa-whatsapp text-emerald-400 text-base"></i> WhatsApp
+                            </button>
+                            <button onclick="shareToTwitter('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                                <i class="fa-brands fa-x-twitter text-white text-base"></i> X (Twitter)
+                            </button>
+                            <button onclick="copyEventLink('${safeTitle}')" class="w-full text-left px-4 py-2.5 hover:bg-black/60 font-bold text-white flex items-center gap-2.5">
+                                <i class="fa-solid fa-link text-[#00F296] text-base"></i> Copy Link
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Navigation Tabs Bar -->
-            <div class="bg-black/40 border border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
+            <div class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
                 <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
@@ -424,7 +415,7 @@ window.renderEventDetailModalContent = function() {
             </div>
 
             <!-- Tab Content View -->
-            <div class="bg-[#040E13]/95 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
+            <div class="bg-[#040E13]/95 border-2 border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
                 ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
                 ${tab === 'info' ? window.renderInfoTab(event) : ''}
                 ${tab === 'roster' ? renderRosterTab(event) : ''}

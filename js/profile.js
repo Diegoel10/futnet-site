@@ -1,4 +1,4 @@
-// js/profile.js: Compact profile tab layout with optimized spacing to show more content above the fold
+// js/profile.js: Compact profile tab layout with optional blank nickname default
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -9,7 +9,7 @@ window.renderProfileTab = function() {
 
     const p = window.userProfile;
     const fullName = `${p.firstName || ''} ${p.lastName || ''}`.trim() || 'Player';
-    const nickname = p.nickname || 'El Capi';
+    const nickname = p.nickname || '';
     const position = p.position || 'Forward';
     const dob = p.dob || '2000-01-01';
     const gender = p.gender || 'Male';
@@ -38,7 +38,7 @@ window.renderProfileTab = function() {
                         <div class="flex items-center gap-2">
                             <h2 class="text-base font-black text-white">${fullName}</h2>
                         </div>
-                        <p class="text-xs text-white/80 font-medium">${nickname}</p>
+                        ${nickname ? `<p class="text-xs text-white/80 font-medium">${nickname}</p>` : ''}
                     </div>
                 </div>
             </div>
@@ -63,7 +63,7 @@ window.renderProfileTab = function() {
                         </div>
                         <div>
                             <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Nickname</div>
-                            <div class="text-xs font-bold text-white truncate">${nickname}</div>
+                            <div class="text-xs font-bold text-white truncate">${nickname || 'None'}</div>
                         </div>
                     </div>
 
@@ -277,8 +277,8 @@ window.openEditProfileModal = function() {
                 </div>
 
                 <div>
-                    <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Nickname</label>
-                    <input type="text" id="edit-nickname" value="${p.nickname || ''}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Nickname (Optional)</label>
+                    <input type="text" id="edit-nickname" value="${p.nickname || ''}" placeholder="e.g. El Capi" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
@@ -359,7 +359,7 @@ window.handleSaveProfile = async function(e) {
 
     window.userProfile.firstName = document.getElementById('edit-firstname').value;
     window.userProfile.lastName = document.getElementById('edit-lastname').value;
-    window.userProfile.nickname = document.getElementById('edit-nickname').value;
+    window.userProfile.nickname = document.getElementById('edit-nickname').value.trim();
     window.userProfile.avatar = document.getElementById('edit-avatar').value;
     window.userProfile.position = document.getElementById('edit-position').value;
     window.userProfile.dob = document.getElementById('edit-dob').value;

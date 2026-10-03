@@ -59,17 +59,17 @@ export function renderInfoTab(event) {
         if (allowPlusOnes) {
             rsvpButtonHtml = `
                 <div class="grid grid-cols-2 gap-2.5">
-                    <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/25 hover:bg-red-500/35 text-red-400 font-black py-3.5 rounded-xl text-xs border border-red-500/50 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
+                    <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/25 hover:bg-red-500/35 text-red-400 font-black py-3.5 rounded-xl text-xs border-2 border-red-500/50 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
                         <i class="fa-solid fa-user-xmark"></i> Cancel RSVP
                     </button>
-                    <button onclick="openManageGuestsModal('${event.id}')" class="bg-teal-500/25 hover:bg-teal-500/35 text-[#00F296] font-black py-3.5 rounded-xl text-xs border border-teal-500/50 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
+                    <button onclick="openManageGuestsModal('${event.id}')" class="bg-teal-500/25 hover:bg-teal-500/35 text-[#00F296] font-black py-3.5 rounded-xl text-xs border-2 border-teal-500/50 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
                         <i class="fa-solid fa-users-gear"></i> Manage Guests
                     </button>
                 </div>
             `;
         } else {
             rsvpButtonHtml = `
-                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/25 hover:bg-red-500/35 text-red-400 font-black py-3.5 rounded-xl text-xs border border-red-500/50 shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
+                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/25 hover:bg-red-500/35 text-red-400 font-black py-3.5 rounded-xl text-xs border-2 border-red-500/50 shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-user-xmark"></i> Leave Game / Cancel RSVP
                 </button>
             `;
@@ -92,7 +92,7 @@ export function renderInfoTab(event) {
         <div class="space-y-4 font-sans text-white">
             
             <!-- 1. Organizer Card -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 flex items-center justify-between shadow-[0_0_20px_rgba(0,180,174,0.2)]">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/60 rounded-[22px] p-4 flex items-center justify-between shadow-[0_0_20px_rgba(0,180,174,0.2)]">
                 <div class="flex items-center gap-3">
                     <img src="${finalHostAvatar}" class="w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                     <div>
@@ -100,43 +100,27 @@ export function renderInfoTab(event) {
                         <span class="text-sm font-black text-white">${organizerName}</span>
                     </div>
                 </div>
-                <span class="px-3 py-1 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border border-[#00F296]/40">Organizer</span>
+                <span class="px-3 py-1 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border-2 border-[#00F296]/40">Organizer</span>
             </div>
 
-            <!-- 2. Date, Time, Location Box -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 flex items-center justify-between shadow-[0_0_20px_rgba(0,180,174,0.2)]">
-                <div class="space-y-3 flex-1 pr-2">
-                    <div class="space-y-0.5">
-                        <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                            <i class="fa-solid fa-calendar text-[#00F296]"></i> Date
-                        </div>
-                        <div class="text-xs font-bold text-white">${event.date || 'TBD'}</div>
-                    </div>
-                    <div class="space-y-0.5">
-                        <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                            <i class="fa-solid fa-clock text-[#00F296]"></i> Time
-                        </div>
-                        <div class="text-xs font-bold text-white">${event.time || 'TBD'}</div>
-                    </div>
-                </div>
-
-                <div class="h-12 w-[1px] bg-white/15 mx-2"></div>
-
-                <div class="space-y-1.5 flex-[1.5] px-2">
+            <!-- 2. Date & Time -->
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/60 rounded-[22px] px-4 py-3.5 grid grid-cols-2 gap-2 shadow-xl text-left">
+                <div class="space-y-0.5 border-r border-white/15 pr-2">
                     <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                        <i class="fa-solid fa-location-dot text-[#00F296]"></i> Park & Location
+                        <i class="fa-solid fa-calendar text-[#00F296]"></i> DATE
                     </div>
-                    <div class="text-xs font-bold text-white leading-snug line-clamp-2">${event.location || 'Location TBD'}</div>
+                    <div class="text-xs font-bold text-white">${event.date || 'TBD'}</div>
                 </div>
-
-                <a href="http://maps.apple.com/?q=${encodeURIComponent(event.location || 'Cypress Park')}" target="_blank" class="bg-[#00F296] hover:opacity-90 text-slate-950 p-3 rounded-xl flex flex-col items-center justify-center shadow-[0_0_15px_rgba(0,242,150,0.4)] transition shrink-0 ml-1">
-                    <i class="fa-solid fa-location-arrow text-sm font-black"></i>
-                    <span class="text-[8px] font-black uppercase tracking-wider mt-0.5">Navigate</span>
-                </a>
+                <div class="space-y-0.5 pl-2">
+                    <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
+                        <i class="fa-solid fa-clock text-[#00F296]"></i> TIME
+                    </div>
+                    <div class="text-xs font-bold text-white">${event.time || 'TBD'}</div>
+                </div>
             </div>
 
             <!-- 3. Format, Fee & Teams Row -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-[0_0_20px_rgba(0,180,174,0.2)] text-center">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/60 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-[0_0_20px_rgba(0,180,174,0.2)] text-center">
                 <div class="space-y-0.5 border-r border-white/10 pr-2">
                     <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">Format</span>
                     <span class="text-xs font-bold text-white">${event.format || '7v7'}</span>
@@ -157,7 +141,7 @@ export function renderInfoTab(event) {
             </div>
 
             <!-- 5. Expandable Game Details Card -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 space-y-2 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/60 rounded-[22px] p-4 space-y-2 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
                 <div class="flex items-center gap-2.5 text-xs font-black text-white">
                     <i class="fa-solid fa-file-lines text-[#00F296]"></i> Game Details
                 </div>
@@ -165,7 +149,7 @@ export function renderInfoTab(event) {
             </div>
 
             <!-- 6. Expandable Rules Card -->
-            <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 space-y-2 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
+            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/60 rounded-[22px] p-4 space-y-2 shadow-[0_0_20px_rgba(0,180,174,0.2)]">
                 <div class="flex items-center gap-2.5 text-xs font-black text-white">
                     <i class="fa-solid fa-list-check text-[#00F296]"></i> Rules
                 </div>
