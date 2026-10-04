@@ -2,7 +2,7 @@
 import { db, appId } from '../firebase-config.js';
 import { doc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, pruneTeamsForUid, safeAvatar, escapeHtml } from './event-store.js';
-import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, refundEveryoneForGame, dollars } from '../credits.js';
+import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, costCents, costSummary, policyText, hydrateBalances, refundEveryoneForGame, dollars } from '../credits.js';
 import { renderAdminTab } from './admin-tab.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
@@ -52,6 +52,7 @@ async function healUnnamedPlayers(eventId) {
 }
 
 window.renderInfoTab = function(event) {
+    setTimeout(() => { try { hydrateBalances(); } catch (e) {} }, 0);
     const rawPrice = event.fee !== undefined && event.fee !== null ? String(event.fee).replace('$', '').trim() : '';
     const displayPrice = rawPrice && rawPrice !== '0' && rawPrice.toLowerCase() !== 'free' ? `$${rawPrice}` : 'Free';
     
@@ -180,6 +181,15 @@ window.renderInfoTab = function(event) {
                 </div>
             </div>
 
+            ${creditGame(event) ? `
+            <div class="bg-amber-500/10 border-2 border-amber-400/40 rounded-[22px] p-4 space-y-2 shadow-xl text-left">
+                <div class="text-[10px] font-black uppercase tracking-wider text-amber-300"><i class="fa-solid fa-wallet mr-1"></i> Must pay to be confirmed</div>
+                <div class="text-xs text-white/90">Cost: <b>${escapeHtml(costSummary(event))}</b> (taken from your community credit)</div>
+                <div class="text-xs text-white/90">Refund policy: <b>${escapeHtml(policyText(event))}</b></div>
+                ${(window.currentUser && String(event.organizerId) !== String(window.currentUser.uid) && (window.myCommunityRoles || {})[event.communityId]) ? `<div class="text-xs text-white/90">Your credit: <b class="text-[#00F296]" data-credit-balance="${escapeHtml(event.communityId)}">...</b></div>` : ''}
+                <p class="text-[11px] text-white/60">Please send funds to your admin by Zelle, Cash App, or Venmo so he can fund your account.</p>
+            </div>` : ''}
+
             <div class="pt-1">
                 ${rsvpButtonHtml}
             </div>
@@ -307,7 +317,7 @@ window.openEventDetails = function(eventId) {
     window.teamAssignments = window.teamAssignments || {};
     window.teamAssignments[event.id] = event.teamAssignments || {};
 
-    const isCreator = window.currentUser && event.organizerId === window.currentUser.uid;
+    const isCreator = window.currentUser && (event.organizerId === window.currentUser.uid || (event.communityId && (window.myCommunityRoles || {})[event.communityId] === 'admin'));
     window.activeModalTab = isCreator ? 'admin' : 'info';
     window.adminManagePlayersExpanded = false;
     window.adminMatchResultsExpanded = false;
@@ -378,7 +388,7 @@ window.renderEventDetailModalContent = function() {
     if (!event) return;
 
     window.currentTeamBuildingEvent = event;
-    const isCreator = window.currentUser && event.organizerId === window.currentUser.uid;
+    const isCreator = window.currentUser && (event.organizerId === window.currentUser.uid || (event.communityId && (window.myCommunityRoles || {})[event.communityId] === 'admin'));
     const tab = window.activeModalTab;
     const commentsCount = event.comments?.length || 0;
 
@@ -466,16 +476,98 @@ window.renderEventDetailModalContent = function() {
     `;
 };
 
-window.openJoinGameModal = function(eventId) {
+window.showMustPayModal = function(ev, needed, have) {
+    const who = escapeHtml(ev.organizer || ev.hostName || 'your admin');
+    let m = document.getElementById('must-pay-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'must-pay-modal'; m.className = 'fixed inset-0 z-[140] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-amber-400/50 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex justify-between items-center border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase text-amber-300"><i class="fa-solid fa-wallet mr-1"></i> Must pay to be confirmed</h3>
+                <button onclick="document.getElementById('must-pay-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center">
+                <div class="bg-black/50 border border-white/10 rounded-xl p-3"><div class="text-[10px] font-black uppercase text-white/50">You need</div><div class="text-xl font-black text-white">${dollars(needed)}</div></div>
+                <div class="bg-black/50 border border-white/10 rounded-xl p-3"><div class="text-[10px] font-black uppercase text-white/50">Your credit</div><div class="text-xl font-black ${have >= needed ? 'text-[#00F296]' : 'text-red-300'}">${dollars(have)}</div></div>
+            </div>
+            <p class="text-xs text-white/80 leading-relaxed">Please send funds to your admin (<b>${who}</b>) by Zelle, Cash App, or Venmo so he can fund your account. Then come back and join. You still need <b>${dollars(Math.max(needed - have, 0))}</b> more.</p>
+            <button onclick="document.getElementById('must-pay-modal').remove()" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20">OK</button>
+        </div>`;
+};
+
+window.showCommunityOnlyModal = function(ev) {
+    const c = (window.communitiesCache || {})[ev.communityId] || {};
+    const name = escapeHtml(ev.communityName || c.name || 'this');
+    const needsApproval = c.requireApproval !== false;
+    let m = document.getElementById('community-only-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'community-only-modal'; m.className = 'fixed inset-0 z-[135] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
+            <div class="flex justify-end"><button onclick="document.getElementById('community-only-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="w-14 h-14 mx-auto rounded-full bg-black/50 border border-emerald-500/30 flex items-center justify-center text-[#00F296] text-xl -mt-4"><i class="fa-solid fa-lock"></i></div>
+            <p class="text-sm font-black">This is a community game only.</p>
+            <button onclick="requestJoinCommunity('${escapeHtml(String(ev.communityId))}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">${needsApproval ? 'Request to join' : 'Join'} ${name} Community</button>
+        </div>`;
+};
+
+window.openJoinGameModal = async function(eventId) {
     const _ev = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (_ev && _ev.communityId && _ev.openToNonMembers !== true && window.checkCommunityGameAccess) {
-        window.checkCommunityGameAccess(_ev).then(ok => {
-            if (ok) window._openJoinGameModalCore(eventId);
-            else window.showToast('This game is for community members only. Join the community first.', 'error');
-        });
-        return;
+    if (_ev && _ev.communityId && window.currentUser) {
+        const isOrganizer = String(_ev.organizerId) === String(window.currentUser.uid);
+        const isMember = isOrganizer || (window.isCommunityMember ? await window.isCommunityMember(_ev.communityId) : true);
+        if (!isMember) {
+            if (_ev.openToNonMembers !== true) {
+                window.showCommunityOnlyModal(_ev);
+                return;
+            }
+            window.openRequestToJoin(eventId);   // non-members ask, the organizer / an admin approves
+            return;
+        }
     }
     window._openJoinGameModalCore(eventId);
+};
+
+// ---- Non-members: ask to join a community game
+window.openRequestToJoin = function(eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const uid = String(window.currentUser?.uid || '');
+    const pending = (ev.joinRequests || []).some(r => String(r.uid) === uid);
+    const who = escapeHtml(ev.organizer || ev.hostName || 'The organizer');
+    const mustPay = creditGame(ev);
+    let m = document.getElementById('request-join-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'request-join-modal'; m.className = 'fixed inset-0 z-[135] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex justify-between items-center border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase">${pending ? 'Request sent' : 'Request to join'}</h3>
+                <button onclick="document.getElementById('request-join-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="text-sm font-black">${escapeHtml(ev.title || 'Community game')}</div>
+            ${mustPay ? `<div class="bg-amber-500/10 border border-amber-400/40 rounded-xl p-3 text-xs text-white/90 leading-relaxed">
+                <b class="text-amber-300">This is a must pay event.</b><br>
+                Send <b>${escapeHtml(costSummary(ev))}</b> via Zelle, Cash App, or Venmo to <b>${who}</b>. ${who} will have to approve your request.
+            </div>` : `<p class="text-xs text-white/70">${who} or a community admin has to approve your request before you are on the roster.</p>`}
+            ${pending
+                ? `<p class="text-xs text-[#00F296] font-bold text-center">Your request is waiting for approval.</p>
+                   <button onclick="document.getElementById('request-join-modal').remove()" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20">OK</button>`
+                : `<button onclick="sendJoinRequest('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">Send request</button>`}
+        </div>`;
+};
+
+window.sendJoinRequest = async function(eventId) {
+    if (!window.currentUser || !window.userProfile) { window.showToast('You must be logged in.', 'error'); return; }
+    const uid = String(window.currentUser.uid);
+    const p = window.userProfile;
+    const name = `${p.firstName || ''} ${p.lastName || ''}`.trim() || 'Player';
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.joinRequests = draft.joinRequests || [];
+        if (draft.joinRequests.some(r => String(r.uid) === uid)) return false;
+        if ((draft.attendees || []).some(a => String(a.uid) === uid)) return false;
+        const r = { uid, name, position: String(p.position || 'Player'), requestedAt: Date.now() };
+        const av = safeAvatar(p.avatar || window.currentUser.photoURL || ''); if (av) r.avatar = av;
+        draft.joinRequests.push(r);
+    });
+    if (res.ok) { window.showToast('Request sent! You will be added when it is approved.'); window.openRequestToJoin(eventId); }
 };
 
 window._openJoinGameModalCore = function(eventId) {
@@ -613,10 +705,12 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
     const _creditEv = (window.eventsList || []).find(e => e.id === eventId);
     const useCredit = creditGame(_creditEv);
     let creditShortBy = 0;
+    let creditNeeded = 0;
+    let creditHave = 0;
     let chargedCents = 0;
 
     const res = await mutateEvent(eventId, (draft, ctx) => {
-        creditShortBy = 0;
+        creditShortBy = 0; creditNeeded = 0; creditHave = 0;
         if (ctx) ctx.charge = 0;
         draft.attendees = draft.attendees || [];
         draft.waitingList = draft.waitingList || [];
@@ -674,8 +768,8 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         if (useCredit && ctx) {
             const mine = draft.attendees.find(a => String(a.uid) === uid);
             const prevPaid = (previous && previous.creditPaidCents) || 0;
-            if (mine && (outcome === 'in' || outcome === 'partial')) {
-                const cost = feeCents(draft) * (1 + (mine.guests || []).length);
+            if (mine && mine.role !== 'Organizer' && (outcome === 'in' || outcome === 'partial')) {
+                const cost = costCents(draft, (mine.guests || []).length);
                 if (prevPaid > 0) { mine.paid = 'Credit'; mine.creditPaidCents = prevPaid; mine.creditCommunityId = draft.communityId; }
                 const extra = cost - prevPaid;
                 if (extra > 0) {
@@ -685,7 +779,9 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
                         mine.creditPaidCents = prevPaid + extra;
                         mine.creditCommunityId = draft.communityId;
                     } else {
-                        creditShortBy = extra - ctx.balance;
+                        // Must pay to be confirmed: not enough credit means no spot. Nothing is saved.
+                        creditShortBy = extra - ctx.balance; creditNeeded = extra; creditHave = ctx.balance;
+                        return false;
                     }
                 }
             }
@@ -693,12 +789,15 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         }
     }, useCredit ? joinHooks(_creditEv, uid) : undefined);
 
+    if (res.ok && res.aborted && creditShortBy > 0) {
+        window.showMustPayModal(_creditEv, creditNeeded, creditHave);
+        return;
+    }
     if (res.ok) {
         if (outcome === 'in' && chargedCents > 0) window.showToast(`Joined! ${dollars(chargedCents)} was taken from your community credit.`);
         else if (outcome === 'in') window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
         else if (outcome === 'partial') window.showToast(`Roster capacity reached! Accepted player + ${acceptedCount} guest(s); remaining guest(s) placed on waitlist.`, "info");
         else window.showToast("Roster is full. You and your guest(s) were added to the waitlist!", "info");
-        if (creditShortBy > 0) window.showToast(`Not enough credit (${dollars(creditShortBy)} short), so you joined as Unpaid. Ask a community admin to add credit, or pay at the game.`, "info");
     }
     window.renderEventDetailModalContent();
 };

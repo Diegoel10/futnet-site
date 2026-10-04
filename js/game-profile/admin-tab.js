@@ -1,7 +1,8 @@
 // js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and correct Firestore paths
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { mutateEvent, stripBigPhotos } from './event-store.js';
+import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml } from './event-store.js';
+import { payOptionsHtml, plusExtraHtml } from '../credits.js';
 
 window.activeGameProfileTab = window.activeGameProfileTab || 'manage-event';
 
@@ -231,8 +232,25 @@ export function renderAdminTab(event) {
             </div>
         `;
     } else if (currentTab === 'manage-players') {
+        const reqs = Array.isArray(event.joinRequests) ? event.joinRequests : [];
+        const reqHtml = reqs.length ? `
+            <div class="space-y-2 bg-amber-500/10 border border-amber-400/40 rounded-2xl p-3">
+                <div class="text-[10px] font-black uppercase tracking-wider text-amber-300"><i class="fa-solid fa-hand mr-1"></i> Join requests (${reqs.length})</div>
+                ${reqs.map(r => {
+                    const dir = window.directoryList?.find(u => String(u.uid) === String(r.uid));
+                    const av = dir?.avatar || safeAvatar(r.avatar) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(r.name || 'Player')}`;
+                    const uidArg = String(r.uid).replace(/'/g, "\\'");
+                    return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
+                        <img src="${escapeHtml(av)}" class="w-8 h-8 rounded-full object-cover">
+                        <span class="flex-1 text-xs font-bold text-white truncate">${escapeHtml(r.name || 'Player')}</span>
+                        <button onclick="approveGameRequest('${event.id}', '${uidArg}')" class="bg-[#00F296] text-slate-950 font-black px-3 py-2 rounded-xl text-[11px]">Approve</button>
+                        <button onclick="declineGameRequest('${event.id}', '${uidArg}')" class="bg-black/60 text-white font-bold px-3 py-2 rounded-xl text-[11px] border border-white/20">Decline</button>
+                    </div>`;
+                }).join('')}
+            </div>` : '';
         activeTabContentHtml = `
             <div class="space-y-4">
+                ${reqHtml}
                 <button onclick="openAddPlayersScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-user-plus"></i> Add Players
                 </button>
@@ -353,6 +371,43 @@ window.checkAndOpenStartMatch = function(eventId) {
     }
 };
 
+window.approveGameRequest = async function(eventId, uid) {
+    let who = '';
+    const res = await mutateEvent(eventId, (draft) => {
+        const reqs = draft.joinRequests || [];
+        const r = reqs.find(x => String(x.uid) === String(uid));
+        draft.joinRequests = reqs.filter(x => String(x.uid) !== String(uid));
+        if (!r) return false;
+        who = r.name || 'Player';
+        draft.attendees = draft.attendees || [];
+        draft.waitingList = draft.waitingList || [];
+        if (draft.attendees.some(a => String(a.uid) === String(uid))) return;
+        const perSide = parseInt(String(draft.format || '7v7').match(/(\d+)/)?.[1], 10) || 7;
+        let teams = typeof draft.teamsCount === 'number' ? draft.teamsCount : (parseInt(String(draft.teamsCount || '3').match(/(\d+)/)?.[1], 10) || 3);
+        let heads = 0; draft.attendees.forEach(a => { heads += 1 + (a.guests ? a.guests.length : 0); });
+        const entry = { uid: String(uid), name: r.name || 'Player', position: r.position || 'Player', role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [] };
+        if (r.avatar) entry.avatar = r.avatar;
+        if (heads + 1 <= perSide * teams) draft.attendees.push(entry);
+        else draft.waitingList.push({ ...entry, status: 'waiting' });
+    });
+    if (res.ok && !res.aborted) {
+        window.showToast(`${who} approved. Remember to mark them Paid once they send payment.`);
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'notifications', 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)), {
+                recipientUid: String(uid), title: 'You are in! ✅', body: `Your request to join "${res.event?.title || 'the game'}" was approved.`,
+                eventId, createdAt: new Date().toISOString(), read: false
+            });
+        } catch (e) { /* notification is optional */ }
+    }
+};
+
+window.declineGameRequest = async function(eventId, uid) {
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.joinRequests = (draft.joinRequests || []).filter(x => String(x.uid) !== String(uid));
+    });
+    if (res.ok) window.showToast('Request declined.');
+};
+
 window.openTwoPageGameWizard = function(eventId, mode) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
@@ -371,7 +426,13 @@ window.openTwoPageGameWizard = function(eventId, mode) {
         description: event.description || '',
         rules: event.rules || '',
         allowPlusOnes: event.allowPlusOnes !== undefined ? event.allowPlusOnes : true,
-        plusOneLimit: event.plusOneLimit !== undefined ? event.plusOneLimit : 1
+        plusOneLimit: event.plusOneLimit !== undefined ? event.plusOneLimit : 1,
+        // community game options
+        communityId: event.communityId || '',
+        openToNonMembers: event.openToNonMembers === true,
+        payWithCredit: event.payWithCredit === true,
+        refundPolicy: event.refundPolicy || 'hours:1',
+        plusOneExtra: event.plusOneExtra !== undefined ? event.plusOneExtra : 0
     };
 
     renderWizardPage1();
@@ -416,6 +477,12 @@ window.renderWizardPage1 = function() {
                     </div>
                 </div>
 
+                ${d.communityId ? `
+                <label class="flex items-center justify-between gap-3 bg-black/30 border border-emerald-500/30 rounded-2xl p-3 cursor-pointer">
+                    <span><span class="block text-xs font-bold text-white">Open to non-members</span><span class="block text-[10px] text-white/50">Non-members can ask to join. The organizer or an admin approves them.</span></span>
+                    <input id="wiz-open" type="checkbox" ${d.openToNonMembers ? 'checked' : ''} class="w-5 h-5 accent-[#00F296] shrink-0">
+                </label>` : ''}
+
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">📅 Date</label>
@@ -452,9 +519,11 @@ window.renderWizardPage1 = function() {
                     </div>
                     <div>
                         <label class="block font-black uppercase text-[9px] tracking-wider text-[#00F296] mb-1">Fee</label>
-                        <input type="text" id="wiz-fee" value="${d.fee}" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2.5 font-bold text-white text-center">
+                        <input type="text" id="wiz-fee" value="${d.fee}" oninput="window.refreshWizPay && window.refreshWizPay()" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2.5 font-bold text-white text-center">
                     </div>
                 </div>
+
+                ${(d.communityId && wizCreditOn(d)) ? `<div id="wiz-pay-wrap" class="${wizIsPaid(d.fee) ? '' : 'hidden'}">${payOptionsHtml('wiz', { payWithCredit: d.payWithCredit, refundPolicy: d.refundPolicy })}</div>` : ''}
 
                 <button onclick="window.goToWizardPage2()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-md transition flex items-center justify-center gap-2 mt-4">
                     Next: Description & Rules <i class="fa-solid fa-arrow-right"></i>
@@ -464,8 +533,21 @@ window.renderWizardPage1 = function() {
     `;
 };
 
+function wizIsPaid(fee) { const f = String(fee || '').replace(/[^0-9.]/g, ''); return (parseFloat(f) || 0) > 0; }
+function wizCreditOn(d) { const c = (window.communitiesCache || {})[d.communityId]; return !!c && c.creditEnabled !== false; }
+window.refreshWizPay = function() {
+    document.getElementById('wiz-pay-wrap')?.classList.toggle('hidden', !wizIsPaid(document.getElementById('wiz-fee')?.value));
+};
+
 window.goToWizardPage2 = function() {
     const d = window._wizardData;
+    if (d.communityId) {
+        d.openToNonMembers = !!document.getElementById('wiz-open')?.checked;
+        if (document.getElementById('wiz-must')) {
+            d.payWithCredit = !!document.getElementById('wiz-must').checked;
+            d.refundPolicy = document.getElementById('wiz-refund')?.value || d.refundPolicy;
+        }
+    }
     d.title = document.getElementById('wiz-title')?.value.trim() || '';
     d.date = document.getElementById('wiz-date')?.value || '';
     d.time = document.getElementById('wiz-time')?.value || '';
@@ -525,6 +607,8 @@ window.renderWizardPage2 = function() {
                     </select>
                 </div>
 
+ ${(d.communityId && wizCreditOn(d) && d.allowPlusOnes && wizIsPaid(d.fee)) ? plusExtraHtml('wiz', { plusOneExtra: d.plusOneExtra }) : ''}
+
                 <div class="flex gap-2 pt-3">
                     <button onclick="window.renderWizardPage1()" class="w-1/3 bg-black/60 text-white py-3.5 rounded-xl font-bold border border-white/20 flex items-center justify-center gap-1">
                         <i class="fa-solid fa-arrow-left"></i> Back
@@ -543,6 +627,16 @@ window.submitTwoPageGameWizard = async function() {
     d.description = document.getElementById('wiz-desc')?.value.trim() || '';
     d.rules = document.getElementById('wiz-rules')?.value.trim() || '';
     d.plusOneLimit = parseInt(document.getElementById('wiz-plus-limit')?.value, 10) || 1;
+    if (document.getElementById('wiz-p1-on')) {
+        d.plusOneExtra = document.getElementById('wiz-p1-on').checked ? (parseInt(document.getElementById('wiz-p1-amt')?.value, 10) || 1) : 0;
+    }
+    const communityFields = d.communityId ? {
+        openToNonMembers: !!d.openToNonMembers,
+        visibility: d.openToNonMembers ? 'Public' : 'Private',
+        payWithCredit: !!d.payWithCredit && wizIsPaid(d.fee),
+        refundPolicy: d.refundPolicy || 'always',
+        plusOneExtra: (d.allowPlusOnes && wizIsPaid(d.fee)) ? (d.plusOneExtra || 0) : 0
+    } : {};
 
     if (!d.date || !d.location) {
         window.showToast("Please fill in Date and Location.", "error");
@@ -569,6 +663,8 @@ window.submitTwoPageGameWizard = async function() {
             rules: d.rules,
             allowPlusOnes: d.allowPlusOnes,
             plusOneLimit: d.plusOneLimit,
+            ...communityFields,
+            joinRequests: [],
             attendees: [],
             waitingList: [],
             declinedList: [],
@@ -607,7 +703,8 @@ window.submitTwoPageGameWizard = async function() {
                     description: d.description,
                     rules: d.rules,
                     allowPlusOnes: d.allowPlusOnes,
-                    plusOneLimit: d.plusOneLimit
+                    plusOneLimit: d.plusOneLimit,
+                    ...communityFields
                 });
             });
             if (!saved.ok) return;
@@ -989,4 +1086,3 @@ window.openPlayerManagementModal = function(eventId, uid, playerName) {
         modal.remove();
     };
 };
-

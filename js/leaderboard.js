@@ -1,24 +1,6 @@
 // js/leaderboard.js
-export function renderLeaderboard(category = 'goals') {
-    const tbody = document.getElementById('leaderboard-tbody');
-    if (!tbody) return;
-
-    // Highlight active category button
-    ['goals', 'wins', 'sessions'].forEach(cat => {
-        const btn = document.getElementById(`l-btn-${cat}`);
-        if (btn) {
-            btn.className = cat === category 
-                ? "px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-brand text-slate-950 shadow-sm" 
-                : "px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900";
-        }
-    });
-
-    const metricHeader = document.getElementById('leaderboard-metric-header');
-    if (metricHeader) {
-        metricHeader.textContent = category === 'goals' ? 'Goals' : (category === 'wins' ? 'Matches Won' : 'Sessions Won');
-    }
-
-    const events = window.eventsList || [];
+import { escapeHtml, jsArg } from './game-profile/event-store.js';
+export function computePlayerStats(events) {
     const playerStats = {};
 
     const getPlayerRecord = (name, avatar, uid, position) => {
@@ -49,7 +31,7 @@ export function renderLeaderboard(category = 'goals') {
 
         const matches = ev.matches || [];
         matches.forEach(m => {
-            if (!m.isFinished) return;
+            if (m.isFinished === false) return;
 
             const t1Goals = m.team1Goals || [];
             const t2Goals = m.team2Goals || [];
@@ -106,7 +88,7 @@ export function renderLeaderboard(category = 'goals') {
             }
 
             matches.forEach(m => {
-                if (!m.isFinished) return;
+                if (m.isFinished === false) return;
                 const t1Score = (m.team1Goals || []).length;
                 const t2Score = (m.team2Goals || []).length;
                 let t1Idx = 0, t2Idx = 1;
@@ -142,7 +124,29 @@ export function renderLeaderboard(category = 'goals') {
         }
     });
 
-    const playersArray = Object.values(playerStats);
+    return Object.values(playerStats);
+}
+
+export function renderLeaderboard(category = 'goals') {
+    const tbody = document.getElementById('leaderboard-tbody');
+    if (!tbody) return;
+
+    // Highlight active category button
+    ['goals', 'wins', 'sessions'].forEach(cat => {
+        const btn = document.getElementById(`l-btn-${cat}`);
+        if (btn) {
+            btn.className = cat === category 
+                ? "px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-brand text-slate-950 shadow-sm" 
+                : "px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900";
+        }
+    });
+
+    const metricHeader = document.getElementById('leaderboard-metric-header');
+    if (metricHeader) {
+        metricHeader.textContent = category === 'goals' ? 'Goals' : (category === 'wins' ? 'Matches Won' : 'Sessions Won');
+    }
+
+    const playersArray = computePlayerStats(window.eventsList || []);
     playersArray.sort((a, b) => {
         if (category === 'goals') return b.goals - a.goals;
         if (category === 'wins') return b.matchesWon - a.matchesWon;
@@ -163,13 +167,13 @@ export function renderLeaderboard(category = 'goals') {
             <tr class="hover:bg-slate-50 transition border-b border-slate-100">
                 <td class="p-4 font-black text-slate-900">${rankBadge}</td>
                 <td class="p-4 flex items-center gap-3">
-                    <img src="${p.avatar}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
+                    <img src="${escapeHtml(p.avatar)}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
                     <div>
-                        <div class="font-bold text-slate-900">${p.name}</div>
-                        <div class="text-[10px] text-slate-400">${p.position}</div>
+                        <div class="font-bold text-slate-900">${escapeHtml(p.name)}</div>
+                        <div class="text-[10px] text-slate-400">${escapeHtml(p.position)}</div>
                     </div>
                 </td>
-                <td class="p-4 text-center font-medium text-slate-700">${p.position}</td>
+                <td class="p-4 text-center font-medium text-slate-700">${escapeHtml(p.position)}</td>
                 <td class="p-4 text-center font-bold text-slate-700">${p.played}</td>
                 <td class="p-4 text-right font-black text-brand text-sm">${metricVal}</td>
             </tr>

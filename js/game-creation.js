@@ -2,6 +2,8 @@
 import { db, appId } from './firebase-config.js';
 import { collection, doc, setDoc, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+import { saveParkIfNew } from './parks.js';
+
 let cachedParks = [];
 let isParksLoaded = false;
 let currentCreationStep = 1; // 1 = Core Details, 2 = Rules & Description
@@ -268,6 +270,7 @@ window.handleCreateEvent = async function(e) {
     try {
         const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', eventId);
         await setDoc(eventDocRef, newEvent);
+        saveParkIfNew(parkname, city, state);   // new field? add it to the suggestions list
 
         window.resetCreateGameForm();
         window.showToast("⚽ Game published successfully!");

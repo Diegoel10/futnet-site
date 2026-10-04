@@ -13,7 +13,9 @@ import {
     onSnapshot, serverTimestamp, increment, arrayUnion, deleteField, runTransaction, where
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml as esc, jsArg } from './game-profile/event-store.js';
-import { memberCreditHtml, adminCreditHtml, REFUND_POLICIES } from './credits.js';
+import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readPayOptions } from './credits.js';
+import { attachParkPicker, saveParkIfNew } from './parks.js';
+import { computePlayerStats } from './leaderboard.js';
 
 const DEFAULT_THUMB = 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800';
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -21,6 +23,7 @@ const BTN = 'px-3 py-2 rounded-xl text-xs font-bold transition';
 const BTN_PRIMARY = `${BTN} bg-[#00F296] text-slate-950 hover:opacity-90`;
 const BTN_DARK = `${BTN} bg-black/50 border border-white/15 text-white hover:bg-black`;
 const BTN_DANGER = `${BTN} bg-red-500/20 border border-red-500/50 text-red-300 hover:bg-red-500/30`;
+const HDR_BTN = 'flex flex-col items-center justify-center gap-1 py-2.5 rounded-xl bg-black/50 border border-white/15 hover:border-[#00F296]/60 text-white text-[11px] font-bold transition';
 const INPUT = 'w-full bg-black/60 border border-teal-500/50 rounded-xl px-3 py-2.5 text-white text-base sm:text-xs focus:outline-none focus:border-[#00F296]';
 const CARD = 'bg-[#040E13]/90 border border-emerald-500/30 rounded-2xl shadow-xl backdrop-blur-md';
 
@@ -47,6 +50,42 @@ const safeImg = (u, fb = DEFAULT_AVATAR) => {
     u = String(u || '');
     return (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) ? u : fb;
 };
+// Profile pictures: live directory first (so old member records still show a photo), then the saved one,
+// then a letter avatar made from the name. Never blank.
+const usableImg = (u) => typeof u === 'string' && (/^https?:\/\//i.test(u) || /^data:image\//i.test(u));
+const initialsUrl = (name) => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(String(name || 'Player')).replace(/'/g, '%27')}`;
+const avatarOf = (uidOrObj, fallback) => {
+    const obj = (uidOrObj && typeof uidOrObj === 'object') ? uidOrObj : null;
+    const uid = obj ? obj.uid : uidOrObj;
+    const d = uid && Array.isArray(window.directoryList) ? window.directoryList.find(u => String(u.uid) === String(uid)) : null;
+    const name = obj?.name || d?.name || [d?.firstName, d?.lastName].filter(Boolean).join(' ') || '';
+    const saved = obj ? obj.avatar : fallback;
+    const pick = [d?.avatar, d?.photoURL, saved].find(usableImg);
+    return pick || initialsUrl(name);
+};
+const avatarImg = (who, cls) => {
+    const obj = (who && typeof who === 'object') ? who : { uid: who };
+    const name = obj.name || (Array.isArray(window.directoryList) ? window.directoryList.find(u => String(u.uid) === String(obj.uid))?.name : '') || '';
+    return `<img src="${esc(avatarOf(obj))}" onerror="this.onerror=null;this.src='${initialsUrl(name)}'" class="${cls}">`;
+};
+
+// The directory (everyone's profile picture) must be loaded for pictures to show; load it once if it is not there yet.
+let _dirLoading = null;
+async function ensureDirectory() {
+    if (Array.isArray(window.directoryList) && window.directoryList.length) return;
+    if (!_dirLoading) {
+        _dirLoading = getDocs(collection(db, 'artifacts', appId, 'directory'))
+            .then(snap => {
+                if (!(Array.isArray(window.directoryList) && window.directoryList.length)) {
+                    window.directoryList = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+                }
+            })
+            .catch(() => {})
+            .finally(() => { _dirLoading = null; });
+    }
+    await _dirLoading;
+    if (S.activeId) renderCommunityPage();
+}
 const fmtAgo = (ms) => {
     if (!ms) return '';
     const m = Math.floor((Date.now() - ms) / 60000);
@@ -262,7 +301,7 @@ window.submitCreateCommunity = async function() {
         description: document.getElementById('cf-desc').value.trim(),
         requirements: document.getElementById('cf-req').value.trim(),
         rules: document.getElementById('cf-rules').value.trim(),
-        requireApproval: document.getElementById('cf-approval').checked,
+        requireApproval: document.getElementById('cf-approval').checked, creditEnabled: true,
         adminOnlyFeed: false, matchesVisibleToNonMembers: true,
         thumbnail: window._cfThumb || DEFAULT_THUMB,
         adminId: uid, membersCount: 1, createdAt: serverTimestamp()
@@ -397,19 +436,25 @@ async function redeemInvite(id, token) {
 
 window.shareCommunity = (id) => {
     const c = window.communitiesCache[id] || {};
-    if (myRole(id) === 'admin') {
-        modalShell('community-share-modal', 'Invite to community', esc(c.name), `
-            <p class="text-[11px] text-white/60">Create a private link that works for ${INVITE_HOURS} hours. People who open it join right away without waiting for approval.</p>
-            <button id="invite-create-btn" onclick="createCommunityInvite('${jsArg(id)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Create invite link (${INVITE_HOURS} hours)</button>
+    const needs = c.requireApproval !== false;
+    const groupBlock = `
+        <div class="space-y-2">
+            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Share group</div>
+            <p class="text-[11px] text-white/60">${needs ? 'Anyone who opens this link can ask to join. An admin has to approve them.' : 'Anyone who opens this link can join.'}</p>
+            <div class="flex items-center gap-2 bg-black/50 border border-teal-500/40 rounded-xl p-3">
+                <span class="text-[11px] text-white/80 truncate flex-1">${esc(communityLink(id))}</span>
+                <button onclick="copyCommunityLink('${jsArg(id)}')" class="${BTN_PRIMARY} shrink-0">Copy</button>
+            </div>
+        </div>`;
+    const inviteBlock = myRole(id) === 'admin' ? `
+        <div class="space-y-2 border-t border-white/10 pt-4">
+            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Game invite</div>
+            <p class="text-[11px] text-white/60">A private link that works for ${INVITE_HOURS} hours. People who open it get in right away, no approval needed.</p>
+            <button id="invite-create-btn" onclick="createCommunityInvite('${jsArg(id)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Create game invite (${INVITE_HOURS} hours)</button>
             <div id="invite-result"></div>
-            <button onclick="closeCommunityModal('community-share-modal')" class="${BTN_DARK} w-full py-3">Done</button>`);
-        return;
-    }
-    modalShell('community-share-modal', 'Invite to community', esc(c.name), `
-        <div class="flex items-center gap-2 bg-black/50 border border-teal-500/40 rounded-xl p-3">
-            <span class="text-[11px] text-white/80 truncate flex-1">${esc(communityLink(id))}</span>
-            <button onclick="copyCommunityLink('${jsArg(id)}')" class="${BTN_PRIMARY} shrink-0">Copy Link</button>
-        </div>
+        </div>` : '';
+    modalShell('community-share-modal', 'Share', esc(c.name), `
+        ${groupBlock}${inviteBlock}
         <button onclick="closeCommunityModal('community-share-modal')" class="${BTN_DARK} w-full py-3">Done</button>`);
 };
 window.copyCommunityLink = async (id) => {
@@ -425,7 +470,7 @@ function stopCommunityListeners() {
 
 // Credit listeners are only started for communities that switched Credit on (saves reads).
 function ensureCreditListeners(c, role) {
-    if (!role || !c || c.creditEnabled !== true || S.creditFor === c.id) return;
+    if (!role || !c || !creditOn(c) || S.creditFor === c.id) return;
     S.creditFor = c.id;
     const base = ['artifacts', appId, 'communities', c.id];
     const uid = me().uid;
@@ -449,6 +494,23 @@ function ensureCreditListeners(c, role) {
             if (S.tab === 'credit') renderCommunityPage();
         }, () => {}));
     }
+}
+
+// Keeps my own member record's picture and name current (old records may have none).
+let _healedFor = null;
+async function healMyMemberRecord(cid) {
+    if (!me() || _healedFor === cid) return;
+    const mine = S.members.find(m => m.uid === me().uid);
+    if (!mine) return;
+    _healedFor = cid;
+    const d = Array.isArray(window.directoryList) ? window.directoryList.find(u => String(u.uid) === String(me().uid)) : null;
+    const best = [window.userProfile?.avatar, d?.avatar, me().photoURL].find(u => usableImg(u) && u.length <= 60000);
+    const patch = {};
+    if (best && mine.avatar !== best) patch.avatar = best;
+    if (!mine.name && myName()) patch.name = myName();
+    if (!Object.keys(patch).length) return;
+    try { await updateDoc(doc(db, 'artifacts', appId, 'communities', cid, 'members', me().uid), patch); }
+    catch (e) { /* the rules may not allow it; pictures still come from the directory */ }
 }
 
 window.openCommunity = async function(id, tab) {
@@ -477,8 +539,10 @@ window.openCommunity = async function(id, tab) {
     S.pending = pending; S.suspended = suspended;
 
     const base = ['artifacts', appId, 'communities', id];
+    ensureDirectory();
     S.unsubs.push(onSnapshot(collection(db, ...base, 'members'), s => {
         S.members = s.docs.map(d => d.data()); renderCommunityPage();
+        healMyMemberRecord(id);
     }, () => {}));
     if (role === 'admin') {
         S.unsubs.push(onSnapshot(collection(db, ...base, 'requests'), s => {
@@ -530,10 +594,10 @@ function renderCommunityPage() {
     const focusVal = document.activeElement?.value;
 
     const tabs = [['info', 'Info'], ['games', 'Games'], ['feed', 'Feed']];
-    if (isMember && c.creditEnabled === true) tabs.push(['credit', 'Credit']);
+    if (isMember && creditOn(c)) tabs.push(['credit', 'Credit']);
     if (isAdmin) tabs.push(['admin', `Admin${S.requests.length ? ` (${S.requests.length})` : ''}`]);
-    if (!isMember && ['feed', 'admin', 'credit'].includes(S.tab)) S.tab = 'info';
-    if (S.tab === 'credit' && c.creditEnabled !== true) S.tab = 'info';
+    if (!isMember && ['admin', 'credit'].includes(S.tab)) S.tab = 'info';
+    if (S.tab === 'credit' && !creditOn(c)) S.tab = 'info';
 
     let body = '';
     if (S.tab === 'info') body = infoTab(c, isAdmin);
@@ -548,7 +612,6 @@ function renderCommunityPage() {
                 <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="w-full h-full object-cover">
                 <div class="absolute inset-0 bg-gradient-to-t from-[#040E13] via-transparent to-black/30"></div>
                 <button onclick="closeCommunity()" aria-label="Back" class="absolute top-3 left-3 w-9 h-9 rounded-full bg-black/60 border border-white/20 flex items-center justify-center"><i class="fa-solid fa-chevron-left text-xs"></i></button>
-                <button onclick="shareCommunity('${jsArg(id)}')" aria-label="Share" class="absolute top-3 right-3 w-9 h-9 rounded-full bg-[#00F296] text-slate-950 flex items-center justify-center"><i class="fa-solid fa-share-nodes text-xs"></i></button>
             </div>
             <div class="p-4 -mt-6 relative space-y-3">
                 <div class="flex items-end justify-between gap-3">
@@ -556,7 +619,14 @@ function renderCommunityPage() {
                         <h2 class="text-lg font-black text-white truncate">${esc(c.name)}</h2>
                         <p class="text-[11px] text-white/60">${c.city ? `<i class="fa-solid fa-location-dot text-[#00F296] mr-1"></i>${esc(c.city)}${c.state ? ', ' + esc(c.state) : ''} • ` : ''}${S.members.length || Number(c.membersCount) || 1} member(s)</p>
                     </div>
-                    ${isMember ? `<button onclick="openCommunityChat('${jsArg(id)}')" class="${BTN_PRIMARY} shrink-0"><i class="fa-solid fa-comments mr-1"></i> Chat</button>` : joinButton(c)}
+                    ${isMember ? '' : joinButton(c)}
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                    ${isMember ? `
+                    <button onclick="showCommunityMembers('${jsArg(id)}')" class="${HDR_BTN}"><i class="fa-solid fa-user-group text-[#00F296]"></i><span>Members</span></button>
+                    <button onclick="showCommunityLeaderboard('${jsArg(id)}')" class="${HDR_BTN}"><i class="fa-solid fa-trophy text-[#00F296]"></i><span>Leaderboard</span></button>
+                    <button onclick="openCommunityChat('${jsArg(id)}')" class="${HDR_BTN}"><i class="fa-solid fa-comments text-[#00F296]"></i><span>Chat</span></button>` : ''}
+                    <button onclick="shareCommunity('${jsArg(id)}')" class="${HDR_BTN} ${isMember ? '' : 'col-span-4'}"><i class="fa-solid fa-share-nodes text-[#00F296]"></i><span>Share</span></button>
                 </div>
             </div>
         </div>
@@ -598,6 +668,32 @@ window.joinCommunity = async function(id) {
     } catch (e) { console.error(e); toast('Could not join community', 'error'); }
 };
 
+// Used by the "community game only" window: ask to join (or join right away if no approval is needed).
+window.requestJoinCommunity = async function(id) {
+    if (!me()) return;
+    const uid = me().uid;
+    try {
+        let c = window.communitiesCache[id];
+        if (!c) {
+            const s = await getDoc(commRef(id));
+            if (!s.exists()) { toast('Community not found', 'error'); return; }
+            c = { ...s.data(), id }; window.communitiesCache[id] = c;
+        }
+        const base = { uid, name: myName(), avatar: myAvatar() };
+        if ((await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', uid))).exists()) { toast('You are already a member.'); return; }
+        if (c.requireApproval !== false) {
+            if ((await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid))).exists()) { toast('Your request is already waiting for approval.', 'info'); }
+            else { await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid), { ...base, requestedAt: serverTimestamp() }); toast('Request sent! An admin will review it.'); }
+        } else {
+            await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', uid), { ...base, role: 'member', joinedAt: serverTimestamp() });
+            await updateDoc(commRef(id), { membersCount: increment(1) });
+            window.myCommunityRoles[id] = 'member'; rebuildChatThreads();
+            toast(`Welcome to ${c.name}!`);
+        }
+        document.getElementById('community-only-modal')?.remove();
+    } catch (e) { console.error(e); toast('Could not send your request', 'error'); }
+};
+
 window.leaveCommunity = async function(id) {
     const c = window.communitiesCache[id];
     if (c.adminId === me().uid) { toast('The owner cannot leave. Delete the community instead.', 'error'); return; }
@@ -620,62 +716,72 @@ function infoTab(c, isAdmin) {
         <div class="space-y-4">
             ${section('About', c.description || (isMember ? '' : 'Join this community to view matches, announcements, and chat.'))}
             ${section('Member requirements', c.requirements)}
-            ${section('Community rules', c.rules)}
+            <div class="bg-amber-500/10 border border-amber-400/30 rounded-xl p-3">
+                <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-scroll mr-1"></i> Community rules</div>
+                <p class="text-xs text-white/85 whitespace-pre-line leading-relaxed">${c.rules ? esc(c.rules) : `<span class="italic text-white/50">${isAdmin ? 'No rules yet. Add them with "Edit name, info & thumbnail" in the Admin tab.' : 'The admin has not added rules yet.'}</span>`}</p>
+            </div>
             <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Admins</div>
                 <div class="flex flex-wrap gap-2">${(admins.length ? admins : [{ uid: c.adminId, name: 'Organizer' }]).map(a => `
                     <div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-full pl-1 pr-3 py-1">
-                        <img src="${esc(safeImg(a.avatar))}" class="w-6 h-6 rounded-full object-cover"><span class="text-[11px] font-bold text-white">${esc(a.name || 'Admin')}</span>
+                        ${avatarImg(a, 'w-6 h-6 rounded-full object-cover')}<span class="text-[11px] font-bold text-white">${esc(a.name || 'Admin')}</span>
                     </div>`).join('')}</div></div>
-            ${isMember ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Members (${people.length})</div>
-                <div class="flex flex-wrap gap-2">${people.map(m => `<img title="${esc(m.name)}" src="${esc(safeImg(m.avatar))}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40">`).join('')}</div></div>
-            ${leaderboardBlock(c)}
-            ${isAdmin || c.adminId === me().uid ? '' : `<button onclick="leaveCommunity('${jsArg(c.id)}')" class="${BTN_DANGER} w-full">Leave Community</button>`}` : ''}
+            ${isMember ? `${isAdmin || c.adminId === me().uid ? '' : `<button onclick="leaveCommunity('${jsArg(c.id)}')" class="${BTN_DANGER} w-full">Leave Community</button>`}` : ''}
         </div>`;
 }
 
-function leaderboardBlock(c) {
-    const stats = {};
-    (window.eventsList || []).filter(e => e.communityId === c.id).forEach(ev => {
-        const att = ev.attendees || [];
-        att.forEach(a => { const k = a.uid || a.name; (stats[k] = stats[k] || { name: a.name, avatar: a.avatar, goals: 0, played: 0 }); stats[k].played++; });
-        (ev.matches || []).filter(m => m.isFinished !== false).forEach(m => {
-            [...(m.team1Goals || []), ...(m.team2Goals || [])].forEach(g => {
-                const a = att.find(x => x.name === g); const k = a?.uid || g;
-                (stats[k] = stats[k] || { name: g, avatar: a?.avatar, goals: 0, played: 0 }).goals++;
-            });
-        });
-    });
-    const rows = Object.values(stats).sort((a, b) => b.goals - a.goals || b.played - a.played).slice(0, 10);
-    if (!rows.length) return '';
-    return `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Community Leaderboard</div>
-        <div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
+window.showCommunityMembers = (id) => {
+    const c = window.communitiesCache[id]; if (!c) return;
+    const people = S.members.filter(m => !isSuspended(m)).sort((a, b) => (isAdminRole(b, c) ? 1 : 0) - (isAdminRole(a, c) ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
+    modalShell('community-members-modal', `Members (${people.length})`, esc(c.name), `
+        <div class="space-y-2">${people.map(m => `
+            <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-2.5">
+                ${avatarImg(m, 'w-9 h-9 rounded-full object-cover border border-emerald-500/40')}
+                <span class="flex-1 text-xs font-bold text-white truncate">${esc(m.name || 'Player')}</span>
+                ${isAdminRole(m, c) ? '<span class="text-[9px] font-black uppercase tracking-wider text-slate-950 bg-[#00F296] rounded-full px-2 py-0.5">Admin</span>' : ''}
+            </div>`).join('') || '<p class="text-xs text-white/50 italic">No members yet.</p>'}</div>`);
+};
+const LB_TABS = [['wins', 'Most Won Matches', 'matchesWon', 'won'], ['sessions', 'Most Won Sessions', 'sessionsWon', 'won'], ['goals', 'Most Goals', 'goals', 'goals']];
+function leaderboardHtml(c, tab) {
+    const events = (window.eventsList || []).filter(e => e.communityId === c.id);
+    const cur = LB_TABS.find(t => t[0] === tab) || LB_TABS[0];
+    const rows = computePlayerStats(events).filter(p => p[cur[2]] > 0)
+        .sort((a, b) => b[cur[2]] - a[cur[2]] || b.played - a.played || String(a.name).localeCompare(String(b.name))).slice(0, 25);
+    return `
+        <div class="grid grid-cols-3 gap-1 bg-black/50 border border-white/10 rounded-xl p-1">
+            ${LB_TABS.map(t => `<button onclick="setCommunityLeaderboardTab('${jsArg(c.id)}','${t[0]}')" class="py-2 px-1 rounded-lg text-[10px] font-black leading-tight transition ${t[0] === cur[0] ? 'bg-[#00F296] text-slate-950' : 'text-white/70 hover:text-white'}">${t[1]}</button>`).join('')}
+        </div>
+        ${rows.length ? `<div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
             <div class="flex items-center gap-3 p-2.5 text-xs">
-                <span class="w-5 text-center font-black text-white/60">${i + 1}</span>
-                <img src="${esc(safeImg(r.avatar))}" class="w-7 h-7 rounded-full object-cover">
+                <span class="w-6 text-center font-black text-white/60">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
+                ${avatarImg({ uid: r.uid, name: r.name, avatar: r.avatar }, 'w-8 h-8 rounded-full object-cover')}
                 <span class="flex-1 truncate font-bold text-white">${esc(r.name)}</span>
-                <span class="text-white/60">${r.played} played</span><span class="font-black text-[#00F296] w-14 text-right">${r.goals} goals</span>
-            </div>`).join('')}</div></div>`;
+                <span class="text-white/50 text-[10px]">${r.played} played</span>
+                <span class="font-black text-[#00F296] w-10 text-right">${r[cur[2]]}</span>
+            </div>`).join('')}</div>`
+        : '<p class="text-xs text-white/50 italic text-center py-6">Nothing here yet. Finish a community match and the rankings will show up.</p>'}`;
 }
+window.setCommunityLeaderboardTab = (id, tab) => {
+    const c = window.communitiesCache[id]; const box = document.getElementById('lb-body'); if (!c || !box) return;
+    box.innerHTML = leaderboardHtml(c, tab);
+};
+window.showCommunityLeaderboard = (id) => {
+    const c = window.communitiesCache[id]; if (!c) return;
+    modalShell('community-leaderboard-modal', 'Leaderboard', esc(c.name), `<div id="lb-body" class="space-y-3">${leaderboardHtml(c, 'wins')}</div>`);
+};
 
 // ------------------------------------------------------------------ GAMES TAB + COMMUNITY GAME CREATION
 function gamesTab(c, isMember) {
     const { up, prev } = communityGames(c.id);
-    const item = (ev) => {
-        const fmt = (ev.format || '7v7');
-        const cnt = (ev.attendees || []).reduce((n, a) => n + 1 + (a.guests?.length || 0), 0);
-        return `<div onclick="openEventDetails('${jsArg(ev.id)}')" class="flex items-center justify-between gap-3 bg-black/40 border border-emerald-500/30 hover:border-emerald-400 rounded-xl p-3 cursor-pointer transition">
-            <div class="min-w-0"><div class="text-xs font-black text-white truncate">${esc(ev.title || 'Soccer Match')}</div>
-            <div class="text-[10px] text-white/60 truncate">${esc(ev.date || '')} • ${esc(ev.time || '')} • ${esc(ev.location || '')}</div></div>
-            <div class="text-[10px] font-bold text-teal-300 shrink-0">${esc(fmt)} • ${cnt} going</div></div>`;
-    };
+    const card = (ev) => (window.renderEventCardHtml ? window.renderEventCardHtml(ev) : '');
     if (!isMember && c.matchesVisibleToNonMembers === false) {
         return `<p class="text-xs text-white/60 text-center py-6">Games are visible to members only. Join this community to see them.</p>`;
     }
-    return `<div class="space-y-4">
+    return `<div class="space-y-5">
         ${isMember && !S.suspended ? `<button onclick="showCommunityGameCreation('${jsArg(c.id)}')" class="${BTN_PRIMARY} w-full py-3"><i class="fa-solid fa-plus mr-1"></i> Create Game in ${esc(c.name)}</button>` : ''}
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Upcoming (${up.length})</div>
-            <div class="space-y-2">${up.map(item).join('') || '<p class="text-xs text-white/50 italic">No upcoming games yet.</p>'}</div></div>
-        ${prev.length ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-white/50 mb-2">Previous (${prev.length})</div><div class="space-y-2 opacity-80">${prev.slice(0, 20).map(item).join('')}</div></div>` : ''}
+            <div class="grid grid-cols-1 gap-4">${up.map(card).join('') || '<p class="text-xs text-white/50 italic">No upcoming games yet.</p>'}</div></div>
+        ${prev.length ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-white/50 mb-2">Previous (${prev.length})</div>
+            <div class="grid grid-cols-1 gap-4 opacity-90">${prev.slice(0, 20).map(card).join('')}</div></div>` : ''}
     </div>`;
 }
 
@@ -683,15 +789,15 @@ window.showCommunityGameCreation = function(communityId) {
     const c = window.communitiesCache[communityId];
     if (!c) return;
     const today = new Date().toISOString().slice(0, 10);
-    const sel = (id, opts, cur) => `<select id="${id}" class="${INPUT}">${opts.map(o => `<option ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    const sel = (id, opts, cur, extra = '') => `<select id="${id}" ${extra} class="${INPUT}">${opts.map(o => `<option ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
     modalShell('community-game-modal', `Create Game in ${esc(c.name)}`, 'Community game', `
         <div>${lbl('Game / event title (optional)')}<input id="cg-title" class="${INPUT}" placeholder="Soccer pick-up (default)"></div>
-        ${toggleRow('cg-open', 'Open to non-members', 'Non-members can also join this community game', false)}
+        ${toggleRow('cg-open', 'Open to non-members', 'Non-members can ask to join. The organizer or an admin approves them.', true)}
         <div class="flex gap-3">
             <div class="flex-1">${lbl('Date')}<input id="cg-date" type="date" min="${today}" value="${today}" class="${INPUT}"></div>
             <div class="flex-1">${lbl('Time')}<input id="cg-time" type="time" value="19:00" class="${INPUT}"></div>
         </div>
-        <div>${lbl('Park & location *')}<input id="cg-park" class="${INPUT}" placeholder="Enter park name (required)"></div>
+        <div class="relative">${lbl('Park & location *')}<input id="cg-park" class="${INPUT}" placeholder="Start typing a park name (required)"></div>
         <div class="flex gap-3">
             <div class="flex-1">${lbl('City *')}<input id="cg-city" class="${INPUT}" value="${esc(c.city || '')}"></div>
             <div class="w-20">${lbl('State')}<input id="cg-state" maxlength="3" class="${INPUT}" value="${esc(c.state || 'FL')}"></div>
@@ -699,18 +805,26 @@ window.showCommunityGameCreation = function(communityId) {
         <div class="flex gap-3">
             <div class="flex-1">${lbl('Teams')}${sel('cg-teams', ['2', '3', '4'], '3')}</div>
             <div class="flex-1">${lbl('Format')}${sel('cg-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'], '7v7')}</div>
-            <div class="flex-1">${lbl('Fee')}${sel('cg-fee', ['Free', '$5', '$6', '$7', '$8', '$10', '$12', '$15'], 'Free')}</div>
+            <div class="flex-1">${lbl('Fee')}${sel('cg-fee', ['Free', '$5', '$6', '$7', '$8', '$10', '$12', '$15'], 'Free', 'onchange="refreshCgOptions()"')}</div>
         </div>
-        ${c.creditEnabled === true ? `
-        ${toggleRow('cg-credit', 'Members pay with credit', 'The fee is taken from their community credit when they join (needs a fee)', true)}
-        <div>${lbl('Refund rule if a player cancels')}<select id="cg-refund" class="${INPUT}">${REFUND_POLICIES.map(([k, t]) => `<option value="${k}" ${k === 'hours:1' ? 'selected' : ''}>${t}</option>`).join('')}</select></div>` : ''}
+        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', { payWithCredit: true, refundPolicy: 'hours:1' }) : ''}</div>
         <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}"></textarea></div>
         <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}"></textarea></div>
         <div class="flex gap-3 items-end">
-            <div class="flex-1">${lbl('Allow plus ones?')}${sel('cg-plus', ['No', 'Yes'], 'No')}</div>
+            <div class="flex-1">${lbl('Allow plus ones?')}${sel('cg-plus', ['No', 'Yes'], 'No', 'onchange="refreshCgOptions()"')}</div>
             <div class="flex-1">${lbl('Max plus ones')}${sel('cg-plus-limit', ['1', '2', '3', '4', '5', '6'], '1')}</div>
         </div>
+        <div id="cg-p1-wrap" class="hidden">${creditOn(c) ? plusExtraHtml('cg', { plusOneExtra: 1 }) : ''}</div>
         <button id="cg-submit" onclick="submitCommunityGame('${jsArg(communityId)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Create Game</button>`);
+    attachParkPicker({ input: 'cg-park', city: 'cg-city', state: 'cg-state' });
+};
+
+// Shows the payment options only when the game has a fee (and the +1 extra only when plus ones are allowed).
+window.refreshCgOptions = () => {
+    const paid = (document.getElementById('cg-fee')?.value || 'Free') !== 'Free';
+    const plus = document.getElementById('cg-plus')?.value === 'Yes';
+    document.getElementById('cg-pay-wrap')?.classList.toggle('hidden', !paid);
+    document.getElementById('cg-p1-wrap')?.classList.toggle('hidden', !(paid && plus));
 };
 
 window.submitCommunityGame = async function(communityId) {
@@ -739,8 +853,12 @@ window.submitCommunityGame = async function(communityId) {
         description: v('cg-desc'), rules: v('cg-rules'),
         teamsCount: parseInt(v('cg-teams'), 10) || 3, format: v('cg-format'),
         fee, price: parseFloat(fee.replace('$', '')) || 0,
-        payWithCredit: c.creditEnabled === true && !!document.getElementById('cg-credit')?.checked && fee !== 'Free',
-        refundPolicy: document.getElementById('cg-refund')?.value || 'always',
+        ...(() => {
+            if (!creditOn(c) || fee === 'Free') return { payWithCredit: false, refundPolicy: 'always', plusOneExtra: 0 };
+            const o = readPayOptions('cg');
+            return { payWithCredit: o.payWithCredit, refundPolicy: o.refundPolicy, plusOneExtra: allowPlusOnes ? o.plusOneExtra : 0 };
+        })(),
+        joinRequests: [],
         allowPlusOnes, plusOneLimit: allowPlusOnes ? (parseInt(v('cg-plus-limit'), 10) || 1) : 0,
         organizerId: me().uid, organizer: name, organizerAvatar: avatar, hostName: name, hostAvatar: avatar,
         attendees: [{ uid: me().uid, name, avatar, role: 'Organizer', status: 'confirmed', paid: 'Free', guests: [] }],
@@ -751,6 +869,7 @@ window.submitCommunityGame = async function(communityId) {
     const btn = document.getElementById('cg-submit'); if (btn) btn.disabled = true;
     try {
         await setDoc(doc(db, 'artifacts', appId, 'eventsList', id), ev);
+        saveParkIfNew(park, city, state);
         window.closeCommunityModal('community-game-modal');
         toast('⚽ Community game published!');
         renderCommunityPage();
@@ -767,6 +886,14 @@ window.checkCommunityGameAccess = async function(ev) {
 
 // ------------------------------------------------------------------ FEED TAB
 function feedTab(c, isMember, isAdmin) {
+    if (!isMember) {
+        return `<div class="text-center py-8 space-y-3">
+            <div class="w-14 h-14 mx-auto rounded-full bg-black/50 border border-emerald-500/30 flex items-center justify-center text-[#00F296] text-xl"><i class="fa-solid fa-lock"></i></div>
+            <p class="text-sm font-black text-white">Join the community to see the feed</p>
+            <p class="text-[11px] text-white/60">Announcements, polls and photos are shared with members only.</p>
+            <div class="flex justify-center">${joinButton(c)}</div>
+        </div>`;
+    }
     const canPost = isMember && !S.suspended && (!c.adminOnlyFeed || isAdmin);
     return `<div class="space-y-4">
         ${canPost ? `
@@ -797,7 +924,7 @@ function postCard(p, c, isAdmin) {
     const myVote = votes[uid];
     return `<div class="bg-black/30 border border-white/10 rounded-xl p-3 space-y-2.5">
         <div class="flex items-center gap-2.5">
-            <img src="${esc(safeImg(p.authorAvatar))}" class="w-8 h-8 rounded-full object-cover">
+            ${avatarImg({ uid: p.authorId, name: p.authorName, avatar: p.authorAvatar }, 'w-8 h-8 rounded-full object-cover')}
             <div class="flex-1 min-w-0"><div class="text-xs font-black text-white truncate">${esc(p.authorName || 'Player')}</div><div class="text-[10px] text-white/40">${fmtAgo(tsMs(p.createdAt))}</div></div>
             ${canDelete ? `<button onclick="deleteCommunityPost('${jsArg(p.id)}')" class="text-white/40 hover:text-red-400 text-xs" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>` : ''}
         </div>
@@ -895,7 +1022,7 @@ function adminTab(c) {
         ${S.requests.length ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Join requests (${S.requests.length})</div>
             <div class="space-y-2">${S.requests.map(r => `
                 <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-2.5">
-                    <img src="${esc(safeImg(r.avatar))}" class="w-8 h-8 rounded-full object-cover"><span class="flex-1 text-xs font-bold text-white truncate">${esc(r.name || 'Player')}</span>
+                    ${avatarImg(r, 'w-8 h-8 rounded-full object-cover')}<span class="flex-1 text-xs font-bold text-white truncate">${esc(r.name || 'Player')}</span>
                     <button onclick="approveCommunityRequest('${jsArg(r.uid)}')" class="${BTN_PRIMARY}">Approve</button>
                     <button onclick="declineCommunityRequest('${jsArg(r.uid)}')" class="${BTN_DARK}">Decline</button>
                 </div>`).join('')}</div></div>` : ''}
@@ -904,14 +1031,14 @@ function adminTab(c) {
                 ${settingToggle(id, 'requireApproval', 'Require approval to join', c.requireApproval !== false)}
                 ${settingToggle(id, 'adminOnlyFeed', 'Only admins can post in the feed', c.adminOnlyFeed === true)}
                 ${settingToggle(id, 'matchesVisibleToNonMembers', 'Games visible to non-members', c.matchesVisibleToNonMembers !== false)}
-                ${settingToggle(id, 'creditEnabled', 'Member Credit (members prepay you, game fees come out of it)', c.creditEnabled === true)}
+                ${settingToggle(id, 'creditEnabled', 'Credit system', creditOn(c))}
             </div>
             <button onclick="editCommunityInfo('${jsArg(id)}')" class="${BTN_DARK} w-full mt-3"><i class="fa-solid fa-pen mr-1"></i> Edit name, info & thumbnail</button></div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Members (${S.members.length})</div>
             <div class="space-y-2">${others.map(m => {
                 const adm = isAdminRole(m, c); const sus = isSuspended(m);
                 return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
-                    <img src="${esc(safeImg(m.avatar))}" class="w-8 h-8 rounded-full object-cover">
+                    ${avatarImg(m, 'w-8 h-8 rounded-full object-cover')}
                     <div class="flex-1 min-w-0"><div class="text-xs font-bold text-white truncate">${esc(m.name || 'Player')}</div>
                     <div class="text-[10px] ${sus ? 'text-red-300' : 'text-white/50'}">${sus ? 'Suspended' : (adm ? 'Admin' : 'Member')}</div></div>
                     ${adm ? `<button onclick="setCommunityRole('${jsArg(m.uid)}', false)" class="${BTN_DARK}">Demote</button>` : `<button onclick="setCommunityRole('${jsArg(m.uid)}', true)" class="${BTN_DARK}">Make Admin</button>`}
@@ -930,7 +1057,7 @@ const settingToggle = (id, key, label, on) => `
     </label>`;
 
 window.setCommunitySetting = async (id, key, val) => {
-    try { await updateDoc(commRef(id), { [key]: val }); if (key === 'creditEnabled' && val) toast('Credit is on. Members now see a Credit tab.'); } catch (e) { console.error(e); toast('Could not update setting', 'error'); }
+    try { await updateDoc(commRef(id), { [key]: val }); if (key === 'creditEnabled' && val) toast('Credit system is on. Members now see a Credit tab.'); } catch (e) { console.error(e); toast('Could not update setting', 'error'); }
 };
 
 window.approveCommunityRequest = async function(uid) {
@@ -1028,7 +1155,7 @@ function renderCommunityChatMessages() {
         return mine ? `
             <div class="flex items-end justify-end gap-2 my-2"><div class="bg-[#14cc80] text-slate-900 px-4 py-2.5 rounded-2xl rounded-tr-sm max-w-md shadow-sm text-xs relative">
                 <p class="pr-10 pb-3 break-words">${esc(m.text)}</p><span class="absolute bottom-1 right-2.5 text-[9px] text-slate-700">${esc(t)}</span></div></div>` : `
-            <div class="flex items-end gap-2 my-2"><img src="${esc(safeImg(m.avatar))}" class="w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200">
+            <div class="flex items-end gap-2 my-2">${avatarImg({ uid: m.senderUid, name: m.sender, avatar: m.avatar }, 'w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200')}
                 <div class="bg-white border border-slate-200 text-slate-900 px-4 py-2.5 rounded-2xl rounded-tl-sm max-w-md shadow-sm text-xs relative">
                 <p class="text-[10px] font-bold text-emerald-600 mb-0.5">${esc(m.sender || 'Player')}</p>
                 <p class="pr-10 pb-3 break-words">${esc(m.text)}</p><span class="absolute bottom-1 right-2.5 text-[9px] text-slate-400">${esc(t)}</span></div></div>`;
@@ -1078,5 +1205,6 @@ const boot = setInterval(async () => {
     if (!me()) return;
     clearInterval(boot);
     await loadCommunities();
+    ensureDirectory();
     handleCommunityHash();
 }, 400);

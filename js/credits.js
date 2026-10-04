@@ -48,12 +48,13 @@ export function eventStart(ev) {
 }
 
 export const REFUND_POLICIES = [
+    ['never', 'Never refund'],
     ['always', 'Always refund'],
-    ['sameday', 'Refund, except on the day of the game'],
-    ['hours:1', 'Refund if canceled 1+ hour before'],
-    ['hours:2', 'Refund if canceled 2+ hours before'],
-    ['hours:3', 'Refund if canceled 3+ hours before'],
-    ['never', 'No refunds']
+    ['sameday', 'Refund unless the player cancels on the day of the match'],
+    ['hours:1', 'Refund unless the player cancels less than 1 hour before'],
+    ['hours:2', 'Refund unless the player cancels less than 2 hours before'],
+    ['hours:3', 'Refund unless the player cancels less than 3 hours before'],
+    ['hours:4', 'Refund unless the player cancels less than 4 hours before']
 ];
 
 export function policyText(ev) {
@@ -78,6 +79,18 @@ export function refundAllowed(ev, now = Date.now()) {
         return now <= start.getTime() - hrs * 3600000;
     }
     return true;
+}
+
+/** Extra charge per +1 (cents), set by the game creator. 0 when none. */
+export function plusOneExtraCents(ev) {
+    const v = Number(ev && ev.plusOneExtra);
+    return Number.isFinite(v) && v > 0 ? Math.round(v * 100) : 0;
+}
+
+/** Total a player owes for themselves + N guests: fee for each head, plus the +1 extra for each guest. */
+export function costCents(ev, guestCount = 0) {
+    const g = Math.max(0, guestCount | 0);
+    return feeCents(ev) + g * (feeCents(ev) + plusOneExtraCents(ev));
 }
 
 /** Game takes credit: community game, credit switched on, and it has a fee. */
@@ -285,7 +298,80 @@ window.saveCreditModal = async function(cid, uid, name) {
     else if (btn) btn.disabled = false;
 };
 
+// ------------------------------------------------------------------ game options (create form + edit/copy wizard)
+// idp = id prefix of the inputs, v = current values { openToNonMembers, payWithCredit, refundPolicy, plusOneExtra }.
+export function payOptionsHtml(idp, v = {}) {
+    const must = v.payWithCredit !== false;
+    const policy = v.refundPolicy || 'hours:1';
+    return `
+    <div id="${idp}-pay-block" class="space-y-3 bg-black/30 border border-emerald-500/30 rounded-2xl p-3">
+        <label class="flex items-center justify-between gap-3 cursor-pointer">
+            <span><span class="block text-xs font-bold text-white">Must pay to be confirmed</span><span class="block text-[10px] text-white/50">Credit system: the fee comes out of the member's credit. No credit, no spot.</span></span>
+            <input id="${idp}-must" type="checkbox" ${must ? 'checked' : ''} onchange="document.getElementById('${idp}-refund-wrap').classList.toggle('hidden', !this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0">
+        </label>
+        <div id="${idp}-refund-wrap" class="${must ? '' : 'hidden'}">
+            <label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Refund policy</label>
+            <select id="${idp}-refund" class="${INPUT}">${REFUND_POLICIES.map(([k, t]) => `<option value="${k}" ${k === policy ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+        </div>
+    </div>`;
+}
+
+export function plusExtraHtml(idp, v = {}) {
+    const cur = Number(v.plusOneExtra);
+    const on = v.plusOneExtra === undefined ? true : cur > 0;
+    const amt = cur > 0 ? cur : 1;
+    return `
+    <div id="${idp}-p1-block" class="space-y-2 bg-black/30 border border-emerald-500/30 rounded-2xl p-3">
+        <label class="flex items-center justify-between gap-3 cursor-pointer">
+            <span><span class="block text-xs font-bold text-white">Charge extra for +1?</span><span class="block text-[10px] text-white/50">On top of the game fee, for each guest a member brings.</span></span>
+            <input id="${idp}-p1-on" type="checkbox" ${on ? 'checked' : ''} onchange="document.getElementById('${idp}-p1-amt-wrap').classList.toggle('hidden', !this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0">
+        </label>
+        <div id="${idp}-p1-amt-wrap" class="${on ? '' : 'hidden'}">
+            <select id="${idp}-p1-amt" class="${INPUT}">${[1, 2, 3].map(n => `<option value="${n}" ${n === amt ? 'selected' : ''}>+$${n} per guest</option>`).join('')}</select>
+        </div>
+    </div>`;
+}
+
+/** Reads the inputs made by payOptionsHtml / plusExtraHtml. */
+export function readPayOptions(idp) {
+    const g = (id) => document.getElementById(`${idp}-${id}`);
+    const must = !!g('must')?.checked;
+    const p1On = !!g('p1-on')?.checked;
+    return {
+        payWithCredit: must,
+        refundPolicy: g('refund')?.value || 'always',
+        plusOneExtra: p1On ? (parseInt(g('p1-amt')?.value, 10) || 1) : 0
+    };
+}
+
+/** What the game costs, in words: "$6, +$1 per guest". */
+export function costSummary(ev) {
+    const f = feeCents(ev); if (!f) return 'Free';
+    const x = plusOneExtraCents(ev);
+    return `${dollars(f)}${ev.allowPlusOnes && x ? `, +${dollars(x)} extra per guest` : ''}`;
+}
+
+/** Fills every <span data-credit-balance="communityId"> with the signed-in member's balance. */
+export async function hydrateBalances() {
+    const me = window.currentUser; if (!me) return;
+    const spans = Array.from(document.querySelectorAll('[data-credit-balance]'));
+    for (const el of spans) {
+        try {
+            const s = await getDoc(credRef(el.getAttribute('data-credit-balance'), me.uid));
+            el.textContent = dollars(s.exists() ? (s.data().balanceCents || 0) : 0);
+        } catch (e) { el.textContent = '$0.00'; }
+    }
+}
+
+/** Reads one member's balance (cents). */
+export async function myBalanceCents(cid) {
+    const me = window.currentUser; if (!me) return 0;
+    try { const s = await getDoc(credRef(cid, me.uid)); return s.exists() ? (s.data().balanceCents || 0) : 0; }
+    catch (e) { return 0; }
+}
+
 window.creditTools = {
+    plusOneExtraCents, costCents, payOptionsHtml, plusExtraHtml, readPayOptions, costSummary, hydrateBalances, myBalanceCents,
     dollars, feeCents, eventStart, refundAllowed, policyText, creditGame, REFUND_POLICIES,
     joinHooks, refundHooks, refundEveryoneForGame, adminAdjustCredit, memberCreditHtml, adminCreditHtml
 };

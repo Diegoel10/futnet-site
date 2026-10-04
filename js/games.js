@@ -206,9 +206,13 @@ window.renderEvents = function() {
         return;
     }
 
-    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    grid.innerHTML = filtered.map(ev => window.renderEventCardHtml(ev)).join('');
+};
 
-    grid.innerHTML = filtered.map(ev => {
+// One game card (used by the Games screen and by the community page).
+window.renderEventCardHtml = function(ev) {
+    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    {
         const formatMatch = (ev.format || "").match(/(\d+)/);
         const perSide = formatMatch ? parseInt(formatMatch[1], 10) : 5;
 
@@ -292,6 +296,12 @@ window.renderEvents = function() {
                         <div class="flex items-center space-x-2">
                             <i class="fa-solid fa-clock text-[#00F296] w-3.5"></i>
                             <span>${formattedTime}</span>
+                            ${(ev.liveMatchActive && window.liveMatchInProgress && window.liveMatchInProgress(ev.liveMatchActive)) ? `
+                                <span class="ml-auto flex items-center gap-1.5 bg-black/60 border border-[#00F296]/60 px-2 py-0.5 rounded-lg text-[10px] font-black ${ev.liveMatchActive.isRunning ? 'text-[#00F296]' : 'text-amber-400'}">
+                                    <span class="w-2 h-2 rounded-full ${ev.liveMatchActive.isRunning ? 'bg-[#00F296] animate-ping' : 'bg-amber-400'} inline-block"></span>
+                                    ${ev.liveMatchActive.isRunning ? 'LIVE*' : 'PAUSED'}
+                                    <span data-live-clock="${ev.id}" class="font-mono">${window.liveClockText(ev.liveMatchActive)}</span>
+                                </span>` : ''}
                         </div>
                         <div class="flex items-center space-x-2">
                             <i class="fa-solid fa-location-dot text-[#00F296] w-3.5"></i>
@@ -316,7 +326,7 @@ window.renderEvents = function() {
                 </div>
             </div>
         `;
-    }).join('');
+    }
 };
 
 if (document.readyState === 'loading') {
