@@ -50,6 +50,8 @@ const safeImg = (u, fb = DEFAULT_AVATAR) => {
     u = String(u || '');
     return (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) ? u : fb;
 };
+const creditOn = (c) => !!c && c.creditEnabled !== false;   // Credit system is ON unless an admin turns it off
+
 // Profile pictures: live directory first (so old member records still show a photo), then the saved one,
 // then a letter avatar made from the name. Never blank.
 const usableImg = (u) => typeof u === 'string' && (/^https?:\/\//i.test(u) || /^data:image\//i.test(u));
