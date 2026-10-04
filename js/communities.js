@@ -10,9 +10,10 @@
 import { db, appId } from './firebase-config.js';
 import {
     doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit,
-    onSnapshot, serverTimestamp, increment, arrayUnion, deleteField, runTransaction
+    onSnapshot, serverTimestamp, increment, arrayUnion, deleteField, runTransaction, where
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml as esc, jsArg } from './game-profile/event-store.js';
+import { memberCreditHtml, adminCreditHtml, REFUND_POLICIES } from './credits.js';
 
 const DEFAULT_THUMB = 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800';
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -30,6 +31,7 @@ window.communityChatThreads = [];
 const S = {
     activeId: null, tab: 'info',
     members: [], requests: [], feed: [], busy: false,
+    credits: {}, myCredit: null, ledger: [], creditFor: null,
     unsubs: [], chatUnsub: null, activeChatCommunity: null, chatMessages: []
 };
 
@@ -321,8 +323,88 @@ function showShareModal(id) {
         <a href="${esc(wa)}" target="_blank" rel="noopener" class="${BTN} block text-center bg-green-500 text-black">WhatsApp</a>
         <button onclick="closeCommunityModal('community-share-modal')" class="${BTN_DARK} w-full py-3">Done</button>`);
 }
+// ---- Expiring invite links (admins): valid for 2 hours, join directly without approval.
+const INVITE_HOURS = 2;
+const inviteLink = (id, token) => `${location.origin}${location.pathname}#community=${encodeURIComponent(id)}&invite=${encodeURIComponent(token)}`;
+const fmtClock = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+window.createCommunityInvite = async (id) => {
+    if (!me()) return;
+    const c = window.communitiesCache[id] || {};
+    const btn = document.getElementById('invite-create-btn'); if (btn) btn.disabled = true;
+    try {
+        const token = Array.from(crypto.getRandomValues(new Uint8Array(12))).map(b => b.toString(36).padStart(2, '0')).join('').slice(0, 20);
+        const expiresAtMs = Date.now() + INVITE_HOURS * 3600000;
+        await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'invites', token), {
+            token, communityId: id, createdBy: me().uid, createdByName: myName(), createdAt: serverTimestamp(), expiresAtMs
+        });
+        const link = inviteLink(id, token);
+        const box = document.getElementById('invite-result');
+        if (box) {
+            const wa = `https://api.whatsapp.com/send?text=${encodeURIComponent(`Join my football community '${c.name}' on FutNet (link works until ${fmtClock(expiresAtMs)}): ${link}`)}`;
+            box.innerHTML = `
+                <div class="flex items-center gap-2 bg-black/50 border border-teal-500/40 rounded-xl p-3">
+                    <span class="text-[11px] text-white/80 truncate flex-1">${esc(link)}</span>
+                    <button onclick="copyInviteLink('${jsArg(link)}')" class="${BTN_PRIMARY} shrink-0">Copy</button>
+                </div>
+                <p class="text-[11px] text-white/60 mt-2">Expires today at <b class="text-white">${fmtClock(expiresAtMs)}</b>. Anyone who opens it before then joins right away, no approval needed.</p>
+                <a href="${wa}" target="_blank" rel="noopener" class="${BTN_DARK} block text-center w-full py-3 mt-2"><i class="fa-brands fa-whatsapp mr-1"></i> Send on WhatsApp</a>`;
+        }
+        if (btn) btn.textContent = 'Create a new link';
+    } catch (e) { console.error(e); toast('Could not create invite link', 'error'); }
+    finally { if (btn) btn.disabled = false; }
+};
+window.copyInviteLink = async (link) => {
+    try { await navigator.clipboard.writeText(link); toast('Invite link copied!'); }
+    catch (e) { window.prompt('Copy this link:', link); }
+};
+
+function showInviteProblem(adminName) {
+    modalShell('invite-problem-modal', 'This invite link expired', '', `
+        <p class="text-sm text-white/80">The link you have has expired. Ask <b class="text-white">${esc(adminName || 'a community admin')}</b> to send you another one.</p>
+        <button onclick="closeCommunityModal('invite-problem-modal')" class="${BTN_PRIMARY} w-full py-3 text-sm">OK</button>`);
+}
+
+async function redeemInvite(id, token) {
+    const uid = me().uid;
+    const memRef = doc(db, 'artifacts', appId, 'communities', id, 'members', uid);
+    try { if ((await getDoc(memRef)).exists()) return true; } catch (e) { /* ignore */ }
+    let inv = null;
+    try { const s = await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'invites', token)); inv = s.exists() ? s.data() : null; }
+    catch (e) { console.error(e); }
+    if (!inv || !(Number(inv.expiresAtMs) > Date.now())) {
+        let who = inv?.createdByName || '';
+        if (!who) {
+            try {
+                const c = (await getDoc(commRef(id))).data();
+                if (c?.adminId) who = (await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', c.adminId))).data()?.name || '';
+            } catch (e) { /* ignore */ }
+        }
+        showInviteProblem(who);
+        return false;
+    }
+    try {
+        await setDoc(memRef, { uid, name: myName(), avatar: myAvatar(), role: 'member', joinedAt: serverTimestamp(), joinedVia: token });
+        await updateDoc(commRef(id), { membersCount: increment(1) });
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid)); } catch (e) { /* none */ }
+        window.myCommunityRoles[id] = 'member';
+        const c = window.communitiesCache[id] || (await getDoc(commRef(id))).data() || {};
+        toast(`Welcome to ${c.name || 'the community'}!`);
+        await loadCommunities();
+        return true;
+    } catch (e) { console.error(e); toast('Could not join with this invite', 'error'); return false; }
+}
+
 window.shareCommunity = (id) => {
     const c = window.communitiesCache[id] || {};
+    if (myRole(id) === 'admin') {
+        modalShell('community-share-modal', 'Invite to community', esc(c.name), `
+            <p class="text-[11px] text-white/60">Create a private link that works for ${INVITE_HOURS} hours. People who open it join right away without waiting for approval.</p>
+            <button id="invite-create-btn" onclick="createCommunityInvite('${jsArg(id)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Create invite link (${INVITE_HOURS} hours)</button>
+            <div id="invite-result"></div>
+            <button onclick="closeCommunityModal('community-share-modal')" class="${BTN_DARK} w-full py-3">Done</button>`);
+        return;
+    }
     modalShell('community-share-modal', 'Invite to community', esc(c.name), `
         <div class="flex items-center gap-2 bg-black/50 border border-teal-500/40 rounded-xl p-3">
             <span class="text-[11px] text-white/80 truncate flex-1">${esc(communityLink(id))}</span>
@@ -338,7 +420,35 @@ window.copyCommunityLink = async (id) => {
 // ------------------------------------------------------------------ COMMUNITY PAGE
 function stopCommunityListeners() {
     S.unsubs.forEach(u => { try { u(); } catch (e) {} });
-    S.unsubs = [];
+    S.unsubs = []; S.creditFor = null; S.credits = {}; S.myCredit = null; S.ledger = [];
+}
+
+// Credit listeners are only started for communities that switched Credit on (saves reads).
+function ensureCreditListeners(c, role) {
+    if (!role || !c || c.creditEnabled !== true || S.creditFor === c.id) return;
+    S.creditFor = c.id;
+    const base = ['artifacts', appId, 'communities', c.id];
+    const uid = me().uid;
+    const sorter = (a, b) => tsMs(b.at) - tsMs(a.at);
+    if (role === 'admin') {
+        S.unsubs.push(onSnapshot(collection(db, ...base, 'credits'), s => {
+            S.credits = {}; s.docs.forEach(d => { S.credits[d.id] = d.data(); });
+            if (S.tab === 'credit') renderCommunityPage();
+        }, () => {}));
+        S.unsubs.push(onSnapshot(query(collection(db, ...base, 'creditLedger'), orderBy('at', 'desc'), limit(50)), s => {
+            S.ledger = s.docs.map(d => d.data());
+            if (S.tab === 'credit') renderCommunityPage();
+        }, () => {}));
+    } else {
+        S.unsubs.push(onSnapshot(doc(db, ...base, 'credits', uid), s => {
+            S.myCredit = s.exists() ? s.data() : null;
+            if (S.tab === 'credit') renderCommunityPage();
+        }, () => {}));
+        S.unsubs.push(onSnapshot(query(collection(db, ...base, 'creditLedger'), where('uid', '==', uid)), s => {
+            S.ledger = s.docs.map(d => d.data()).sort(sorter);
+            if (S.tab === 'credit') renderCommunityPage();
+        }, () => {}));
+    }
 }
 
 window.openCommunity = async function(id, tab) {
@@ -382,7 +492,11 @@ window.openCommunity = async function(id, tab) {
         }, () => {}));
     }
     S.unsubs.push(onSnapshot(commRef(id), s => {
-        if (s.exists()) { window.communitiesCache[id] = { ...s.data(), id }; renderCommunityPage(); }
+        if (s.exists()) {
+            window.communitiesCache[id] = { ...s.data(), id };
+            ensureCreditListeners(window.communitiesCache[id], myRole(id));
+            renderCommunityPage();
+        }
     }, () => {}));
     renderCommunityPage();
 };
@@ -416,13 +530,16 @@ function renderCommunityPage() {
     const focusVal = document.activeElement?.value;
 
     const tabs = [['info', 'Info'], ['games', 'Games'], ['feed', 'Feed']];
+    if (isMember && c.creditEnabled === true) tabs.push(['credit', 'Credit']);
     if (isAdmin) tabs.push(['admin', `Admin${S.requests.length ? ` (${S.requests.length})` : ''}`]);
-    if (!isMember && ['feed', 'admin'].includes(S.tab)) S.tab = 'info';
+    if (!isMember && ['feed', 'admin', 'credit'].includes(S.tab)) S.tab = 'info';
+    if (S.tab === 'credit' && c.creditEnabled !== true) S.tab = 'info';
 
     let body = '';
     if (S.tab === 'info') body = infoTab(c, isAdmin);
     else if (S.tab === 'games') body = gamesTab(c, isMember);
     else if (S.tab === 'feed') body = feedTab(c, isMember, isAdmin);
+    else if (S.tab === 'credit' && isMember) body = isAdmin ? adminCreditHtml(c, S.members, S.credits, S.ledger) : memberCreditHtml(c, S.myCredit, S.ledger);
     else if (S.tab === 'admin' && isAdmin) body = adminTab(c);
 
     el.innerHTML = `
@@ -521,7 +638,7 @@ function leaderboardBlock(c) {
     (window.eventsList || []).filter(e => e.communityId === c.id).forEach(ev => {
         const att = ev.attendees || [];
         att.forEach(a => { const k = a.uid || a.name; (stats[k] = stats[k] || { name: a.name, avatar: a.avatar, goals: 0, played: 0 }); stats[k].played++; });
-        (ev.matches || []).filter(m => m.isFinished).forEach(m => {
+        (ev.matches || []).filter(m => m.isFinished !== false).forEach(m => {
             [...(m.team1Goals || []), ...(m.team2Goals || [])].forEach(g => {
                 const a = att.find(x => x.name === g); const k = a?.uid || g;
                 (stats[k] = stats[k] || { name: g, avatar: a?.avatar, goals: 0, played: 0 }).goals++;
@@ -584,6 +701,9 @@ window.showCommunityGameCreation = function(communityId) {
             <div class="flex-1">${lbl('Format')}${sel('cg-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'], '7v7')}</div>
             <div class="flex-1">${lbl('Fee')}${sel('cg-fee', ['Free', '$5', '$6', '$7', '$8', '$10', '$12', '$15'], 'Free')}</div>
         </div>
+        ${c.creditEnabled === true ? `
+        ${toggleRow('cg-credit', 'Members pay with credit', 'The fee is taken from their community credit when they join (needs a fee)', true)}
+        <div>${lbl('Refund rule if a player cancels')}<select id="cg-refund" class="${INPUT}">${REFUND_POLICIES.map(([k, t]) => `<option value="${k}" ${k === 'hours:1' ? 'selected' : ''}>${t}</option>`).join('')}</select></div>` : ''}
         <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}"></textarea></div>
         <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}"></textarea></div>
         <div class="flex gap-3 items-end">
@@ -619,6 +739,8 @@ window.submitCommunityGame = async function(communityId) {
         description: v('cg-desc'), rules: v('cg-rules'),
         teamsCount: parseInt(v('cg-teams'), 10) || 3, format: v('cg-format'),
         fee, price: parseFloat(fee.replace('$', '')) || 0,
+        payWithCredit: c.creditEnabled === true && !!document.getElementById('cg-credit')?.checked && fee !== 'Free',
+        refundPolicy: document.getElementById('cg-refund')?.value || 'always',
         allowPlusOnes, plusOneLimit: allowPlusOnes ? (parseInt(v('cg-plus-limit'), 10) || 1) : 0,
         organizerId: me().uid, organizer: name, organizerAvatar: avatar, hostName: name, hostAvatar: avatar,
         attendees: [{ uid: me().uid, name, avatar, role: 'Organizer', status: 'confirmed', paid: 'Free', guests: [] }],
@@ -782,6 +904,7 @@ function adminTab(c) {
                 ${settingToggle(id, 'requireApproval', 'Require approval to join', c.requireApproval !== false)}
                 ${settingToggle(id, 'adminOnlyFeed', 'Only admins can post in the feed', c.adminOnlyFeed === true)}
                 ${settingToggle(id, 'matchesVisibleToNonMembers', 'Games visible to non-members', c.matchesVisibleToNonMembers !== false)}
+                ${settingToggle(id, 'creditEnabled', 'Member Credit (members prepay you, game fees come out of it)', c.creditEnabled === true)}
             </div>
             <button onclick="editCommunityInfo('${jsArg(id)}')" class="${BTN_DARK} w-full mt-3"><i class="fa-solid fa-pen mr-1"></i> Edit name, info & thumbnail</button></div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Members (${S.members.length})</div>
@@ -807,7 +930,7 @@ const settingToggle = (id, key, label, on) => `
     </label>`;
 
 window.setCommunitySetting = async (id, key, val) => {
-    try { await updateDoc(commRef(id), { [key]: val }); } catch (e) { console.error(e); toast('Could not update setting', 'error'); }
+    try { await updateDoc(commRef(id), { [key]: val }); if (key === 'creditEnabled' && val) toast('Credit is on. Members now see a Credit tab.'); } catch (e) { console.error(e); toast('Could not update setting', 'error'); }
 };
 
 window.approveCommunityRequest = async function(uid) {
@@ -934,11 +1057,20 @@ window.sendCommunityChatMessage = async function(text) {
 // ------------------------------------------------------------------ startup + deep links
 const initialHash = location.hash;   // captured before login/tab routing rewrites it
 let initialHashUsed = false;
-function handleCommunityHash() {
+async function handleCommunityHash() {
     const h = (!initialHashUsed && /^#community=/.test(initialHash)) ? initialHash : location.hash;
     initialHashUsed = true;
-    const m = h.match(/^#community=(.+)$/);
-    if (m && me()) { window.openCommunity(decodeURIComponent(m[1])); return true; }
+    const m = h.match(/^#community=([^&]+)(?:&invite=(.+))?$/);
+    if (m && me()) {
+        const id = decodeURIComponent(m[1]);
+        if (m[2]) {
+            const ok = await redeemInvite(id, decodeURIComponent(m[2]));
+            try { history.replaceState(null, '', location.pathname + '#community=' + encodeURIComponent(id)); } catch (e) { /* ignore */ }
+            if (!ok) return true;
+        }
+        window.openCommunity(id);
+        return true;
+    }
     return false;
 }
 window.addEventListener('hashchange', handleCommunityHash);

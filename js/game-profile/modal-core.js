@@ -1,13 +1,55 @@
 // js/game-profile/modal-core.js: Complete updated file with standalone event page routing, browser back button support, and robust deletion/editing
 import { db, appId } from '../firebase-config.js';
-import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, pruneTeamsForUid, safeAvatar, escapeHtml } from './event-store.js';
+import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, refundEveryoneForGame, dollars } from '../credits.js';
 import { renderAdminTab } from './admin-tab.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
 import { renderCommentsTab } from './comments-tab.js';
 import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
+
+
+// Roster entries saved without a real name show up as "Player". Look the name up from the player's
+// profile (by uid) and save it, so every screen (site and app) shows the right name and photo.
+const _healedEvents = new Set();
+async function healUnnamedPlayers(eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    if (!ev || _healedEvents.has(eventId)) return;
+    const isUnnamed = (a) => a && a.uid && !String(a.uid).includes('_guest_') &&
+        (!a.name || !String(a.name).trim() || String(a.name).trim() === 'Player');
+    const bad = [...(ev.attendees || []), ...(ev.waitingList || [])].filter(isUnnamed);
+    if (!bad.length) return;
+    _healedEvents.add(eventId);
+    const found = {};
+    await Promise.all([...new Set(bad.map(a => a.uid))].map(async uid => {
+        try {
+            const s = await getDoc(doc(db, 'artifacts', appId, 'directory', String(uid)));
+            if (!s.exists()) return;
+            const d = s.data();
+            const name = (d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim() || '').trim();
+            if (name) found[uid] = { name, avatar: safeAvatar(d.avatar) };
+        } catch (e) { /* ignore */ }
+    }));
+    if (!Object.keys(found).length) return;
+    await mutateEvent(eventId, (draft) => {
+        let changed = false;
+        const fix = (a) => {
+            if (isUnnamed(a) && found[a.uid]) {
+                a.name = found[a.uid].name;
+                if (!a.avatar && found[a.uid].avatar) a.avatar = found[a.uid].avatar;
+                changed = true;
+            }
+        };
+        (draft.attendees || []).forEach(fix);
+        (draft.waitingList || []).forEach(fix);
+        Object.values(draft.teamAssignments || {}).forEach(list => {
+            if (Array.isArray(list)) list.forEach(p => { if (p && found[p.uid] && (!p.name || p.name === 'Player')) { p.name = found[p.uid].name; changed = true; } });
+        });
+        return changed ? undefined : false;
+    });
+}
 
 window.renderInfoTab = function(event) {
     const rawPrice = event.fee !== undefined && event.fee !== null ? String(event.fee).replace('$', '').trim() : '';
@@ -281,6 +323,7 @@ window.openEventDetails = function(eventId) {
         window.switchTab('event-details-screen');
     }
     window.renderEventDetailModalContent();
+    healUnnamedPlayers(eventId);
 };
 
 // Listen to browser back button to close event profile seamlessly
@@ -566,8 +609,15 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
     const storedAvatar = safeAvatar(profile.avatar || window.currentUser.photoURL || '');
     let outcome = 'full';
     let acceptedCount = 0;
+    // Community credit: the game fee is taken from the player's credit in the same save.
+    const _creditEv = (window.eventsList || []).find(e => e.id === eventId);
+    const useCredit = creditGame(_creditEv);
+    let creditShortBy = 0;
+    let chargedCents = 0;
 
-    const res = await mutateEvent(eventId, (draft) => {
+    const res = await mutateEvent(eventId, (draft, ctx) => {
+        creditShortBy = 0;
+        if (ctx) ctx.charge = 0;
         draft.attendees = draft.attendees || [];
         draft.waitingList = draft.waitingList || [];
         draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== uid);
@@ -620,19 +670,44 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         const kept = (draft.attendees.find(a => String(a.uid) === uid)?.guests || []).length;
         if (outcome === 'full') pruneTeamsForUid(draft, uid);
         else pruneTeamsForUid(draft, uid, { keepHost: true, keepGuests: kept });
-    });
+
+        if (useCredit && ctx) {
+            const mine = draft.attendees.find(a => String(a.uid) === uid);
+            const prevPaid = (previous && previous.creditPaidCents) || 0;
+            if (mine && (outcome === 'in' || outcome === 'partial')) {
+                const cost = feeCents(draft) * (1 + (mine.guests || []).length);
+                if (prevPaid > 0) { mine.paid = 'Credit'; mine.creditPaidCents = prevPaid; mine.creditCommunityId = draft.communityId; }
+                const extra = cost - prevPaid;
+                if (extra > 0) {
+                    if (ctx.balance >= extra) {
+                        ctx.charge = extra;
+                        mine.paid = 'Credit';
+                        mine.creditPaidCents = prevPaid + extra;
+                        mine.creditCommunityId = draft.communityId;
+                    } else {
+                        creditShortBy = extra - ctx.balance;
+                    }
+                }
+            }
+            chargedCents = ctx.charge;
+        }
+    }, useCredit ? joinHooks(_creditEv, uid) : undefined);
 
     if (res.ok) {
-        if (outcome === 'in') window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
+        if (outcome === 'in' && chargedCents > 0) window.showToast(`Joined! ${dollars(chargedCents)} was taken from your community credit.`);
+        else if (outcome === 'in') window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
         else if (outcome === 'partial') window.showToast(`Roster capacity reached! Accepted player + ${acceptedCount} guest(s); remaining guest(s) placed on waitlist.`, "info");
         else window.showToast("Roster is full. You and your guest(s) were added to the waitlist!", "info");
+        if (creditShortBy > 0) window.showToast(`Not enough credit (${dollars(creditShortBy)} short), so you joined as Unpaid. Ask a community admin to add credit, or pay at the game.`, "info");
     }
     window.renderEventDetailModalContent();
 };
 
 window.cancelGameEvent = async function(eventId) {
-    if (!confirm("Are you sure you want to cancel and delete this game?")) return;
+    if (!confirm("Are you sure you want to cancel and delete this game? Anyone who paid with community credit gets it back.")) return;
     try {
+        const _evForRefund = (window.eventsList || []).find(e => String(e.id) === String(eventId));
+        if (_evForRefund && _evForRefund.communityId) await refundEveryoneForGame(_evForRefund);
         const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
         const eventDocRef = doc(db, 'artifacts', appId, 'eventsList', realDocId);
         
@@ -1044,25 +1119,46 @@ window.handleRSVPAction = async function(eventId, action) {
     const uid = String(window.currentUser.uid);
     const profile = window.userProfile || {};
     const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
-    const res = await mutateEvent(eventId, (draft) => {
+    const _ev = (window.eventsList || []).find(e => e.id === eventId);
+    const _mine = _ev && (_ev.attendees || []).find(a => String(a.uid) === uid);
+    const hadCredit = !!(_ev && _ev.communityId && _mine && _mine.creditPaidCents > 0);
+    let refunded = 0, forfeited = 0;
+    const res = await mutateEvent(eventId, (draft, ctx) => {
+        refunded = 0; forfeited = 0;
+        const paid = ctx ? ((draft.attendees || []).find(a => String(a.uid) === uid)?.creditPaidCents || 0) : 0;
+        if (ctx) ctx.refund = 0;
+        if (paid > 0) {
+            if (refundAllowed(draft)) { ctx.refund = paid; ctx.note = 'You left the game'; refunded = paid; }
+            else forfeited = paid;
+        }
         draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== uid);
         draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== uid);
         draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== uid);
         draft.declinedList.push({ uid, name: fullName });
         pruneTeamsForUid(draft, uid);
-    });
+    }, hadCredit ? refundHooks(_ev, uid) : undefined);
     if (res.ok) {
-        window.showToast("You have left the game.");
+        if (refunded > 0) window.showToast(`You left the game. ${dollars(refunded)} was returned to your credit.`);
+        else if (forfeited > 0) window.showToast(`You left the game. Your ${dollars(forfeited)} credit was not refunded (${(window.creditTools && window.creditTools.policyText(_ev)) || 'game refund rule'}).`, "info");
+        else window.showToast("You have left the game.");
         window.renderEventDetailModalContent();
     }
 };
 
 window.removePlayerFromEvent = async function(eventId, uid, tab) {
     if (!confirm("Are you sure you want to remove this player from the roster?")) return;
-    const res = await mutateEvent(eventId, (draft) => {
+    const _ev = (window.eventsList || []).find(e => e.id === eventId);
+    const _p = _ev && (_ev.attendees || []).find(a => String(a.uid) === String(uid));
+    const hadCredit = !!(_ev && _ev.communityId && _p && _p.creditPaidCents > 0);
+    let refunded = 0;
+    const res = await mutateEvent(eventId, (draft, ctx) => {
+        refunded = 0;
+        const paid = ctx ? ((draft.attendees || []).find(a => String(a.uid) === String(uid))?.creditPaidCents || 0) : 0;
+        if (ctx) ctx.refund = 0;
+        if (paid > 0) { ctx.refund = paid; ctx.note = 'Removed from the game by the organizer'; refunded = paid; }
         draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== String(uid));
         draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(uid));
         pruneTeamsForUid(draft, uid);
-    });
-    if (res.ok) window.showToast("Player removed from roster.");
+    }, hadCredit ? refundHooks(_ev, uid) : undefined);
+    if (res.ok) window.showToast(refunded > 0 ? `Player removed. ${dollars(refunded)} was returned to their credit.` : "Player removed from roster.");
 };

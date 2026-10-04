@@ -42,7 +42,10 @@ const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // mutator(draft) edits `draft` in place. Return false to cancel without writing.
 // Resolves { ok, event, aborted }.
-export async function mutateEvent(eventId, mutator) {
+// `hooks` (optional) lets one change also touch other documents in the SAME transaction
+// (used for community credit): hooks.read(tx) runs before any write and returns a context,
+// the mutator receives it as 2nd argument, hooks.write(tx, draft, ctx) runs only if the game is saved.
+export async function mutateEvent(eventId, mutator, hooks) {
     const ref = eventDocRef(eventId);
     try {
         const result = await runTransaction(db, async (tx) => {
@@ -50,7 +53,8 @@ export async function mutateEvent(eventId, mutator) {
             if (!snap.exists()) throw new Error('GAME_NOT_FOUND');
             const before = snap.data();
             const draft = JSON.parse(JSON.stringify(before));
-            const verdict = await mutator(draft);
+            const ctx = hooks && hooks.read ? await hooks.read(tx, before) : null;
+            const verdict = await mutator(draft, ctx);
             if (verdict === false) return { aborted: true, event: before };
 
             const clean = stripBigPhotos(draft);
@@ -63,6 +67,7 @@ export async function mutateEvent(eventId, mutator) {
                 if (JSON.stringify(clean).length > 900000) throw new Error('GAME_TOO_LARGE');
                 tx.update(ref, changed);
             }
+            if (hooks && hooks.write) await hooks.write(tx, draft, ctx);
             return { aborted: false, event: { ...before, ...clean } };
         });
 
