@@ -535,8 +535,9 @@
                 <div id="tab-chat" class="hidden space-y-5">
                     <div class="bg-[#040E13]/90 border border-emerald-500/30 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[75vh] backdrop-blur-md">
                         <div class="border-r border-white/10 flex flex-col bg-black/30 h-full overflow-hidden">
-                            <div class="p-4 border-b border-white/10 shrink-0">
-                                <h2 class="text-sm font-black text-white uppercase tracking-wider">Chats</h2>
+                            <div class="flex border-b border-white/10 shrink-0">
+                                <button id="chats-tab-btn-chats" onclick="setChatsTab('chats')" class="flex-1 py-3 text-xs font-black uppercase tracking-wider text-[#00F296] border-b-2 border-[#00F296]">Chats</button>
+                                <button id="chats-tab-btn-community" onclick="setChatsTab('community')" class="flex-1 py-3 text-xs font-black uppercase tracking-wider text-white/50 border-b-2 border-transparent">Community Chats</button>
                             </div>
                             <div class="p-3 shrink-0">
                                 <input type="text" id="chats-search-input" oninput="renderChatsList()" class="w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="Search chats...">

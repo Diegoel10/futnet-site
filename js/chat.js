@@ -9,6 +9,17 @@ window.chatsThreads = [];
 let chatUnsubscribe = null;
 let typingUnsubscribe = null;
 let typingTimeout = null;
+window.chatsTab = 'chats';
+
+window.setChatsTab = function(tab) {
+    window.chatsTab = tab === 'community' ? 'community' : 'chats';
+    const on = 'flex-1 py-3 text-xs font-black uppercase tracking-wider text-[#00F296] border-b-2 border-[#00F296]';
+    const off = 'flex-1 py-3 text-xs font-black uppercase tracking-wider text-white/50 border-b-2 border-transparent';
+    const a = document.getElementById('chats-tab-btn-chats'), b = document.getElementById('chats-tab-btn-community');
+    if (a) a.className = window.chatsTab === 'chats' ? on : off;
+    if (b) b.className = window.chatsTab === 'community' ? on : off;
+    window.renderChatsList();
+};
 
 // Real-time listener for chats from the user's directory document
 window.initChatListener = function() {
@@ -53,9 +64,12 @@ window.renderChatsList = async function() {
         }
     }
 
-    let activeThreads = [...(window.chatsThreads || [])];
+    const inCommunityTab = window.chatsTab === 'community';
+    let activeThreads = inCommunityTab ? [] : [...(window.chatsThreads || [])];
 
-    if (query !== '') {
+    if (inCommunityTab) {
+        // only community group chats are listed here
+    } else if (query !== '') {
         activeThreads = activeThreads.filter(th => th.name.toLowerCase().includes(query));
 
         const existingThreadIds = new Set(activeThreads.map(t => t.id));
@@ -81,10 +95,12 @@ window.renderChatsList = async function() {
 
     // Community group chats (messages live in communities/{id}/messages)
     const commThreads = (window.communityChatThreads || []).filter(t => !query || (t.name || '').toLowerCase().includes(query));
-    activeThreads = [...commThreads, ...activeThreads];
+    activeThreads = inCommunityTab ? commThreads : activeThreads;
 
     if (activeThreads.length === 0) {
-        container.innerHTML = `<div class="p-6 text-center text-xs text-slate-500 italic">No conversations found. Search above to start chatting with anyone!</div>`;
+        container.innerHTML = inCommunityTab
+            ? `<div class="p-6 text-center text-xs text-slate-500 italic">No community chats yet. Join a community to chat with its members.</div>`
+            : `<div class="p-6 text-center text-xs text-slate-500 italic">No conversations found. Search above to start chatting with anyone!</div>`;
         return;
     }
 
@@ -114,7 +130,8 @@ window.renderChatsList = async function() {
 };
 
 window.openChatThread = function(id) {
-    if (String(id).startsWith('community:')) { window.openCommunityChatThread(id); return; }
+    if (String(id).startsWith('community:')) { if (window.chatsTab !== 'community') window.setChatsTab('community'); window.openCommunityChatThread(id); return; }
+    if (window.chatsTab !== 'chats') window.setChatsTab('chats');
     if (window.stopCommunityChat) window.stopCommunityChat();
     window.activeChatThreadId = id;
     let th = (window.chatsThreads || []).find(t => t.id === id);

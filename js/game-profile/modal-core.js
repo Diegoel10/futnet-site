@@ -510,8 +510,54 @@ window.showCommunityOnlyModal = function(ev) {
         </div>`;
 };
 
+// ---- "I accept" step: game rules (when the organizer asked for it) + the refund policy (must-pay games)
+window._acceptedRules = window._acceptedRules || {};
+const needsAcceptance = (ev) => !!ev && !!ev.communityId && (creditGame(ev) || ev.requireAcceptance === true);
+
+window.showAcceptRulesModal = function(eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const showRules = ev.requireAcceptance === true;
+    const showRefund = creditGame(ev);
+    let m = document.getElementById('accept-rules-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'accept-rules-modal'; m.className = 'fixed inset-0 z-[145] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase">${showRules && showRefund ? 'Rules & refund policy' : (showRefund ? 'Refund policy' : 'Game rules')}</h3>
+                <button onclick="document.getElementById('accept-rules-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="text-sm font-black">${escapeHtml(ev.title || 'Community game')}</div>
+            ${showRules ? `<div class="bg-black/40 border border-white/10 rounded-xl p-3">
+                <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-scroll mr-1"></i> Rules</div>
+                <p class="text-xs text-white/85 whitespace-pre-line leading-relaxed">${escapeHtml(ev.rules || 'Standard fair play rules apply. Be punctual and respectful.')}</p>
+            </div>` : ''}
+            ${showRefund ? `<div class="bg-black/40 border border-white/10 rounded-xl p-3">
+                <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-rotate-left mr-1"></i> Refund policy</div>
+                <p class="text-xs text-white/85 leading-relaxed">${escapeHtml(policyText(ev))}</p>
+            </div>` : ''}
+            <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
+                <input id="accept-rules-check" type="checkbox" class="w-5 h-5 accent-[#00F296] shrink-0">
+                <span class="text-xs font-bold text-white">I accept</span>
+            </label>
+            <button onclick="acceptRulesAndContinue('${escapeHtml(String(eventId))}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">Continue</button>
+        </div>`;
+};
+
+window.acceptRulesAndContinue = function(eventId) {
+    if (!document.getElementById('accept-rules-check')?.checked) { window.showToast('Please tick "I accept" to continue.', 'error'); return; }
+    window._acceptedRules[eventId] = Date.now();
+    document.getElementById('accept-rules-modal')?.remove();
+    window.openJoinGameModal(eventId);
+};
+
 window.openJoinGameModal = async function(eventId) {
     const _ev = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (_ev && needsAcceptance(_ev) && window.currentUser && !window._acceptedRules[eventId]) {
+        const uid0 = String(window.currentUser.uid);
+        const isOrg0 = String(_ev.organizerId) === uid0;
+        const mine0 = (_ev.attendees || []).find(a => String(a.uid) === uid0);
+        if (!isOrg0 && !(mine0 && mine0.acceptedRules)) { window.showAcceptRulesModal(eventId); return; }
+    }
     if (_ev && _ev.communityId && window.currentUser) {
         const isOrganizer = String(_ev.organizerId) === String(window.currentUser.uid);
         const isMember = isOrganizer || (window.isCommunityMember ? await window.isCommunityMember(_ev.communityId) : true);
@@ -564,6 +610,7 @@ window.sendJoinRequest = async function(eventId) {
         if (draft.joinRequests.some(r => String(r.uid) === uid)) return false;
         if ((draft.attendees || []).some(a => String(a.uid) === uid)) return false;
         const r = { uid, name, position: String(p.position || 'Player'), requestedAt: Date.now() };
+        if (window._acceptedRules[eventId]) { r.acceptedRules = true; r.acceptedAt = window._acceptedRules[eventId]; }
         const av = safeAvatar(p.avatar || window.currentUser.photoURL || ''); if (av) r.avatar = av;
         draft.joinRequests.push(r);
     });
@@ -739,6 +786,8 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
             role: keepRole, status: 'confirmed', paid: 'Unpaid', guests: []
         };
         if (storedAvatar) me.avatar = storedAvatar;
+        if (window._acceptedRules[eventId]) { me.acceptedRules = true; me.acceptedAt = window._acceptedRules[eventId]; }
+        else if (previous && previous.acceptedRules) { me.acceptedRules = true; me.acceptedAt = previous.acceptedAt || Date.now(); }
 
         const incoming = 1 + guestsArray.length;
         const available = maxCapacity - confirmedHeads;

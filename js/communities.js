@@ -12,7 +12,7 @@ import {
     doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit,
     onSnapshot, serverTimestamp, increment, arrayUnion, deleteField, runTransaction, where
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { escapeHtml as esc, jsArg } from './game-profile/event-store.js';
+import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-store.js';
 import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readPayOptions } from './credits.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { computePlayerStats } from './leaderboard.js';
@@ -241,6 +241,20 @@ function modalShell(id, title, subtitle, bodyHtml) {
     return m;
 }
 window.closeCommunityModal = (id) => document.getElementById(id)?.remove();
+
+// Whole-screen page (like the New post screen) with a back/close button on top.
+function fullScreenShell(id, title, subtitle, bodyHtml) {
+    let m = document.getElementById(id);
+    if (!m) { m = document.createElement('div'); m.id = id; document.body.appendChild(m); }
+    m.className = 'fixed inset-0 z-[140] bg-[#040E13] flex flex-col text-white';
+    m.innerHTML = `
+        <div class="flex items-center gap-3 px-4 py-3 border-b border-white/10 shrink-0">
+            <button onclick="closeCommunityModal('${id}')" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            <div class="min-w-0"><div class="text-base font-black truncate">${title}</div><div class="text-[11px] text-white/60 truncate">${subtitle || ''}</div></div>
+        </div>
+        <div class="flex-1 overflow-y-auto"><div class="max-w-2xl mx-auto w-full p-4 space-y-4">${bodyHtml}</div></div>`;
+    return m;
+}
 
 const lbl = (t) => `<label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">${t}</label>`;
 const toggleRow = (id, title, sub, checked) => `
@@ -734,11 +748,11 @@ function infoTab(c, isAdmin) {
 window.showCommunityMembers = (id) => {
     const c = window.communitiesCache[id]; if (!c) return;
     const people = S.members.filter(m => !isSuspended(m)).sort((a, b) => (isAdminRole(b, c) ? 1 : 0) - (isAdminRole(a, c) ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
-    modalShell('community-members-modal', `Members (${people.length})`, esc(c.name), `
+    fullScreenShell('community-members-modal', `Members (${people.length})`, esc(c.name), `
         <div class="space-y-2">${people.map(m => `
-            <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-2.5">
-                ${avatarImg(m, 'w-9 h-9 rounded-full object-cover border border-emerald-500/40')}
-                <span class="flex-1 text-xs font-bold text-white truncate">${esc(m.name || 'Player')}</span>
+            <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3">
+                ${avatarImg(m, 'w-11 h-11 rounded-full object-cover border border-emerald-500/40')}
+                <span class="flex-1 text-sm font-bold text-white truncate">${esc(m.name || 'Player')}</span>
                 ${isAdminRole(m, c) ? '<span class="text-[9px] font-black uppercase tracking-wider text-slate-950 bg-[#00F296] rounded-full px-2 py-0.5">Admin</span>' : ''}
             </div>`).join('') || '<p class="text-xs text-white/50 italic">No members yet.</p>'}</div>`);
 };
@@ -787,38 +801,62 @@ function gamesTab(c, isMember) {
     </div>`;
 }
 
-window.showCommunityGameCreation = function(communityId) {
+window.showCommunityGameCreation = function(communityId, opts = {}) {
     const c = window.communitiesCache[communityId];
     if (!c) return;
+    const mode = opts.mode === 'edit' || opts.mode === 'copy' ? opts.mode : 'create';
+    const src = mode === 'create' ? null : (window.eventsList || []).find(e => e.id === opts.eventId);
+    if (mode !== 'create' && !src) return;
+    window._cgMode = { mode, eventId: opts.eventId || null };
     const today = new Date().toISOString().slice(0, 10);
-    const sel = (id, opts, cur, extra = '') => `<select id="${id}" ${extra} class="${INPUT}">${opts.map(o => `<option ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
-    modalShell('community-game-modal', `Create Game in ${esc(c.name)}`, 'Community game', `
-        <div>${lbl('Game / event title (optional)')}<input id="cg-title" class="${INPUT}" placeholder="Soccer pick-up (default)"></div>
-        ${toggleRow('cg-open', 'Open to non-members', 'Non-members can ask to join. The organizer or an admin approves them.', true)}
+    const to24 = (t) => {
+        t = String(t || '').trim(); if (!t) return '19:00';
+        const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i); if (!m) return '19:00';
+        let h = parseInt(m[1], 10); const ap = (m[3] || '').toUpperCase();
+        if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+        return String(h).padStart(2, '0') + ':' + m[2];
+    };
+    const loc = String(src?.location || '');
+    const lm = loc.match(/^(.*?)\s*\(([^,()]*),\s*([^()]*)\)\s*$/);
+    const park0 = src ? (lm ? lm[1] : loc) : '';
+    const city0 = src ? (lm ? lm[2] : (c.city || '')) : (c.city || '');
+    const state0 = src ? (lm ? lm[3] : (c.state || 'FL')) : (c.state || 'FL');
+    const feeNow = src ? (String(src.fee || '').trim() && String(src.fee) !== '0' ? String(src.fee) : 'Free') : 'Free';
+    const feeOpts = ['Free', '$5', '$6', '$7', '$8', '$10', '$12', '$15']; if (!feeOpts.includes(feeNow)) feeOpts.push(feeNow);
+    const plusNow = src ? (src.allowPlusOnes ? 'Yes' : 'No') : 'No';
+    const sel = (id, opts2, cur, extra = '') => `<select id="${id}" ${extra} class="${INPUT}">${opts2.map(o => `<option ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    const heading = mode === 'edit' ? 'Edit Game' : mode === 'copy' ? 'Copy Game' : `Create Game in ${esc(c.name)}`;
+    const btnText = mode === 'edit' ? 'Save Changes' : mode === 'copy' ? 'Publish Copy' : 'Create Game';
+    const titleVal = src ? (src.title || '') : '';
+    modalShell('community-game-modal', heading, `${esc(c.name)} · Community game`, `
+        <div>${lbl('Game / event title (optional)')}<input id="cg-title" class="${INPUT}" placeholder="Soccer pick-up (default)" value="${esc(titleVal)}"></div>
+        ${toggleRow('cg-open', 'Open to non-members', 'Non-members can ask to join. The organizer or an admin approves them.', src ? src.openToNonMembers === true : true)}
         <div class="flex gap-3">
-            <div class="flex-1">${lbl('Date')}<input id="cg-date" type="date" min="${today}" value="${today}" class="${INPUT}"></div>
-            <div class="flex-1">${lbl('Time')}<input id="cg-time" type="time" value="19:00" class="${INPUT}"></div>
+            <div class="flex-1">${lbl('Date')}<input id="cg-date" type="date" min="${today}" value="${esc(mode === 'copy' || !src?.date ? today : src.date)}" class="${INPUT}"></div>
+            <div class="flex-1">${lbl('Time')}<input id="cg-time" type="time" value="${to24(src?.time)}" class="${INPUT}"></div>
         </div>
-        <div class="relative">${lbl('Park & location *')}<input id="cg-park" class="${INPUT}" placeholder="Start typing a park name (required)"></div>
+        <div class="relative">${lbl('Park & location *')}<input id="cg-park" class="${INPUT}" placeholder="Start typing a park name (required)" value="${esc(park0)}"></div>
         <div class="flex gap-3">
-            <div class="flex-1">${lbl('City *')}<input id="cg-city" class="${INPUT}" value="${esc(c.city || '')}"></div>
-            <div class="w-20">${lbl('State')}<input id="cg-state" maxlength="3" class="${INPUT}" value="${esc(c.state || 'FL')}"></div>
+            <div class="flex-1">${lbl('City *')}<input id="cg-city" class="${INPUT}" value="${esc(city0)}"></div>
+            <div class="w-20">${lbl('State')}<input id="cg-state" maxlength="3" class="${INPUT}" value="${esc(state0)}"></div>
         </div>
         <div class="flex gap-3">
-            <div class="flex-1">${lbl('Teams')}${sel('cg-teams', ['2', '3', '4'], '3')}</div>
-            <div class="flex-1">${lbl('Format')}${sel('cg-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'], '7v7')}</div>
-            <div class="flex-1">${lbl('Fee')}${sel('cg-fee', ['Free', '$5', '$6', '$7', '$8', '$10', '$12', '$15'], 'Free', 'onchange="refreshCgOptions()"')}</div>
+            <div class="flex-1">${lbl('Teams')}${sel('cg-teams', ['2', '3', '4'], String(src?.teamsCount || 3))}</div>
+            <div class="flex-1">${lbl('Format')}${sel('cg-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'], src?.format || '7v7')}</div>
+            <div class="flex-1">${lbl('Fee')}${sel('cg-fee', feeOpts, feeNow, 'onchange="refreshCgOptions()"')}</div>
         </div>
-        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', { payWithCredit: true, refundPolicy: 'hours:1' }) : ''}</div>
-        <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}"></textarea></div>
-        <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}"></textarea></div>
+        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', { payWithCredit: src ? src.payWithCredit === true : true, refundPolicy: src?.refundPolicy || 'hours:1' }) : ''}</div>
+        <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}">${esc(src?.description || '')}</textarea></div>
+        <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}">${esc(src?.rules || '')}</textarea></div>
+        ${toggleRow('cg-accept', 'Users must accept rules to be confirmed', 'Players see the rules and the refund policy and tap "I accept" before they join.', src ? src.requireAcceptance === true : true)}
         <div class="flex gap-3 items-end">
-            <div class="flex-1">${lbl('Allow plus ones?')}${sel('cg-plus', ['No', 'Yes'], 'No', 'onchange="refreshCgOptions()"')}</div>
-            <div class="flex-1">${lbl('Max plus ones')}${sel('cg-plus-limit', ['1', '2', '3', '4', '5', '6'], '1')}</div>
+            <div class="flex-1">${lbl('Allow plus ones?')}${sel('cg-plus', ['No', 'Yes'], plusNow, 'onchange="refreshCgOptions()"')}</div>
+            <div class="flex-1">${lbl('Max plus ones')}${sel('cg-plus-limit', ['1', '2', '3', '4', '5', '6'], String(src?.plusOneLimit || 1))}</div>
         </div>
-        <div id="cg-p1-wrap" class="hidden">${creditOn(c) ? plusExtraHtml('cg', { plusOneExtra: 1 }) : ''}</div>
-        <button id="cg-submit" onclick="submitCommunityGame('${jsArg(communityId)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Create Game</button>`);
+        <div id="cg-p1-wrap" class="hidden">${creditOn(c) ? plusExtraHtml('cg', { plusOneExtra: src && src.plusOneExtra !== undefined ? src.plusOneExtra : 1 }) : ''}</div>
+        <button id="cg-submit" onclick="submitCommunityGame('${jsArg(communityId)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">${btnText}</button>`);
     attachParkPicker({ input: 'cg-park', city: 'cg-city', state: 'cg-state' });
+    window.refreshCgOptions();
 };
 
 // Shows the payment options only when the game has a fee (and the +1 extra only when plus ones are allowed).
@@ -832,6 +870,7 @@ window.refreshCgOptions = () => {
 window.submitCommunityGame = async function(communityId) {
     if (!me() || S.busy) return;
     const c = window.communitiesCache[communityId];
+    const { mode, eventId } = window._cgMode || { mode: 'create' };
     const v = (id) => document.getElementById(id)?.value?.trim() || '';
     const park = v('cg-park'), city = v('cg-city'), state = v('cg-state') || 'FL';
     if (!park || !city) { toast('Please enter park name and city', 'error'); return; }
@@ -845,45 +884,57 @@ window.submitCommunityGame = async function(communityId) {
     const allowPlusOnes = v('cg-plus') === 'Yes';
     const fee = v('cg-fee');
     const openToNonMembers = document.getElementById('cg-open').checked;
-    const id = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-    const name = myName(), avatar = myAvatar() || DEFAULT_AVATAR;
-    const ev = {
-        id, title: v('cg-title') || 'Soccer pick-up (default)',
-        communityId, communityName: c.name, openToNonMembers,
-        visibility: openToNonMembers ? 'Public' : 'Private',
+    const requireAcceptance = document.getElementById('cg-accept').checked;
+    const credit = (() => {
+        if (!creditOn(c) || fee === 'Free') return { payWithCredit: false, refundPolicy: 'always', plusOneExtra: 0 };
+        const o = readPayOptions('cg');
+        return { payWithCredit: o.payWithCredit, refundPolicy: o.refundPolicy, plusOneExtra: allowPlusOnes ? o.plusOneExtra : 0 };
+    })();
+    const fields = {
+        title: v('cg-title') || 'Soccer pick-up (default)',
+        openToNonMembers, visibility: openToNonMembers ? 'Public' : 'Private', requireAcceptance,
         date, time, location: `${park} (${city}, ${state})`,
         description: v('cg-desc'), rules: v('cg-rules'),
         teamsCount: parseInt(v('cg-teams'), 10) || 3, format: v('cg-format'),
         fee, price: parseFloat(fee.replace('$', '')) || 0,
-        ...(() => {
-            if (!creditOn(c) || fee === 'Free') return { payWithCredit: false, refundPolicy: 'always', plusOneExtra: 0 };
-            const o = readPayOptions('cg');
-            return { payWithCredit: o.payWithCredit, refundPolicy: o.refundPolicy, plusOneExtra: allowPlusOnes ? o.plusOneExtra : 0 };
-        })(),
+        ...credit,
+        allowPlusOnes, plusOneLimit: allowPlusOnes ? (parseInt(v('cg-plus-limit'), 10) || 1) : 0
+    };
+    const btn = document.getElementById('cg-submit');
+
+    if (mode === 'edit') {
+        S.busy = true; if (btn) btn.disabled = true;
+        try {
+            const res = await mutateEvent(eventId, (draft) => { Object.assign(draft, fields); });
+            if (res.ok) {
+                saveParkIfNew(park, city, state);
+                window.closeCommunityModal('community-game-modal');
+                toast('Game updated successfully!');
+            } else if (btn) btn.disabled = false;
+        } catch (e) { console.error(e); toast('Failed to update game', 'error'); if (btn) btn.disabled = false; }
+        finally { S.busy = false; }
+        return;
+    }
+
+    const id = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const name = myName(), avatar = myAvatar() || DEFAULT_AVATAR;
+    const ev = {
+        id, communityId, communityName: c.name, ...fields,
         joinRequests: [],
-        allowPlusOnes, plusOneLimit: allowPlusOnes ? (parseInt(v('cg-plus-limit'), 10) || 1) : 0,
         organizerId: me().uid, organizer: name, organizerAvatar: avatar, hostName: name, hostAvatar: avatar,
         attendees: [{ uid: me().uid, name, avatar, role: 'Organizer', status: 'confirmed', paid: 'Free', guests: [] }],
         waitingList: [], declinedList: [], comments: [], matches: [], isSessionEnded: false,
         createdAt: new Date().toISOString()
     };
-    S.busy = true;
-    const btn = document.getElementById('cg-submit'); if (btn) btn.disabled = true;
+    S.busy = true; if (btn) btn.disabled = true;
     try {
         await setDoc(doc(db, 'artifacts', appId, 'eventsList', id), ev);
         saveParkIfNew(park, city, state);
         window.closeCommunityModal('community-game-modal');
-        toast('⚽ Community game published!');
+        toast(mode === 'copy' ? 'Game copied and published!' : '⚽ Community game published!');
         renderCommunityPage();
-    } catch (e) { console.error(e); toast('Failed to save game', 'error'); }
+    } catch (e) { console.error(e); toast('Failed to save game', 'error'); if (btn) btn.disabled = false; }
     finally { S.busy = false; }
-};
-
-// Gate used by the join flow: members-only community games.
-window.checkCommunityGameAccess = async function(ev) {
-    if (!ev || !ev.communityId || ev.openToNonMembers === true) return true;
-    if (ev.organizerId && me() && ev.organizerId === me().uid) return true;
-    return window.isCommunityMember(ev.communityId);
 };
 
 // ------------------------------------------------------------------ FEED TAB
@@ -899,19 +950,11 @@ function feedTab(c, isMember, isAdmin) {
     const canPost = isMember && !S.suspended && (!c.adminOnlyFeed || isAdmin);
     return `<div class="space-y-4">
         ${canPost ? `
-        <div class="bg-black/30 border border-white/10 rounded-xl p-3 space-y-2">
-            <textarea id="post-text" rows="2" class="${INPUT}" placeholder="Share an update with the community..."></textarea>
-            <div id="post-poll-box" class="hidden space-y-2">
-                <input id="poll-q" class="${INPUT}" placeholder="Ask a question...">
-                ${[1, 2, 3, 4].map(i => `<input id="poll-o${i}" class="${INPUT}" placeholder="Option ${i}${i > 2 ? ' (optional)' : ''}">`).join('')}
-            </div>
-            <div class="flex items-center gap-2">
-                <label class="${BTN_DARK} cursor-pointer"><i class="fa-solid fa-image mr-1"></i> Photo<input type="file" accept="image/*" class="hidden" onchange="pickPostPhoto(this)"></label>
-                <button onclick="document.getElementById('post-poll-box').classList.toggle('hidden')" class="${BTN_DARK}"><i class="fa-solid fa-chart-simple mr-1"></i> Poll</button>
-                <span id="post-photo-name" class="text-[10px] text-white/50 truncate flex-1"></span>
-                <button onclick="publishCommunityPost()" class="${BTN_PRIMARY}">Post</button>
-            </div>
-        </div>` : (isMember ? `<p class="text-[11px] text-white/50 text-center">${S.suspended ? 'You are suspended from posting.' : 'Only admins can post in this community.'}</p>` : '')}
+        <button onclick="openPostComposer()" class="w-full flex items-center gap-3 bg-black/30 border border-white/10 rounded-xl p-3 text-left hover:bg-black/50 transition">
+            ${avatarImg({ uid: me().uid, name: myName(), avatar: myAvatar() }, 'w-9 h-9 rounded-full object-cover shrink-0')}
+            <span class="flex-1 text-xs text-white/50 bg-black/40 border border-white/10 rounded-full px-4 py-2.5">Share something with ${esc(c.name || 'the community')}...</span>
+            <i class="fa-regular fa-image text-[#00F296] text-lg"></i>
+        </button>` : (isMember ? `<p class="text-[11px] text-white/50 text-center">${S.suspended ? 'You are suspended from posting.' : 'Only admins can post in this community.'}</p>` : '')}
         ${S.feed.length === 0 ? '<p class="text-xs text-white/50 italic text-center py-4">No posts yet.</p>' : S.feed.map(p => postCard(p, c, isAdmin)).join('')}
     </div>`;
 }
@@ -950,10 +993,73 @@ function postCard(p, c, isAdmin) {
 }
 
 window._postPhoto = null;
+
+// Full-screen "New post" composer (Facebook style): text, Gallery and Poll only.
+window.openPostComposer = function() {
+    const id = S.activeId; const c = window.communitiesCache[id]; if (!id || !c || !me()) return;
+    window.closePostComposer();
+    window._postPhoto = null;
+    const o = document.createElement('div');
+    o.id = 'post-composer';
+    o.className = 'fixed inset-0 z-[300] bg-[#040E13] flex flex-col';
+    o.innerHTML = `
+        <div class="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+            <button onclick="closePostComposer()" class="text-white text-xl w-8 h-8 flex items-center justify-center" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            <h2 class="text-sm font-black text-white">New post</h2>
+            <span class="w-8"></span>
+        </div>
+        <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4 max-w-2xl w-full mx-auto">
+            <div class="flex items-center gap-3">
+                ${avatarImg({ uid: me().uid, name: myName(), avatar: myAvatar() }, 'w-12 h-12 rounded-full object-cover')}
+                <div class="text-base font-black text-white">${esc(myName())}</div>
+            </div>
+            <textarea id="post-text" rows="6" class="w-full bg-transparent text-white text-lg placeholder-white/40 focus:outline-none resize-none" placeholder="What's on your mind?"></textarea>
+            <div id="post-photo-preview" class="hidden relative">
+                <img id="post-photo-img" class="w-full rounded-xl max-h-80 object-cover">
+                <button onclick="removePostPhoto()" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/70 text-white" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="post-poll-box" class="hidden space-y-2 bg-black/30 border border-white/10 rounded-xl p-3">
+                <div class="flex items-center justify-between"><span class="text-xs font-black text-white">Poll</span><button onclick="togglePostPoll()" class="text-white/50 text-xs">Remove</button></div>
+                <input id="poll-q" class="${INPUT}" placeholder="Ask a question...">
+                ${[1, 2, 3, 4].map(i => `<input id="poll-o${i}" class="${INPUT}" placeholder="Option ${i}${i > 2 ? ' (optional)' : ''}">`).join('')}
+            </div>
+        </div>
+        <div class="shrink-0 border-t border-white/10 px-4 pt-3 pb-4 space-y-3">
+            <div class="flex gap-3 max-w-2xl mx-auto w-full">
+                <label class="flex-1 cursor-pointer bg-black/40 border border-white/15 rounded-2xl py-3 flex flex-col items-center gap-1 text-white text-xs font-bold hover:bg-black/60">
+                    <i class="fa-regular fa-image text-xl"></i>Gallery
+                    <input type="file" accept="image/*" class="hidden" onchange="pickPostPhoto(this)">
+                </label>
+                <button onclick="togglePostPoll()" class="flex-1 bg-black/40 border border-white/15 rounded-2xl py-3 flex flex-col items-center gap-1 text-white text-xs font-bold hover:bg-black/60">
+                    <i class="fa-solid fa-chart-simple text-xl"></i>Poll
+                </button>
+            </div>
+            <div class="flex items-center justify-between max-w-2xl mx-auto w-full">
+                <span class="inline-flex items-center gap-2 bg-black/40 border border-white/15 rounded-full px-4 py-2 text-xs font-bold text-white"><i class="fa-solid fa-user-group"></i>${esc(c.name || 'Community')}</span>
+                <button id="post-submit-btn" onclick="publishCommunityPost()" class="${BTN_PRIMARY} px-8 py-3">Post</button>
+            </div>
+        </div>`;
+    document.body.appendChild(o);
+    setTimeout(() => document.getElementById('post-text')?.focus(), 50);
+};
+
+window.closePostComposer = function() { document.getElementById('post-composer')?.remove(); window._postPhoto = null; };
+
+window.togglePostPoll = function() { document.getElementById('post-poll-box')?.classList.toggle('hidden'); };
+
+window.removePostPhoto = function() {
+    window._postPhoto = null;
+    document.getElementById('post-photo-preview')?.classList.add('hidden');
+};
+
 window.pickPostPhoto = async (input) => {
     const f = input.files && input.files[0]; if (!f) return;
-    try { window._postPhoto = await resizeImageToJpeg(f, 900, 0.65); document.getElementById('post-photo-name').textContent = f.name; }
-    catch (e) { toast('Could not read that image', 'error'); }
+    try {
+        window._postPhoto = await resizeImageToJpeg(f, 900, 0.65);
+        const img = document.getElementById('post-photo-img'); if (img) img.src = window._postPhoto;
+        document.getElementById('post-photo-preview')?.classList.remove('hidden');
+    } catch (e) { toast('Could not read that image', 'error'); }
+    input.value = '';
 };
 
 window.publishCommunityPost = async function() {
@@ -970,10 +1076,11 @@ window.publishCommunityPost = async function() {
         text, likes: 0, likedBy: [], comments: [], createdAt: serverTimestamp()
     };
     if (question) post.poll = { question, options, votes: {} };
-    else if (window._postPhoto) post.mediaUrl = window._postPhoto;
+    if (window._postPhoto) post.mediaUrl = window._postPhoto;
     S.busy = true;
-    try { await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'feed', postId), post); window._postPhoto = null; }
-    catch (e) { console.error(e); toast('Could not publish post', 'error'); }
+    const btn = document.getElementById('post-submit-btn'); if (btn) btn.disabled = true;
+    try { await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'feed', postId), post); window.closePostComposer(); }
+    catch (e) { console.error(e); toast('Could not publish post', 'error'); if (btn) btn.disabled = false; }
     finally { S.busy = false; }
 };
 
@@ -1117,6 +1224,7 @@ function rebuildChatThreads() {
 
 window.openCommunityChat = function(communityId) {
     window.switchTab('chat');
+    if (window.setChatsTab) window.setChatsTab('community');
     window.openCommunityChatThread(threadId(communityId));
 };
 

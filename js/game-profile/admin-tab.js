@@ -387,6 +387,7 @@ window.approveGameRequest = async function(eventId, uid) {
         let heads = 0; draft.attendees.forEach(a => { heads += 1 + (a.guests ? a.guests.length : 0); });
         const entry = { uid: String(uid), name: r.name || 'Player', position: r.position || 'Player', role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [] };
         if (r.avatar) entry.avatar = r.avatar;
+        if (r.acceptedRules) { entry.acceptedRules = true; entry.acceptedAt = r.acceptedAt || Date.now(); }
         if (heads + 1 <= perSide * teams) draft.attendees.push(entry);
         else draft.waitingList.push({ ...entry, status: 'waiting' });
     });
@@ -411,6 +412,11 @@ window.declineGameRequest = async function(eventId, uid) {
 window.openTwoPageGameWizard = function(eventId, mode) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
+    // Community games use the very same form as "Create Game in {Community}".
+    if (event.communityId && window.communitiesCache?.[event.communityId] && window.showCommunityGameCreation) {
+        window.showCommunityGameCreation(event.communityId, { mode, eventId });
+        return;
+    }
 
     window._wizardData = {
         mode: mode,
