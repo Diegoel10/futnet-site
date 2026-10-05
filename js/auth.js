@@ -6,6 +6,7 @@ import { auth, db, appId } from './firebase-config.js';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
+    sendPasswordResetEmail,
     signInWithRedirect,
     signInWithPopup,
     getRedirectResult,
@@ -132,6 +133,44 @@ window.handleEmailAuth = async function(event) {
     }
 };
 
+window.handleForgotPassword = async function() {
+    const email = (document.getElementById('auth-email')?.value || '').trim();
+    const box = document.getElementById('login-error-msg');
+    const show = (text, ok) => {
+        if (!box) return;
+        box.textContent = text;
+        box.classList.remove('hidden');
+        box.classList.toggle('text-red-400', !ok);
+        box.classList.toggle('bg-red-950/40', !ok);
+        box.classList.toggle('border-red-500/30', !ok);
+        box.classList.toggle('text-[#00F296]', ok);
+        box.classList.toggle('bg-emerald-950/40', ok);
+        box.classList.toggle('border-emerald-500/30', ok);
+    };
+    if (!email) { show('Type your email in the box above first, then tap Forgot password again.', false); return; }
+    try {
+        await sendPasswordResetEmail(auth, email);
+        show('If an account exists for ' + email + ', a reset link is on its way. Check your inbox and spam folder.', true);
+    } catch (err) {
+        console.error('Reset error:', err);
+        if (err && err.code === 'auth/invalid-email') show('That email does not look right. Please check it.', false);
+        else if (err && err.code === 'auth/too-many-requests') show('Too many tries. Please wait a few minutes and try again.', false);
+        else show('If an account exists for ' + email + ', a reset link is on its way. Check your inbox and spam folder.', true);
+    }
+};
+
+window.signInInstead = function() {
+    const email = (document.getElementById('reg-email')?.value || '').trim();
+    window.showLoginScreen();
+    const le = document.getElementById('auth-email');
+    if (le && email) le.value = email;
+};
+
+window.resetFromSignup = function() {
+    window.signInInstead();
+    window.handleForgotPassword();
+};
+
 window.handleUnifiedRegistration = async function(event) {
     event.preventDefault();
     const firstName = document.getElementById('reg-firstname')?.value.trim() || '';
@@ -194,7 +233,12 @@ window.handleUnifiedRegistration = async function(event) {
         }
     } catch (err) {
         console.error("Registration error:", err);
-        if (errorBox) {
+        if (err && err.code === 'auth/email-already-in-use' && errorBox) {
+            errorBox.innerHTML = 'This email already has an account.<div class="mt-2 flex items-center justify-center gap-3">' +
+                '<button type="button" onclick="resetFromSignup()" class="underline font-bold text-[#8DCDD2]">Forgot password?</button>' +
+                '<button type="button" onclick="signInInstead()" class="underline font-bold text-white">Sign in instead</button></div>';
+            errorBox.classList.remove('hidden');
+        } else if (errorBox) {
             errorBox.textContent = err.message || "Failed to create account.";
             errorBox.classList.remove('hidden');
         }
