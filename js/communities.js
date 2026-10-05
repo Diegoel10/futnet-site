@@ -73,6 +73,34 @@ const avatarImg = (who, cls) => {
 
 // The directory (everyone's profile picture) must be loaded for pictures to show; load it once if it is not there yet.
 let _dirLoading = null;
+// Real name from the player directory when the member record has none (or just says "Player").
+function normMember(m) {
+    if (m && (!m.name || m.name === 'Player') && Array.isArray(window.directoryList)) {
+        const d = window.directoryList.find(x => String(x.uid) === String(m.uid));
+        const nm = d && (d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim() || d.nickname);
+        if (nm) return { ...m, name: nm };
+    }
+    return m;
+}
+
+// Admin tidy-up: fixes the member counter and fills in names missing from member records.
+async function syncMemberRecords(id, raw) {
+    const c = window.communitiesCache[id];
+    if (!c || myRole(id) !== 'admin') return;
+    try {
+        if (raw.length && Number(c.membersCount) !== raw.length) await updateDoc(commRef(id), { membersCount: raw.length });
+    } catch (e) { /* ignore */ }
+    for (const m of raw) {
+        const fixed = normMember(m);
+        const patch = {};
+        if (!m.name && fixed.name) patch.name = fixed.name;
+        if (m.name === 'Player' && fixed.name && fixed.name !== 'Player') patch.name = fixed.name;
+        if (Object.keys(patch).length) {
+            try { await updateDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', String(m.uid)), patch); } catch (e) { /* ignore */ }
+        }
+    }
+}
+
 async function ensureDirectory() {
     if (Array.isArray(window.directoryList) && window.directoryList.length) return;
     if (!_dirLoading) {
@@ -86,6 +114,7 @@ async function ensureDirectory() {
             .finally(() => { _dirLoading = null; });
     }
     await _dirLoading;
+    S.members = S.members.map(normMember);
     if (S.activeId) renderCommunityPage();
 }
 const fmtAgo = (ms) => {
@@ -420,6 +449,8 @@ function showInviteProblem(adminName) {
         <button onclick="closeCommunityModal('invite-problem-modal')" class="${BTN_PRIMARY} w-full py-3 text-sm">OK</button>`);
 }
 
+window.answerInvite = (yes) => { if (window._inviteAnswer) { const f = window._inviteAnswer; window._inviteAnswer = null; f(!!yes); } };
+
 async function redeemInvite(id, token) {
     const uid = me().uid;
     const memRef = doc(db, 'artifacts', appId, 'communities', id, 'members', uid);
@@ -438,6 +469,19 @@ async function redeemInvite(id, token) {
         showInviteProblem(who);
         return false;
     }
+    // Ask first: nobody is added without tapping Accept.
+    const cInfo = window.communitiesCache[id] || (await getDoc(commRef(id)).then(x => x.data()).catch(() => null)) || {};
+    const accepted = await new Promise((resolve) => {
+        window._inviteAnswer = resolve;
+        modalShell('invite-accept-modal', 'You are invited', esc(cInfo.name || 'Community'), `
+            <p class="text-sm text-white/90 leading-relaxed">${esc(inv.createdByName || 'An admin')} invited you to join <b>${esc(cInfo.name || 'this community')}</b>. Do you want to accept?</p>
+            <div class="flex gap-3">
+                <button onclick="answerInvite(false)" class="${BTN_DARK} flex-1 py-3">Not now</button>
+                <button onclick="answerInvite(true)" class="${BTN_PRIMARY} flex-1 py-3">Accept</button>
+            </div>`);
+    });
+    window.closeCommunityModal('invite-accept-modal');
+    if (!accepted) return false;
     try {
         await setDoc(memRef, { uid, name: myName(), avatar: myAvatar(), role: 'member', joinedAt: serverTimestamp(), joinedVia: token });
         await updateDoc(commRef(id), { membersCount: increment(1) });
@@ -523,7 +567,7 @@ async function healMyMemberRecord(cid) {
     const best = [window.userProfile?.avatar, d?.avatar, me().photoURL].find(u => usableImg(u) && u.length <= 60000);
     const patch = {};
     if (best && mine.avatar !== best) patch.avatar = best;
-    if (!mine.name && myName()) patch.name = myName();
+    if ((!mine.name || mine.name === 'Player') && myName() && myName() !== 'Player') patch.name = myName();
     if (!Object.keys(patch).length) return;
     try { await updateDoc(doc(db, 'artifacts', appId, 'communities', cid, 'members', me().uid), patch); }
     catch (e) { /* the rules may not allow it; pictures still come from the directory */ }
@@ -557,8 +601,12 @@ window.openCommunity = async function(id, tab) {
     const base = ['artifacts', appId, 'communities', id];
     ensureDirectory();
     S.unsubs.push(onSnapshot(collection(db, ...base, 'members'), s => {
-        S.members = s.docs.map(d => d.data()); renderCommunityPage();
+        // The document id IS the user id, so a member record that lost its uid / name still shows up correctly.
+        const raw = s.docs.map(d => ({ uid: d.id, ...d.data() }));
+        S.members = raw.map(normMember);
+        renderCommunityPage();
         healMyMemberRecord(id);
+        if (!s.metadata.fromCache) syncMemberRecords(id, raw);
     }, () => {}));
     if (role === 'admin') {
         S.unsubs.push(onSnapshot(collection(db, ...base, 'requests'), s => {
@@ -856,7 +904,12 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
         <div id="cg-p1-wrap" class="hidden">${creditOn(c) ? plusExtraHtml('cg', { plusOneExtra: src && src.plusOneExtra !== undefined ? src.plusOneExtra : 1 }) : ''}</div>
         <button id="cg-submit" onclick="submitCommunityGame('${jsArg(communityId)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">${btnText}</button>`);
     attachParkPicker({ input: 'cg-park', city: 'cg-city', state: 'cg-state' });
+    // A game that was already saved as both "must pay" and "open to non-members" keeps working as it is.
+    window._cgLegacyOpen = !!(mode === 'edit' && src && src.openToNonMembers === true && src.payWithCredit === true);
     window.refreshCgOptions();
+    const mustBox = document.getElementById('cg-must');
+    if (mustBox) mustBox.addEventListener('change', () => { window._cgLegacyOpen = false; window.refreshCgOptions(); });
+    document.getElementById('cg-fee')?.addEventListener('change', () => { window._cgLegacyOpen = false; });
 };
 
 // Shows the payment options only when the game has a fee (and the +1 extra only when plus ones are allowed).
@@ -865,6 +918,23 @@ window.refreshCgOptions = () => {
     const plus = document.getElementById('cg-plus')?.value === 'Yes';
     document.getElementById('cg-pay-wrap')?.classList.toggle('hidden', !paid);
     document.getElementById('cg-p1-wrap')?.classList.toggle('hidden', !(paid && plus));
+
+    // Must-pay games are for community members only (the fee comes out of their community credit).
+    const must = paid && !!document.getElementById('cg-must')?.checked && !document.getElementById('cg-pay-wrap')?.classList.contains('hidden');
+    const open = document.getElementById('cg-open');
+    if (open) {
+        const lock = must && !window._cgLegacyOpen;
+        if (lock) open.checked = false;
+        open.disabled = lock;
+        const row = open.closest('label');
+        if (row) {
+            row.classList.toggle('opacity-50', lock);
+            const sub = row.querySelector('span span:nth-child(2)');
+            if (sub) sub.textContent = lock
+                ? 'Not available for must-pay games: only community members can join them.'
+                : 'Non-members can ask to join. The organizer or an admin approves them.';
+        }
+    }
 };
 
 window.submitCommunityGame = async function(communityId) {
@@ -1304,6 +1374,13 @@ async function handleCommunityHash() {
             const ok = await redeemInvite(id, decodeURIComponent(m[2]));
             try { history.replaceState(null, '', location.pathname + '#community=' + encodeURIComponent(id)); } catch (e) { /* ignore */ }
             if (!ok) return true;
+            // They just joined with an invite: land on Info and ask them to read it.
+            await window.openCommunity(id, 'info');
+            const cc = window.communitiesCache[id] || {};
+            modalShell('invite-welcome-modal', `Welcome to ${esc(cc.name || 'the community')}!`, '', `
+                <p class="text-sm text-white/90 leading-relaxed">Please read the rules and description before you play.</p>
+                <button onclick="closeCommunityModal('invite-welcome-modal')" class="${BTN_PRIMARY} w-full py-3 text-sm">OK, I will read them</button>`);
+            return true;
         }
         window.openCommunity(id);
         return true;

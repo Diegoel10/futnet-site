@@ -2,7 +2,7 @@
 import { db, appId } from '../firebase-config.js';
 import { doc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, pruneTeamsForUid, safeAvatar, escapeHtml } from './event-store.js';
-import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, costCents, costSummary, policyText, hydrateBalances, refundEveryoneForGame, dollars } from '../credits.js';
+import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, costCents, costSummary, policyText, hydrateBalances, refundEveryoneForGame, dollars, plusOneExtraCents, myBalanceCents } from '../credits.js';
 import { renderAdminTab } from './admin-tab.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
@@ -334,7 +334,40 @@ window.openEventDetails = function(eventId) {
     }
     window.renderEventDetailModalContent();
     healUnnamedPlayers(eventId);
+    offerCommunityJoin(event);
 };
+
+// A signed-in person who is not in the community opens a members-only community game:
+// ask if they would like to join the community. (Games open to non-members, and anyone already on the game, are left alone.)
+const _askedCommunity = new Set();
+async function offerCommunityJoin(ev) {
+    try {
+        if (!ev || !ev.communityId || !window.currentUser || ev.openToNonMembers === true) return;
+        const uid = String(window.currentUser.uid);
+        if (String(ev.organizerId) === uid) return;
+        if ((ev.attendees || []).some(a => String(a.uid) === uid)) return;
+        if ((ev.waitingList || []).some(a => String(a.uid) === uid)) return;
+        if ((ev.joinRequests || []).some(r => String(r.uid) === uid)) return;
+        const key = String(ev.communityId);
+        if (_askedCommunity.has(key)) return;
+        const isMember = window.isCommunityMember ? await window.isCommunityMember(ev.communityId) : true;
+        if (isMember || window.activeModalEventId !== ev.id) return;
+        _askedCommunity.add(key);
+        const c = (window.communitiesCache || {})[ev.communityId] || {};
+        const name = escapeHtml(ev.communityName || c.name || 'this community');
+        const needsApproval = c.requireApproval !== false;
+        let m = document.getElementById('community-offer-modal');
+        if (!m) { m = document.createElement('div'); m.id = 'community-offer-modal'; m.className = 'fixed inset-0 z-[135] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+        m.innerHTML = `
+            <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
+                <div class="w-14 h-14 mx-auto rounded-full bg-black/50 border border-emerald-500/30 flex items-center justify-center text-[#00F296] text-xl"><i class="fa-solid fa-people-group"></i></div>
+                <p class="text-sm font-black">This game is for members of ${name}.</p>
+                <p class="text-xs text-white/70">Do you want to join the community?${needsApproval ? ' An admin will review your request.' : ''}</p>
+                <button onclick="requestJoinCommunity('${escapeHtml(String(ev.communityId))}'); document.getElementById('community-offer-modal')?.remove();" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">${needsApproval ? 'Request to join' : 'Join'} community</button>
+                <button onclick="document.getElementById('community-offer-modal')?.remove()" class="w-full bg-black/60 text-white/80 font-bold py-3 rounded-xl text-xs border border-white/20">Not now</button>
+            </div>`;
+    } catch (e) { console.error(e); }
+}
 
 // Listen to browser back button to close event profile seamlessly
 window.addEventListener('popstate', (event) => {
@@ -617,14 +650,97 @@ window.sendJoinRequest = async function(eventId) {
     if (res.ok) { window.showToast('Request sent! You will be added when it is approved.'); window.openRequestToJoin(eventId); }
 };
 
+// ---- Box shown while joining: rules, refund policy, what will be deducted, and the guest/share note
+const joinIsOrganizer = (ev) => !!(window.currentUser && String(ev.organizerId) === String(window.currentUser.uid));
+
+function joinInfoHtml(ev, count) {
+    const pays = creditGame(ev) && !joinIsOrganizer(ev);
+    const rules = ev.communityId && (ev.requireAcceptance === true || (ev.rules && String(ev.rules).trim()));
+    let h = '';
+    if (rules) {
+        h += `<div class="bg-black/40 border border-white/10 rounded-xl p-3 text-left">
+            <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-scroll mr-1"></i> Rules</div>
+            <p class="text-[11px] text-white/85 whitespace-pre-line leading-relaxed max-h-24 overflow-y-auto">${escapeHtml(ev.rules || 'Standard fair play rules apply. Be punctual and respectful.')}</p>
+        </div>`;
+    }
+    if (creditGame(ev)) {
+        h += `<div class="bg-black/40 border border-white/10 rounded-xl p-3 text-left">
+            <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-rotate-left mr-1"></i> Refund policy</div>
+            <p class="text-[11px] text-white/85 leading-relaxed">${escapeHtml(policyText(ev))}</p>
+        </div>`;
+    }
+    if (pays) {
+        const cid = String(ev.communityId);
+        h += `<div class="bg-emerald-500/10 border border-emerald-400/40 rounded-xl p-3 text-left">
+            <p class="text-xs text-white/90 leading-relaxed"><i class="fa-solid fa-wallet text-[#00F296] mr-1"></i>
+                <b id="join-deduct-amount" class="text-[#00F296]">${dollars(costCents(ev, count))}</b> will be deducted from your credit balance.</p>
+            <p class="text-[10px] text-white/60 mt-1">Your balance: <b id="join-balance" data-cid="${escapeHtml(cid)}">...</b></p>
+            <p id="join-short-warning" class="hidden text-[11px] text-red-300 font-bold mt-1">You do not have enough credit. Ask a community admin to add credit first.</p>
+        </div>`;
+    }
+    return h;
+}
+
+function joinGuestNoteHtml(ev, count) {
+    if (!ev.allowPlusOnes || count < 1) return '';
+    const x = plusOneExtraCents(ev);
+    const costLine = creditGame(ev)
+        ? `There is an additional cost for guests: <b>${dollars(feeCents(ev) + x)}</b> each, taken from your credit.`
+        : 'Your guests are welcome to play too.';
+    let h = `<div class="bg-amber-500/10 border border-amber-400/40 rounded-xl p-3 text-left text-[11px] text-white/90 leading-relaxed">
+        <i class="fa-solid fa-user-plus text-amber-300 mr-1"></i> ${costLine}`;
+    if (ev.communityId) {
+        const link = `https://futnet.site/#community=${encodeURIComponent(String(ev.communityId))}`;
+        h += `<br>Share this community with them so they can join too!
+        <div class="flex items-center gap-2 mt-2">
+            <input id="join-share-link" readonly value="${escapeHtml(link)}" class="flex-1 min-w-0 bg-black border border-white/20 rounded-lg px-2 py-1.5 text-[10px] text-white/80" onclick="this.select()">
+            <button type="button" onclick="window.copyCommunityLinkFromJoin()" id="join-share-btn" class="shrink-0 bg-[#00F296] text-slate-950 font-black text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-lg"><i class="fa-solid fa-copy mr-1"></i>Copy</button>
+        </div>`;
+    }
+    return h + '</div>';
+}
+
+window.copyCommunityLinkFromJoin = async function() {
+    const input = document.getElementById('join-share-link'); if (!input) return;
+    let ok = false;
+    try { await navigator.clipboard.writeText(input.value); ok = true; } catch (e) {
+        try { input.select(); ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    }
+    const btn = document.getElementById('join-share-btn');
+    if (ok && btn) { btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Copied!'; setTimeout(() => { if (btn) btn.innerHTML = '<i class="fa-solid fa-copy mr-1"></i>Copy'; }, 1500); }
+    window.showToast(ok ? 'Link copied! Paste it in a message to your guests.' : 'Could not copy. Press and hold the link to copy it.', ok ? 'success' : 'error');
+};
+
+/** Updates the deducted amount / guest note and loads the member's balance. */
+async function refreshJoinSummary(eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const count = window._currentGuestCount || 0;
+    const amt = document.getElementById('join-deduct-amount');
+    if (amt) amt.textContent = dollars(costCents(ev, count));
+    const note = document.getElementById('join-guest-note');
+    if (note) note.innerHTML = joinGuestNoteHtml(ev, count);
+    const bal = document.getElementById('join-balance');
+    if (bal) {
+        if (window._joinBalanceCents === undefined || window._joinBalanceFor !== eventId) {
+            window._joinBalanceFor = eventId;
+            window._joinBalanceCents = await myBalanceCents(String(ev.communityId));
+        }
+        bal.textContent = dollars(window._joinBalanceCents);
+        const warn = document.getElementById('join-short-warning');
+        if (warn) warn.classList.toggle('hidden', window._joinBalanceCents >= costCents(ev, count));
+    }
+}
+
 window._openJoinGameModalCore = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
     const allowPlusOnes = event.allowPlusOnes || false;
     const maxGuests = event.plusOneLimit || 3;
+    const showInfo = creditGame(event) && !joinIsOrganizer(event);
 
-    if (!allowPlusOnes) {
+    // Nothing to show or ask: join straight away
+    if (!allowPlusOnes && !showInfo) {
         window.confirmJoinGameWithGuests(eventId, []);
         return;
     }
@@ -640,18 +756,20 @@ window._openJoinGameModalCore = function(eventId) {
     window._currentGuestCount = 0;
     window._maxGuestLimit = maxGuests;
     window._activeJoiningEventId = eventId;
+    window._joinBalanceCents = undefined;
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl text-white text-center">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center border-b border-white/10 pb-3">
-                <h3 class="text-xs font-black uppercase text-white">Joining: ${event.title}</h3>
+                <h3 class="text-xs font-black uppercase text-white text-left">Joining: ${escapeHtml(event.title || '')}</h3>
                 <button onclick="document.getElementById('join-guests-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
-            <div class="space-y-3 py-2">
+            ${joinInfoHtml(event, 0)}
+
+            ${allowPlusOnes ? `<div class="space-y-3 py-1">
                 <h4 class="text-sm font-black text-white">Bringing guests?</h4>
                 <p class="text-[11px] text-white/60">You can bring up to ${maxGuests} guest(s).</p>
-                
                 <div class="flex items-center justify-center gap-6 pt-2">
                     <button type="button" onclick="window.updateJoinGuestCount(-1)" class="w-10 h-10 bg-black/60 hover:bg-black text-white font-black rounded-xl text-base transition flex items-center justify-center border border-white/20">
                         <i class="fa-solid fa-minus"></i>
@@ -662,12 +780,14 @@ window._openJoinGameModalCore = function(eventId) {
                     </button>
                 </div>
             </div>
+            <div id="join-guest-note"></div>` : ''}
 
             <button type="button" onclick="window.proceedToGuestNamesStep()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition uppercase tracking-wider">
-                Confirm & Continue
+                ${allowPlusOnes ? 'Confirm & Continue' : 'Confirm & Join'}
             </button>
         </div>
     `;
+    refreshJoinSummary(eventId);
 };
 
 window.updateJoinGuestCount = function(change) {
@@ -681,6 +801,7 @@ window.updateJoinGuestCount = function(change) {
     window._currentGuestCount = current;
     const display = document.getElementById('join-guest-count-display');
     if (display) display.innerText = current;
+    refreshJoinSummary(window._activeJoiningEventId);
 };
 
 window.proceedToGuestNamesStep = function() {
@@ -696,11 +817,13 @@ window.proceedToGuestNamesStep = function() {
 
     if (!modal) return;
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-left">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-left max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center border-b border-white/10 pb-3">
                 <h3 class="text-xs font-black uppercase text-white">Enter Guest Names (${count})</h3>
                 <button onclick="document.getElementById('join-guests-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
+
+            ${(() => { const _e = (window.eventsList || []).find(x => x.id === eventId); return _e ? joinInfoHtml(_e, count) + joinGuestNoteHtml(_e, count) : ''; })()}
 
             <div id="guest-names-inputs-container" class="space-y-3 max-h-52 overflow-y-auto pr-1">
                 ${Array.from({ length: count }, (_, i) => `
@@ -716,6 +839,7 @@ window.proceedToGuestNamesStep = function() {
             </button>
         </div>
     `;
+    refreshJoinSummary(eventId);
 };
 
 window.submitJoinGameWithGuestNames = function(eventId, count) {
@@ -1095,21 +1219,44 @@ window.toggleShareDropdown = function() {
     if (dropdown) dropdown.classList.toggle('hidden');
 };
 
+function eventShareLink() {
+    const id = window.currentSharedEventId;
+    return id ? `https://futnet.site/#event=${encodeURIComponent(id)}` : window.location.href;
+}
+
 window.shareToWhatsApp = function(title, location) {
-    const text = encodeURIComponent(`⚽ Check out this soccer game on FutNet: "${title}" at ${location}! Join us!`);
+    const text = encodeURIComponent(`⚽ Check out this soccer game on FutNet: "${title}" at ${location}! Join us!\n${eventShareLink()}`);
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+    toggleShareDropdown();
 };
 
 window.shareToTwitter = function(title) {
     const text = encodeURIComponent(`⚽ Playing soccer on FutNet: "${title}". Come join the match!`);
-    window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank');
+    window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(eventShareLink())}`, '_blank');
+    toggleShareDropdown();
 };
 
-window.copyEventLink = function(title) {
-    navigator.clipboard.writeText(window.location.href).then(() => {
-        window.showToast(`Link for "${title}" copied to clipboard!`);
-        toggleShareDropdown();
-    });
+window.copyEventLink = async function(title) {
+    const link = eventShareLink();
+    let ok = false;
+    try { await navigator.clipboard.writeText(link); ok = true; } catch (e) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = link; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            ok = document.execCommand('copy');
+            ta.remove();
+        } catch (e2) { ok = false; }
+    }
+    if (!ok) { window.showToast('Could not copy. Long-press the address bar to copy the link.', 'error'); return; }
+    // Show it right on the button so nobody has to wonder
+    const btn = document.querySelector('#share-dropdown button[onclick^="copyEventLink"]');
+    if (btn) {
+        const old = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check text-[#00F296] text-base"></i> Link copied!';
+        setTimeout(() => { btn.innerHTML = old; toggleShareDropdown(); }, 1200);
+    } else toggleShareDropdown();
+    window.showToast('Link copied! Paste it anywhere to share this game.');
 };
 
 window.updatePlayerPaidStatus = async function(eventId, uid, paidStatus) {
