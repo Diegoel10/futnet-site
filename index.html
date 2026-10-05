@@ -20,6 +20,33 @@
     <meta name="twitter:image" content="https://futnet.site/img/og-preview.jpeg">
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Safety net: if the app has not started after a few seconds (slow connection, a script that did not load),
+         reload once automatically, then show a Reload button instead of a blank screen. Uses no Tailwind, so it works even if styles failed. -->
+    <script>
+    (function () {
+        var KEY = 'futnet_boot_reloads';
+        function reloads() { try { return parseInt(sessionStorage.getItem(KEY), 10) || 0; } catch (e) { return 9; } }
+        function bump() { try { sessionStorage.setItem(KEY, String(reloads() + 1)); } catch (e) {} }
+        function showRetry() {
+            if (document.getElementById('boot-retry') || window.__futnetBooted) return;
+            var d = document.createElement('div');
+            d.id = 'boot-retry';
+            d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483647;background:rgba(4,14,19,.96);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif';
+            d.innerHTML = '<div style="font-size:42px">&#9917;</div><div style="font-weight:800;font-size:18px">FutNet is taking longer than usual</div><div style="opacity:.7;font-size:13px;max-width:280px">This is usually a slow connection. Tap the button to try again.</div><button id="boot-retry-btn" style="background:#00F296;color:#04120d;border:0;border-radius:12px;padding:12px 26px;font-weight:800;font-size:14px">Reload</button>';
+            document.body.appendChild(d);
+            document.getElementById('boot-retry-btn').onclick = function () { location.reload(); };
+        }
+        function check(final) {
+            if (window.__futnetBooted) return;
+            var stylesMissing = typeof window.tailwind === 'undefined';
+            if (reloads() < 1) { bump(); location.reload(); return; }   // one quiet automatic retry
+            if (final || stylesMissing) showRetry();
+        }
+        // styles (Tailwind) never arrived: do not wait the full time
+        window.addEventListener('load', function () { setTimeout(function () { if (typeof window.tailwind === 'undefined') check(true); }, 2500); });
+        setTimeout(function () { check(true); }, 10000);
+    })();
+    </script>
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Google AdSense Script Integration -->
@@ -761,6 +788,9 @@
         };
 
         onAuthStateChanged(auth, async (user) => {
+            window.__futnetBooted = true;
+            try { sessionStorage.removeItem('futnet_boot_reloads'); } catch (e) {}
+            const _br = document.getElementById('boot-retry'); if (_br) _br.remove();
             window.currentUser = user;
             if (user) {
                 if (window.showAuthLoading) window.showAuthLoading('Loading profile...');
@@ -784,15 +814,13 @@
                         };
                     }
                 } catch (e) {
-                    window.userProfile = {
-                        uid: user.uid,
-                        firstName: user.displayName || "Player",
-                        lastName: "",
-                        avatar: user.photoURL || "https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg",
-                        position: "Forward",
-                        gender: "Male",
-                        dob: "1995-01-01"
-                    };
+                    // The profile could not be read (connection problem). Do NOT show an empty placeholder profile:
+                    // it would look like the person lost their info, and saving it could overwrite the real one.
+                    console.warn('Profile load failed:', e && e.message);
+                    const ls = document.getElementById('loading-status');
+                    if (ls) { ls.classList.remove('animate-pulse'); ls.innerHTML = 'We could not load your profile. Check your connection and try again.<br><button onclick="location.reload()" style="margin-top:14px;background:#00F296;color:#04120d;border:0;border-radius:12px;padding:12px 26px;font-weight:800;font-size:14px">Try again</button>'; }
+                    document.getElementById('loading-screen')?.classList.remove('hidden');
+                    return;
                 }
                 initAppDashboard();
                 window.openPendingEvent();

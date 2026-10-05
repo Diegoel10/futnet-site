@@ -224,7 +224,14 @@ window.handleSocialAuth = async function(providerName) {
     try {
         // Popup is the most reliable option: signInWithRedirect is blocked by modern browsers
         // when the site (futnet.site) and the Firebase auth domain (firebaseapp.com) are different.
-        await signInWithPopup(auth, provider);
+        const result = await signInWithPopup(auth, provider);
+        try {
+            const tr = result._tokenResponse || {};
+            let first = tr.firstName || '', last = tr.lastName || '';
+            if (!first && tr.fullName) { const p = String(tr.fullName).trim().split(' '); first = p[0] || ''; last = p.slice(1).join(' '); }
+            if (!first && result.user && result.user.displayName) { const p = result.user.displayName.trim().split(' '); first = p[0] || ''; last = p.slice(1).join(' '); }
+            window._socialName = { first, last };
+        } catch (e) { /* the name prompt will ask instead */ }
         window.showAuthLoading('Loading profile...');
         // onAuthStateChanged takes it from here (creates the profile if needed and opens the app)
     } catch (err) {
@@ -252,15 +259,63 @@ window.ensureUserProfile = function(user) {
     if (profilePromises.has(user.uid)) return profilePromises.get(user.uid);
     const promise = (async () => {
         const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
-        const docSnap = await getDoc(profileRef);
+        // A slow or dropped connection must never look like "no profile": try a few times, and if it still
+        // fails, throw so the app asks the person to retry instead of showing an empty placeholder profile.
+        let docSnap = null, lastErr = null;
+        for (let i = 0; i < 3 && !docSnap; i++) {
+            try { docSnap = await getDoc(profileRef); }
+            catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 700 * (i + 1))); }
+        }
+        if (!docSnap) throw lastErr || new Error('Could not reach the profile');
         if (docSnap.exists()) return docSnap.data();
 
-        // Email/password sign-ups save their own profile in handleUnifiedRegistration
-        if (user.providerData?.[0]?.providerId === 'password') return null;
+        // No saved profile for this login. Every account has a public "directory" card (name, photo, position);
+        // rebuild the profile from it when it exists, so older accounts show their real info.
+        try {
+            const dirSnap = await getDoc(doc(db, 'artifacts', appId, 'directory', user.uid));
+            if (dirSnap.exists()) {
+                const d = dirSnap.data();
+                const parts = String(d.name || '').trim().split(' ');
+                const rebuilt = {
+                    uid: user.uid,
+                    firstName: parts[0] || '',
+                    lastName: parts.slice(1).join(' '),
+                    nickname: d.nickname || '',
+                    email: user.email || '',
+                    position: d.position || 'Forward',
+                    avatar: d.avatar || user.photoURL || '',
+                    termsAccepted: false,
+                    rebuiltFromDirectory: true
+                };
+                await setDoc(profileRef, rebuilt, { merge: true });
+                return rebuilt;
+            }
+        } catch (e) { console.warn('Directory rebuild skipped:', e.message); }
 
-        const nameParts = (user.displayName || "Player").split(" ");
-        const firstName = nameParts[0] || "Player";
-        const lastName = nameParts.slice(1).join(" ") || "";
+        // Email/password sign-ups normally save their own profile in handleUnifiedRegistration. If that save never
+        // happened (connection dropped, Private Safari...), the account has no profile at all: start an empty one
+        // and let the "Create your profile" screen collect the info, instead of showing a made-up profile.
+        if (user.providerData?.[0]?.providerId === 'password') {
+            const empty = {
+                uid: user.uid, firstName: '', lastName: '', nickname: '', email: user.email || '',
+                gender: 'Male', dob: '1995-01-01', position: 'Forward',
+                avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+                termsAccepted: false, profileComplete: false, createdAt: new Date().toISOString()
+            };
+            await setDoc(profileRef, empty, { merge: true });
+            return empty;
+        }
+
+        // Name: the sign-in provider's name; Apple only sends it the very first time, so use what the popup gave us
+        const sn = window._socialName || {};
+        let first = (sn.first || '').trim(), last = (sn.last || '').trim();
+        if (!first) {
+            const nameParts = (user.displayName || '').trim().split(' ').filter(Boolean);
+            first = nameParts[0] || '';
+            last = nameParts.slice(1).join(' ');
+        }
+        const firstName = first || "Player";
+        const lastName = last;
         const profileData = {
             uid: user.uid,
             firstName,
@@ -272,6 +327,7 @@ window.ensureUserProfile = function(user) {
             position: "Forward",
             avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
             termsAccepted: false,
+            profileComplete: false,   // the "Create your profile" screen fills in the rest
             createdAt: new Date().toISOString()
         };
         await setDoc(profileRef, profileData);
@@ -325,6 +381,166 @@ window.handleLogout = async function() {
     }
 };
 
+// Apple (and sometimes Google) sign-in can come back without a name. Ask for it once so the player
+// does not show up as "Player" on rosters and in communities.
+window.promptForNameIfNeeded = function() {
+    const p = window.userProfile; const user = window.currentUser;
+    if (!p || !user || document.getElementById('name-prompt-modal')) return;
+    const f = String(p.firstName || '').trim();
+    const missing = !f || f.toLowerCase() === 'player' || f.toLowerCase().includes('@');
+    if (!missing || String(p.name || '').trim() && String(p.name).trim().toLowerCase() !== 'player') return;
+    const m = document.createElement('div');
+    m.id = 'name-prompt-modal';
+    m.className = 'fixed inset-0 z-[500] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md';
+    const inp = 'w-full bg-black border border-teal-500/60 rounded-xl px-3 py-3 text-white text-base focus:outline-none focus:border-[#00F296]';
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <h3 class="text-lg font-black">Welcome to FutNet! 👋</h3>
+            <p class="text-xs text-white/70">What is your name? Your teammates will see it on rosters and in communities.</p>
+            <div><label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">First name</label><input id="np-first" autocomplete="given-name" class="${inp}"></div>
+            <div><label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Last name</label><input id="np-last" autocomplete="family-name" class="${inp}"></div>
+            <button id="np-save" onclick="saveMyName()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm uppercase tracking-wider">Save</button>
+        </div>`;
+    document.body.appendChild(m);
+    setTimeout(() => document.getElementById('np-first')?.focus(), 100);
+};
+
+window.saveMyName = async function() {
+    const first = document.getElementById('np-first')?.value.trim() || '';
+    const last = document.getElementById('np-last')?.value.trim() || '';
+    if (!first) { if (window.showToast) window.showToast('Please enter your first name.', 'error'); return; }
+    const user = window.currentUser; if (!user) return;
+    const btn = document.getElementById('np-save'); if (btn) btn.disabled = true;
+    const full = `${first} ${last}`.trim();
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { firstName: first, lastName: last, name: full }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full }, { merge: true });
+        window.userProfile = { ...(window.userProfile || {}), firstName: first, lastName: last, name: full };
+        if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) d.name = full; });
+        document.getElementById('name-prompt-modal')?.remove();
+        if (window.showToast) window.showToast(`Nice to meet you, ${first}!`);
+    } catch (e) {
+        console.error(e);
+        if (btn) btn.disabled = false;
+        if (window.showToast) window.showToast('Could not save your name. Try again.', 'error');
+    }
+};
+
+
+// ---------------------------------------------------------------------------------------------
+// "Create your profile" screen for people who signed in with Apple or Google for the first time.
+// Whatever the provider shared (name, email, photo) is filled in; they add birthday, gender, position.
+// Apple: email is optional (many people hide it). The screen cannot be skipped until it is saved.
+// ---------------------------------------------------------------------------------------------
+window.promptProfileSetupIfNeeded = function() {
+    const p = window.userProfile; const user = window.currentUser;
+    if (!p || !user || p.profileComplete !== false) return false;
+    if (document.getElementById('profile-setup-modal')) return true;
+
+    const isApple = (user.providerData || []).some(x => x.providerId === 'apple.com');
+    const clean = (s) => { const t = String(s || '').trim(); return (!t || t.toLowerCase() === 'player' || t.includes('@')) ? '' : t; };
+    const sn = window._socialName || {};
+    const first = clean(p.firstName) || clean(sn.first);
+    const last = clean(p.lastName) || clean(sn.last);
+    let email = String(p.email || user.email || '').trim();
+    if (/privaterelay\.appleid\.com$/i.test(email)) email = '';   // Apple's made-up address: leave it blank
+    const photo = (p.avatar && !/person-circle\.svg$/.test(p.avatar)) ? p.avatar : '';
+    window._profileSetupAvatar = photo;
+
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const inp = 'w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-base focus:outline-none focus:border-[#00F296]';
+    const lab = 'block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1';
+    const initial = esc((first || 'F').charAt(0).toUpperCase());
+
+    const m = document.createElement('div');
+    m.id = 'profile-setup-modal';
+    m.className = 'fixed inset-0 z-[190] flex items-start sm:items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto';
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white my-auto">
+            <div class="text-center">
+                <h3 class="text-lg font-black">Create your profile</h3>
+                <p class="text-xs text-white/60 mt-1">Check your info and fill in the rest. Your teammates will see it.</p>
+            </div>
+            <div class="flex flex-col items-center gap-1.5">
+                <div class="relative cursor-pointer" onclick="document.getElementById('ps-photo-input').click()">
+                    <div id="ps-avatar-wrap" class="w-20 h-20 rounded-full overflow-hidden border-2 border-[#00F296] bg-black flex items-center justify-center text-2xl font-black text-[#00F296]">
+                        ${photo ? `<img id="ps-avatar-img" src="${esc(photo)}" class="w-full h-full object-cover">` : `<span id="ps-avatar-initial">${initial}</span>`}
+                    </div>
+                    <div class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[#00F296] text-slate-950 flex items-center justify-center text-xs"><i class="fa-solid fa-camera"></i></div>
+                </div>
+                <input type="file" id="ps-photo-input" accept="image/*" class="hidden" onchange="handleProfileSetupPhoto(event)">
+                <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider">Profile picture</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="${lab}">First name *</label><input id="ps-first" autocomplete="given-name" value="${esc(first)}" class="${inp}"></div>
+                <div><label class="${lab}">Last name</label><input id="ps-last" autocomplete="family-name" value="${esc(last)}" class="${inp}"></div>
+            </div>
+            <div><label class="${lab}">Nickname (optional)</label><input id="ps-nick" placeholder="e.g. El Capi" value="${esc(p.nickname || '')}" class="${inp}"></div>
+            <div><label class="${lab}">Email ${isApple ? '(optional)' : ''}</label><input id="ps-email" type="email" autocomplete="email" value="${esc(email)}" placeholder="${isApple ? 'Optional' : ''}" class="${inp}"></div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="${lab}">Birthday *</label><input id="ps-dob" type="date" class="${inp}" style="background-color:#000 !important;color:#fff !important;"></div>
+                <div><label class="${lab}">Gender</label>
+                    <select id="ps-gender" class="${inp}" style="background-color:#000 !important;color:#fff !important;">
+                        <option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
+                    </select></div>
+            </div>
+            <div><label class="${lab}">Favorite position</label>
+                <select id="ps-position" class="${inp}" style="background-color:#000 !important;color:#fff !important;">
+                    <option value="Forward">Forward (ST / LW / RW)</option>
+                    <option value="Midfielder">Midfielder (CM / CAM / CDM)</option>
+                    <option value="Defender">Defender (CB / LB / RB)</option>
+                    <option value="Goalkeeper">Goalkeeper (GK)</option>
+                </select></div>
+            <div id="ps-error" class="hidden text-xs text-red-400 font-bold bg-red-950/50 border border-red-500/50 p-2 rounded-xl text-center"></div>
+            <button id="ps-save" onclick="saveProfileSetup()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm uppercase tracking-wider">Save &amp; continue</button>
+        </div>`;
+    document.body.appendChild(m);
+    return true;
+};
+
+window.handleProfileSetupPhoto = function(event) {
+    const file = event.target.files && event.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        let url = e.target.result;
+        try { url = await window.shrinkImageToSquare(url); } catch (err) { console.warn('Could not shrink the picture:', err); }
+        window._profileSetupAvatar = url;
+        const wrap = document.getElementById('ps-avatar-wrap');
+        if (wrap) wrap.innerHTML = `<img id="ps-avatar-img" src="${url}" class="w-full h-full object-cover">`;
+    };
+    reader.readAsDataURL(file);
+};
+
+window.saveProfileSetup = async function() {
+    const user = window.currentUser; if (!user) return;
+    const v = (id) => (document.getElementById(id)?.value || '').trim();
+    const err = (msg) => { const b = document.getElementById('ps-error'); if (b) { b.textContent = msg; b.classList.remove('hidden'); } };
+    const firstName = v('ps-first'), lastName = v('ps-last'), nickname = v('ps-nick'), email = v('ps-email');
+    const dob = v('ps-dob'), gender = v('ps-gender') || 'Male', position = v('ps-position') || 'Forward';
+    if (!firstName) return err('Please enter your first name.');
+    if (!dob) return err('Please pick your birthday.');
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right. Fix it or leave it empty.');
+    const avatar = window._profileSetupAvatar || (window.userProfile && window.userProfile.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const btn = document.getElementById('ps-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+    const full = `${firstName} ${lastName}`.trim();
+    try {
+        const fields = { uid: user.uid, firstName, lastName, nickname, email, dob, gender, position, avatar, name: full, profileComplete: true };
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), fields, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full, nickname, avatar, position }, { merge: true });
+        window.userProfile = { ...(window.userProfile || {}), ...fields };
+        if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) { d.name = full; d.avatar = avatar; d.position = position; } });
+        ['nav-avatar-icon', 'mob-nav-avatar-icon'].forEach(id => { const el = document.getElementById(id); if (el) el.src = avatar; });
+        document.getElementById('profile-setup-modal')?.remove();
+        document.getElementById('name-prompt-modal')?.remove();
+        if (window.showToast) window.showToast(`Welcome, ${firstName}! Your profile is ready.`);
+        if (typeof window.renderProfileTab === 'function') { try { window.renderProfileTab(); } catch (e) { /* not on that screen */ } }
+    } catch (e) {
+        console.error('Profile setup save failed:', e);
+        if (btn) { btn.disabled = false; btn.textContent = 'Save & continue'; }
+        err('Could not save. Check your connection and try again.');
+    }
+};
+
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         window.currentUser = user;
@@ -332,6 +548,7 @@ onAuthStateChanged(auth, async (user) => {
             const profile = await window.ensureUserProfile(user);
             if (profile) window.userProfile = profile;
             window.shrinkMySavedAvatarIfNeeded(user);
+            setTimeout(() => { if (!window.promptProfileSetupIfNeeded()) window.promptForNameIfNeeded(); }, 1200);
         } catch (e) {
             console.warn("Profile fetch deferred or offline:", e.message);
         }

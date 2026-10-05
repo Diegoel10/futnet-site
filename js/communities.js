@@ -217,8 +217,8 @@ function communityCard(c) {
     const role = myRole(c.id);
     return `
     <div onclick="openCommunity('${jsArg(c.id)}')" class="${CARD} overflow-hidden cursor-pointer hover:border-emerald-400 transition">
-        <div class="h-32 bg-black/40 relative">
-            <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="w-full h-full object-cover">
+        <div class="bg-black/40 relative">
+            <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="block w-full h-auto max-h-[70vh] object-contain mx-auto">
             ${role ? `<span class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/70 border border-[#00F296]/60 text-[#00F296] text-[9px] font-black uppercase">${role === 'admin' ? 'Admin' : 'Member'}</span>` : ''}
         </div>
         <div class="p-4 space-y-1.5">
@@ -295,9 +295,9 @@ const toggleRow = (id, title, sub, checked) => `
 function communityFormBody(c, isEdit) {
     c = c || {};
     return `
-        <div>${lbl('Community thumbnail (16:9, optional)')}
-            <label class="block h-32 rounded-2xl overflow-hidden border border-teal-500/40 bg-black/50 cursor-pointer relative">
-                <img id="cf-thumb-preview" src="${esc(safeImg(c.thumbnail, ''))}" class="w-full h-full object-cover ${c.thumbnail ? '' : 'hidden'}">
+        <div>${lbl('Community cover photo (optional)')}
+            <label class="block min-h-[8rem] rounded-2xl overflow-hidden border border-teal-500/40 bg-black/50 cursor-pointer relative">
+                <img id="cf-thumb-preview" src="${esc(safeImg(c.thumbnail, ''))}" class="block w-full h-auto max-h-64 object-contain mx-auto ${c.thumbnail ? '' : 'hidden'}">
                 <div id="cf-thumb-empty" class="absolute inset-0 flex flex-col items-center justify-center text-xs font-bold text-white/70 ${c.thumbnail ? 'hidden' : ''}"><i class="fa-solid fa-image text-2xl text-[#00F296] mb-1"></i>Tap to add cover photo</div>
                 <input type="file" accept="image/*" class="hidden" onchange="previewCommunityThumb(this)">
             </label></div>
@@ -672,9 +672,9 @@ function renderCommunityPage() {
 
     el.innerHTML = `
         <div class="${CARD} overflow-hidden">
-            <div class="h-36 relative bg-black/40">
-                <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="w-full h-full object-cover">
-                <div class="absolute inset-0 bg-gradient-to-t from-[#040E13] via-transparent to-black/30"></div>
+            <div class="relative bg-black/40">
+                <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="block w-full h-auto max-h-[70vh] object-contain mx-auto">
+                <div class="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#040E13] to-transparent pointer-events-none"></div>
                 <button onclick="closeCommunity()" aria-label="Back" class="absolute top-3 left-3 w-9 h-9 rounded-full bg-black/60 border border-white/20 flex items-center justify-center"><i class="fa-solid fa-chevron-left text-xs"></i></button>
             </div>
             <div class="p-4 -mt-6 relative space-y-3">
