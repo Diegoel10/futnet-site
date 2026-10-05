@@ -585,6 +585,15 @@ window.acceptRulesAndContinue = function(eventId) {
 
 window.openJoinGameModal = async function(eventId) {
     const _ev = (window.eventsList || []).find(ev => ev.id === eventId);
+    // Suspended from joining games in this community? Show why and stop.
+    if (_ev && _ev.communityId && window.currentUser && typeof window.communitySuspension === 'function') {
+        const sp = await window.communitySuspension(_ev.communityId);
+        if (sp && sp.games) {
+            const until = sp.until ? new Date(sp.until).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+            window.showToast(`You are suspended from joining games${until ? ' until ' + until : ''}.${sp.reason ? ' Reason: ' + escapeHtml(sp.reason) : ''}`, 'error');
+            return;
+        }
+    }
     if (_ev && needsAcceptance(_ev) && window.currentUser && !window._acceptedRules[eventId]) {
         const uid0 = String(window.currentUser.uid);
         const isOrg0 = String(_ev.organizerId) === uid0;

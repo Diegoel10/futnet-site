@@ -169,6 +169,28 @@ window.isCommunityMember = async function(communityId) {
 };
 
 function isSuspended(m) { return tsMs(m?.suspendedUntil) > Date.now(); }
+// A suspension can cover joining games, chat and the feed. Older suspensions (no scope saved) cover everything.
+const SUSPEND_SCOPES = [['games', 'Joining games'], ['chat', 'Chat'], ['feed', 'Feed']];
+function suspendedScopes(m) {
+    if (!isSuspended(m)) return null;
+    const sc = m.suspendScope;
+    if (sc && typeof sc === 'object') return { games: !!sc.games, chat: !!sc.chat, feed: !!sc.feed };
+    return { games: true, chat: true, feed: true };
+}
+const scopeLabels = (sc) => SUSPEND_SCOPES.filter(([k]) => sc && sc[k]).map(([, l]) => l).join(', ');
+const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+const suspFrom = (k) => !!(S.mySusp && S.mySusp[k]);
+
+// Other screens (joining a game) ask: is this person suspended from X in this community?
+window.communitySuspension = async function(communityId) {
+    if (!me() || !communityId) return null;
+    try {
+        const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', communityId, 'members', me().uid));
+        if (!ms.exists()) return null;
+        const d = ms.data(); const sc = suspendedScopes(d);
+        return sc ? { ...sc, reason: d.suspendReason || '', until: tsMs(d.suspendedUntil) } : null;
+    } catch (e) { return null; }
+};
 function isAdminRole(m, c) {
     if (!m) return false;
     if (m.uid === c?.adminId) return true;
@@ -588,15 +610,19 @@ window.openCommunity = async function(id, tab) {
     }
     // membership
     const uid = me().uid;
-    let role = null, pending = false, suspended = false;
+    let role = null, pending = false, mySusp = null;
     if (c.adminId === uid) role = 'admin';
     try {
         const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', uid));
-        if (ms.exists()) { role = (ms.data().role === 'admin' || c.adminId === uid) ? 'admin' : 'member'; suspended = isSuspended(ms.data()); }
+        if (ms.exists()) {
+            role = (ms.data().role === 'admin' || c.adminId === uid) ? 'admin' : 'member';
+            const sc = suspendedScopes(ms.data());
+            if (sc) mySusp = { ...sc, reason: ms.data().suspendReason || '', until: tsMs(ms.data().suspendedUntil) };
+        }
         else if (!role) pending = (await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid))).exists();
     } catch (e) { /* ignore */ }
     if (role) window.myCommunityRoles[id] = role; else delete window.myCommunityRoles[id];
-    S.pending = pending; S.suspended = suspended;
+    S.pending = pending; S.mySusp = mySusp;
 
     const base = ['artifacts', appId, 'communities', id];
     ensureDirectory();
@@ -698,6 +724,10 @@ function renderCommunityPage() {
         <div class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center gap-1 overflow-x-auto">
             ${tabs.map(([k, l]) => `<button onclick="setCommunityTab('${k}')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition ${S.tab === k ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${l}</button>`).join('')}
         </div>`}
+        ${S.mySusp ? `<div class="bg-red-500/10 border border-red-500/40 rounded-2xl p-3 text-xs text-white/90 leading-relaxed">
+            <b class="text-red-300"><i class="fa-solid fa-ban mr-1"></i> You are suspended until ${esc(fmtDate(S.mySusp.until))}</b><br>
+            Blocked from: <b>${esc(scopeLabels(S.mySusp))}</b>${S.mySusp.reason ? `<br>Reason: ${esc(S.mySusp.reason)}` : ''}
+        </div>` : ''}
         <div class="${CARD} p-4 sm:p-5">${body}</div>`;
 
     if (focusId) {
@@ -774,7 +804,7 @@ window.leaveCommunity = async function(id) {
 function infoTab(c, isAdmin) {
     const section = (t, v) => v ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">${t}</div><p class="text-xs text-white/80 whitespace-pre-line leading-relaxed">${esc(v)}</p></div>` : '';
     const admins = S.members.filter(m => isAdminRole(m, c));
-    const people = S.members.filter(m => !isSuspended(m));
+    const people = S.members.slice();
     const isMember = !!myRole(c.id);
     return `
         <div class="space-y-4">
@@ -795,7 +825,7 @@ function infoTab(c, isAdmin) {
 
 window.showCommunityMembers = (id) => {
     const c = window.communitiesCache[id]; if (!c) return;
-    const people = S.members.filter(m => !isSuspended(m)).sort((a, b) => (isAdminRole(b, c) ? 1 : 0) - (isAdminRole(a, c) ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
+    const people = S.members.slice().sort((a, b) => (isAdminRole(b, c) ? 1 : 0) - (isAdminRole(a, c) ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
     fullScreenShell('community-members-modal', `Members (${people.length})`, esc(c.name), `
         <div class="space-y-2">${people.map(m => `
             <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3">
@@ -841,7 +871,7 @@ function gamesTab(c, isMember) {
         return `<p class="text-xs text-white/60 text-center py-6">Games are visible to members only. Join this community to see them.</p>`;
     }
     return `<div class="space-y-5">
-        ${isMember && !S.suspended ? `<button onclick="showCommunityGameCreation('${jsArg(c.id)}')" class="${BTN_PRIMARY} w-full py-3"><i class="fa-solid fa-plus mr-1"></i> Create Game in ${esc(c.name)}</button>` : ''}
+        ${isMember && !suspFrom('games') ? `<button onclick="showCommunityGameCreation('${jsArg(c.id)}')" class="${BTN_PRIMARY} w-full py-3"><i class="fa-solid fa-plus mr-1"></i> Create Game in ${esc(c.name)}</button>` : ''}
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Upcoming (${up.length})</div>
             <div class="grid grid-cols-1 gap-4">${up.map(card).join('') || '<p class="text-xs text-white/50 italic">No upcoming games yet.</p>'}</div></div>
         ${prev.length ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-white/50 mb-2">Previous (${prev.length})</div>
@@ -1017,14 +1047,14 @@ function feedTab(c, isMember, isAdmin) {
             <div class="flex justify-center">${joinButton(c)}</div>
         </div>`;
     }
-    const canPost = isMember && !S.suspended && (!c.adminOnlyFeed || isAdmin);
+    const canPost = isMember && !suspFrom('feed') && (!c.adminOnlyFeed || isAdmin);
     return `<div class="space-y-4">
         ${canPost ? `
         <button onclick="openPostComposer()" class="w-full flex items-center gap-3 bg-black/30 border border-white/10 rounded-xl p-3 text-left hover:bg-black/50 transition">
             ${avatarImg({ uid: me().uid, name: myName(), avatar: myAvatar() }, 'w-9 h-9 rounded-full object-cover shrink-0')}
             <span class="flex-1 text-xs text-white/50 bg-black/40 border border-white/10 rounded-full px-4 py-2.5">Share something with ${esc(c.name || 'the community')}...</span>
             <i class="fa-regular fa-image text-[#00F296] text-lg"></i>
-        </button>` : (isMember ? `<p class="text-[11px] text-white/50 text-center">${S.suspended ? 'You are suspended from posting.' : 'Only admins can post in this community.'}</p>` : '')}
+        </button>` : (isMember ? `<p class="text-[11px] text-white/50 text-center">${suspFrom('feed') ? 'You are suspended from posting.' : 'Only admins can post in this community.'}</p>` : '')}
         ${S.feed.length === 0 ? '<p class="text-xs text-white/50 italic text-center py-4">No posts yet.</p>' : S.feed.map(p => postCard(p, c, isAdmin)).join('')}
     </div>`;
 }
@@ -1058,7 +1088,7 @@ function postCard(p, c, isAdmin) {
             <span class="text-white/60"><i class="fa-regular fa-comment mr-1"></i>${(p.comments || []).length}</span>
         </div>
         ${(p.comments || []).map(cm => `<div class="text-[11px] bg-black/30 rounded-lg px-2.5 py-1.5"><span class="font-black text-white">${esc(cm.authorName || 'Player')}</span> <span class="text-white/80">${esc(cm.text)}</span></div>`).join('')}
-        ${!S.suspended ? `<div class="flex gap-2"><input id="cmt-${esc(p.id)}" class="${INPUT}" placeholder="Write a comment..." onkeydown="if(event.key==='Enter')addCommunityComment('${jsArg(p.id)}')"><button onclick="addCommunityComment('${jsArg(p.id)}')" class="${BTN_PRIMARY}">Send</button></div>` : ''}
+        ${!suspFrom('feed') ? `<div class="flex gap-2"><input id="cmt-${esc(p.id)}" class="${INPUT}" placeholder="Write a comment..." onkeydown="if(event.key==='Enter')addCommunityComment('${jsArg(p.id)}')"><button onclick="addCommunityComment('${jsArg(p.id)}')" class="${BTN_PRIMARY}">Send</button></div>` : ''}
     </div>`;
 }
 
@@ -1215,15 +1245,13 @@ function adminTab(c) {
             <button onclick="editCommunityInfo('${jsArg(id)}')" class="${BTN_DARK} w-full mt-3"><i class="fa-solid fa-pen mr-1"></i> Edit name, info & thumbnail</button></div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Members (${S.members.length})</div>
             <div class="space-y-2">${others.map(m => {
-                const adm = isAdminRole(m, c); const sus = isSuspended(m);
-                return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
-                    ${avatarImg(m, 'w-8 h-8 rounded-full object-cover')}
-                    <div class="flex-1 min-w-0"><div class="text-xs font-bold text-white truncate">${esc(m.name || 'Player')}</div>
-                    <div class="text-[10px] ${sus ? 'text-red-300' : 'text-white/50'}">${sus ? 'Suspended' : (adm ? 'Admin' : 'Member')}</div></div>
-                    ${adm ? `<button onclick="setCommunityRole('${jsArg(m.uid)}', false)" class="${BTN_DARK}">Demote</button>` : `<button onclick="setCommunityRole('${jsArg(m.uid)}', true)" class="${BTN_DARK}">Make Admin</button>`}
-                    ${sus ? `<button onclick="suspendCommunityMember('${jsArg(m.uid)}', 0)" class="${BTN_DARK}">Unsuspend</button>` : `<button onclick="suspendCommunityMember('${jsArg(m.uid)}', 7)" class="${BTN_DARK}">Suspend 7d</button>`}
-                    <button onclick="removeCommunityMember('${jsArg(m.uid)}')" class="${BTN_DANGER}" aria-label="Remove member"><i class="fa-solid fa-user-xmark"></i></button>
-                </div>`;
+                const adm = isAdminRole(m, c); const sc = suspendedScopes(m);
+                return `<button onclick="openMemberBox('${jsArg(m.uid)}')" class="w-full text-left flex items-center gap-3 bg-black/40 border border-white/10 hover:border-[#00F296]/50 rounded-xl p-2.5 transition">
+                    ${avatarImg(m, 'w-10 h-10 rounded-full object-cover border border-emerald-500/40')}
+                    <div class="flex-1 min-w-0"><div class="text-sm font-bold text-white truncate">${esc(m.name || 'Player')}</div>
+                    <div class="text-[10px] ${sc ? 'text-red-300' : 'text-white/50'}">${sc ? `Suspended: ${esc(scopeLabels(sc))}` : (adm ? 'Admin' : 'Member')}</div></div>
+                    <i class="fa-solid fa-chevron-right text-white/40 text-xs"></i>
+                </button>`;
             }).join('') || '<p class="text-xs text-white/50 italic">No other members yet.</p>'}</div></div>
         ${c.adminId === me().uid ? `<button onclick="deleteCommunity('${jsArg(id)}')" class="${BTN_DANGER} w-full">Delete Community</button>` : ''}
     </div>`;
@@ -1253,6 +1281,174 @@ window.declineCommunityRequest = async (uid) => {
     try { await deleteDoc(doc(db, 'artifacts', appId, 'communities', S.activeId, 'requests', uid)); }
     catch (e) { console.error(e); toast('Could not decline request', 'error'); }
 };
+// ------------------------------------------------------------------ MEMBER BOX + MANAGE (admin tab)
+// "Are you sure?" box used before every member action.
+function confirmBox(title, message, confirmLabel, danger, onYes) {
+    window._confirmBoxYes = async () => { document.getElementById('confirm-box-modal')?.remove(); try { await onYes(); } catch (e) { console.error(e); toast('Something went wrong', 'error'); } };
+    let m = document.getElementById('confirm-box-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'confirm-box-modal'; document.body.appendChild(m); }
+    m.className = 'fixed inset-0 z-[170] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md';
+    m.innerHTML = `
+        <div class="bg-[#040E13] border ${danger ? 'border-red-500/50' : 'border-emerald-500/40'} rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
+            <div class="text-base font-black">${esc(title)}</div>
+            <p class="text-xs text-white/75 leading-relaxed whitespace-pre-line">${message}</p>
+            <div class="flex gap-2">
+                <button onclick="document.getElementById('confirm-box-modal').remove()" class="${BTN_DARK} flex-1 py-3">Cancel</button>
+                <button onclick="_confirmBoxYes()" class="${danger ? BTN_DANGER : BTN_PRIMARY} flex-1 py-3">${esc(confirmLabel)}</button>
+            </div>
+        </div>`;
+}
+
+const memberByUid = (uid) => S.members.find(x => String(x.uid) === String(uid));
+const memberName = (m) => (m && m.name && m.name !== 'Player') ? m.name : (m?.name || 'Player');
+function canManageMember(c, m) {
+    if (!m || !me()) return false;
+    if (String(m.uid) === String(me().uid) || String(m.uid) === String(c.adminId)) return false;
+    return !isAdminRole(m, c) || String(me().uid) === String(c.adminId);   // only the creator manages other admins
+}
+function overlay(id, inner, z = 150) {
+    let m = document.getElementById(id);
+    if (!m) { m = document.createElement('div'); m.id = id; document.body.appendChild(m); }
+    m.className = `fixed inset-0 z-[${z}] flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md sm:p-4`;
+    m.innerHTML = `<div class="bg-[#040E13] border border-emerald-500/40 rounded-t-3xl sm:rounded-3xl w-full max-w-sm max-h-[92vh] overflow-y-auto shadow-2xl text-white p-5 space-y-4">${inner}</div>`;
+}
+const closeBtn = (id) => `<button onclick="closeCommunityModal('${id}')" aria-label="Close" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark text-xs"></i></button>`;
+
+window.openMemberBox = (uid) => {
+    const c = window.communitiesCache[S.activeId]; const m = memberByUid(uid); if (!c || !m) return;
+    const d = (window.directoryList || []).find(u => String(u.uid) === String(uid)) || {};
+    const adm = isAdminRole(m, c); const sc = suspendedScopes(m);
+    const joined = fmtDate(tsMs(m.joinedAt));
+    const bal = creditOn(c) && S.credits[uid] ? S.credits[uid].balanceCents : null;
+    const row = (k, v) => v ? `<div class="flex justify-between gap-3 text-xs"><span class="text-white/50">${k}</span><span class="font-bold text-white text-right">${v}</span></div>` : '';
+    overlay('member-box-modal', `
+        <div class="relative text-center space-y-2 pt-1">
+            ${avatarImg(m, 'w-24 h-24 rounded-full object-cover border-2 border-[#00F296] mx-auto')}
+            <div class="text-lg font-black">${esc(memberName(m))}</div>
+            <div class="flex justify-center gap-2 flex-wrap">
+                <span class="text-[9px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 ${adm ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white/80'}">${String(uid) === String(c.adminId) ? 'Creator' : (adm ? 'Admin' : 'Member')}</span>
+                ${sc ? '<span class="text-[9px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 bg-red-500/30 text-red-200">Suspended</span>' : ''}
+            </div>
+        </div>
+        <div class="space-y-2 bg-black/40 border border-white/10 rounded-xl p-3">
+            ${row('Nickname', esc(d.nickname || ''))}
+            ${row('Position', esc(d.position || ''))}
+            ${row('Joined', esc(joined))}
+            ${bal !== null ? row('Credit balance', esc(((bal || 0) / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' }))) : ''}
+        </div>
+        ${sc ? `<div class="bg-red-500/10 border border-red-500/40 rounded-xl p-3 text-xs leading-relaxed text-white/90">
+            <b class="text-red-300">Suspended until ${esc(fmtDate(tsMs(m.suspendedUntil)))}</b><br>
+            Blocked from: <b>${esc(scopeLabels(sc))}</b>
+            ${m.suspendReason ? `<br>Reason: ${esc(m.suspendReason)}` : ''}
+            ${m.suspendedByName ? `<br><span class="text-white/50">By ${esc(m.suspendedByName)}</span>` : ''}
+        </div>` : ''}
+        <div class="flex gap-2">
+            <button onclick="closeCommunityModal('member-box-modal')" class="${BTN_DARK} flex-1 py-3">Close</button>
+            ${canManageMember(c, m) ? `<button onclick="openMemberManage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-sliders mr-1"></i> Manage</button>` : ''}
+        </div>`);
+    document.getElementById('member-box-modal').firstElementChild.insertAdjacentHTML('afterbegin', closeBtn('member-box-modal'));
+};
+
+window.openMemberManage = (uid) => {
+    const c = window.communitiesCache[S.activeId]; const m = memberByUid(uid); if (!c || !m || !canManageMember(c, m)) return;
+    const adm = isAdminRole(m, c); const sc = suspendedScopes(m); const name = esc(memberName(m));
+    overlay('member-manage-modal', `
+        <div class="text-center">
+            <div class="text-sm font-black">Manage ${name}</div>
+            <div class="text-[10px] text-white/50">Every action asks you to confirm.</div>
+        </div>
+        <div class="space-y-2">
+            <button onclick="askMemberRole('${jsArg(uid)}', ${adm ? 'false' : 'true'})" class="${BTN_DARK} w-full py-3 text-left"><i class="fa-solid fa-user-shield w-5 text-[#00F296]"></i> ${adm ? 'Remove admin' : 'Make admin'}</button>
+            ${sc
+                ? `<button onclick="askUnsuspend('${jsArg(uid)}')" class="${BTN_DARK} w-full py-3 text-left"><i class="fa-solid fa-lock-open w-5 text-[#00F296]"></i> End suspension</button>`
+                : `<button onclick="openSuspendForm('${jsArg(uid)}')" class="${BTN_DARK} w-full py-3 text-left"><i class="fa-solid fa-ban w-5 text-amber-300"></i> Suspend</button>`}
+            <button onclick="askRemoveMember('${jsArg(uid)}')" class="${BTN_DANGER} w-full py-3 text-left"><i class="fa-solid fa-user-xmark w-5"></i> Remove from community</button>
+        </div>
+        <button onclick="closeCommunityModal('member-manage-modal')" class="${BTN_DARK} w-full py-3">Back</button>`, 155);
+};
+
+const closeMemberModals = () => ['member-manage-modal', 'member-suspend-modal', 'member-box-modal'].forEach(id => document.getElementById(id)?.remove());
+const memberDoc = (uid) => doc(db, 'artifacts', appId, 'communities', S.activeId, 'members', uid);
+
+window.askMemberRole = (uid, makeAdmin) => {
+    const m = memberByUid(uid); const name = esc(memberName(m));
+    confirmBox(makeAdmin ? 'Make admin?' : 'Remove admin?',
+        makeAdmin ? `${name} will be able to approve members, manage games and suspend or remove members.` : `${name} will go back to being a regular member.`,
+        makeAdmin ? 'Yes, make admin' : 'Yes, remove admin', false,
+        async () => { await window.setCommunityRole(uid, makeAdmin); closeMemberModals(); toast(makeAdmin ? `${esc(memberName(m))} is now an admin` : `${esc(memberName(m))} is no longer an admin`); });
+};
+
+window.askRemoveMember = (uid) => {
+    const m = memberByUid(uid); const name = esc(memberName(m));
+    confirmBox('Remove from community?', `${name} will lose access to this community, its games, chat and feed. They can ask to join again.`, 'Yes, remove', true,
+        async () => { await doRemoveMember(uid); closeMemberModals(); toast(`${esc(memberName(m))} was removed`); });
+};
+async function doRemoveMember(uid) {
+    const id = S.activeId;
+    await deleteDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', uid));
+    await updateDoc(commRef(id), { membersCount: increment(-1) });
+}
+
+window.askUnsuspend = (uid) => {
+    const m = memberByUid(uid); const name = esc(memberName(m));
+    confirmBox('End suspension?', `${name} will be able to join games, chat and post again right away.`, 'Yes, end suspension', false,
+        async () => {
+            await updateDoc(memberDoc(uid), { suspendedUntil: deleteField(), suspendReason: deleteField(), suspendScope: deleteField(), suspendedBy: deleteField(), suspendedByName: deleteField(), suspendedAt: deleteField() });
+            closeMemberModals(); toast(`${esc(memberName(m))} is no longer suspended`);
+        });
+};
+
+window._suspendWeeks = 1;
+window.openSuspendForm = (uid) => {
+    const m = memberByUid(uid); if (!m) return;
+    window._suspendWeeks = 1;
+    overlay('member-suspend-modal', `
+        <div class="text-center">
+            <div class="text-sm font-black">Suspend ${esc(memberName(m))}</div>
+        </div>
+        <div>${lbl('How long')}
+            <div id="susp-weeks" class="grid grid-cols-4 gap-2">${[1, 2, 3, 4].map(w => `<button type="button" data-w="${w}" onclick="pickSuspendWeeks(${w})" class="py-2.5 rounded-xl text-xs font-black border ${w === 1 ? 'bg-[#00F296] text-slate-950 border-[#00F296]' : 'bg-black/50 text-white border-white/15'}">${w} week${w > 1 ? 's' : ''}</button>`).join('')}</div></div>
+        <div>${lbl('Suspended from (pick at least one)')}
+            <div class="space-y-2">${SUSPEND_SCOPES.map(([k, l]) => `
+                <label class="flex items-center justify-between gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
+                    <span class="text-xs font-bold text-white">${l}</span>
+                    <input type="checkbox" id="susp-${k}" checked class="w-5 h-5 accent-[#00F296]">
+                </label>`).join('')}</div></div>
+        <div>${lbl('Reason (required)')}<textarea id="susp-reason" rows="3" maxlength="300" class="${INPUT}" placeholder="Tell them why. They will see this."></textarea></div>
+        <div id="susp-error" class="hidden text-xs text-red-400 font-bold bg-red-950/50 border border-red-500/50 p-2 rounded-xl text-center"></div>
+        <div class="flex gap-2">
+            <button onclick="closeCommunityModal('member-suspend-modal')" class="${BTN_DARK} flex-1 py-3">Back</button>
+            <button onclick="askSuspend('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3">Continue</button>
+        </div>`, 160);
+};
+window.pickSuspendWeeks = (w) => {
+    window._suspendWeeks = w;
+    document.querySelectorAll('#susp-weeks button').forEach(b => {
+        const on = Number(b.dataset.w) === w;
+        b.className = `py-2.5 rounded-xl text-xs font-black border ${on ? 'bg-[#00F296] text-slate-950 border-[#00F296]' : 'bg-black/50 text-white border-white/15'}`;
+    });
+};
+window.askSuspend = (uid) => {
+    const m = memberByUid(uid); if (!m) return;
+    const err = (t) => { const b = document.getElementById('susp-error'); if (b) { b.textContent = t; b.classList.remove('hidden'); } };
+    const scope = { games: !!document.getElementById('susp-games')?.checked, chat: !!document.getElementById('susp-chat')?.checked, feed: !!document.getElementById('susp-feed')?.checked };
+    const reason = (document.getElementById('susp-reason')?.value || '').trim();
+    const weeks = window._suspendWeeks || 1;
+    if (!scope.games && !scope.chat && !scope.feed) return err('Pick at least one: joining games, chat or feed.');
+    if (!reason) return err('Please write a reason.');
+    const untilMs = Date.now() + weeks * 7 * 86400000;
+    confirmBox('Suspend this member?',
+        `${esc(memberName(m))} will be suspended for ${weeks} week${weeks > 1 ? 's' : ''} (until ${esc(fmtDate(untilMs))}).\nBlocked from: ${esc(scopeLabels(scope))}\nReason: ${esc(reason)}`,
+        'Yes, suspend', true,
+        async () => {
+            await updateDoc(memberDoc(uid), {
+                suspendedUntil: new Date(untilMs), suspendReason: reason, suspendScope: scope,
+                suspendedBy: me().uid, suspendedByName: myName(), suspendedAt: serverTimestamp()
+            });
+            closeMemberModals(); toast(`${esc(memberName(m))} was suspended`);
+        });
+};
+
 window.setCommunityRole = async (uid, makeAdmin) => {
     try {
         await updateDoc(doc(db, 'artifacts', appId, 'communities', S.activeId, 'members', uid),
@@ -1354,7 +1550,8 @@ window.sendCommunityChatMessage = async function(text) {
     try {
         // blocked while suspended
         const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', cid, 'members', me().uid));
-        if (ms.exists() && isSuspended(ms.data())) { toast('You are suspended from this community', 'error'); return; }
+        const _sc = ms.exists() ? suspendedScopes(ms.data()) : null;
+        if (_sc && _sc.chat) { toast(`You are suspended from chat until ${fmtDate(tsMs(ms.data().suspendedUntil))}.${ms.data().suspendReason ? ' Reason: ' + esc(ms.data().suspendReason) : ''}`, 'error'); return; }
         await setDoc(doc(db, 'artifacts', appId, 'communities', cid, 'messages', msgId), {
             id: msgId, senderUid: me().uid, sender: myName(), avatar: myAvatar(), text, createdAt: serverTimestamp()
         });
