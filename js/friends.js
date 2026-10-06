@@ -224,18 +224,7 @@ window.sendFriendRequest = async function(targetUid) {
                 await setDoc(targetRef, targetData, { merge: true });
             }
 
-            const myName = window.userProfile?.name || 
-                           (window.userProfile?.firstName ? `${window.userProfile.firstName} ${window.userProfile.lastName || ''}`.trim() : 'Someone');
-
-            await addDoc(collection(db, 'artifacts', appId, 'notifications'), {
-                recipientUid: targetUid,
-                senderUid: myUid,
-                type: "friend_request",
-                title: "New Friend Request",
-                body: `${myName} sent you a friend request on FutNet!`,
-                read: false,
-                timestamp: serverTimestamp()
-            });
+            // The push notification is sent by the server (onFriendsChanged).
 
             window.showToast("Friend request sent!");
             const searchInput = document.getElementById('friend-search-input');

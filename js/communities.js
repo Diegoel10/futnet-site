@@ -559,7 +559,7 @@ function ensureCreditListeners(c, role) {
     const sorter = (a, b) => tsMs(b.at) - tsMs(a.at);
     if (role === 'admin') {
         S.unsubs.push(onSnapshot(collection(db, ...base, 'credits'), s => {
-            S.credits = {}; s.docs.forEach(d => { S.credits[d.id] = d.data(); });
+            S.credits = {}; s.docs.forEach(d => { S.credits[d.id] = d.data(); }); if (document.getElementById('cm-list')) window.refreshCommunityMembersList();
             if (S.tab === 'credit') renderCommunityPage();
         }, () => {}));
         S.unsubs.push(onSnapshot(query(collection(db, ...base, 'creditLedger'), orderBy('at', 'desc'), limit(50)), s => {
@@ -630,6 +630,7 @@ window.openCommunity = async function(id, tab) {
         // The document id IS the user id, so a member record that lost its uid / name still shows up correctly.
         const raw = s.docs.map(d => ({ uid: d.id, ...d.data() }));
         S.members = raw.map(normMember);
+        if (document.getElementById('cm-list')) window.refreshCommunityMembersList();   // members page open: keep it live
         renderCommunityPage();
         healMyMemberRecord(id);
         if (!s.metadata.fromCache) syncMemberRecords(id, raw);
@@ -823,16 +824,107 @@ function infoTab(c, isAdmin) {
         </div>`;
 }
 
-window.showCommunityMembers = (id) => {
+// ---- Members page: search + sort (newest joined first by default)
+const MEMBER_SORTS = [
+    ['newest', 'Newest joined'], ['oldest', 'Oldest joined'],
+    ['az', 'Name A–Z'], ['za', 'Name Z–A'],
+    ['games', 'Most games played'], ['admins', 'Admins first'],
+    ['credit', 'Highest credit']   // admins only, when the community uses Credit
+];
+const MV = { id: null, q: '', sort: 'newest', highlight: '' };
+const foldText = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+// Games each member has played in this community (past or ended games where they were confirmed).
+function gamesPlayedMap(cid) {
+    const today = new Date(); const t = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const map = {};
+    (window.eventsList || []).filter(e => e.communityId === cid && (e.isSessionEnded === true || String(e.date || '').slice(0, 10) < t))
+        .forEach(e => (e.attendees || []).forEach(a => {
+            if (!a || !a.uid || (a.status && a.status !== 'confirmed')) return;
+            map[a.uid] = (map[a.uid] || 0) + 1;
+        }));
+    return map;
+}
+
+function membersListHtml() {
+    const c = window.communitiesCache[MV.id]; if (!c) return '';
+    const amAdmin = myRole(c.id) === 'admin' || c.adminId === me().uid;
+    const showCredit = amAdmin && creditOn(c);
+    const games = gamesPlayedMap(c.id);
+    const nick = (m) => (Array.isArray(window.directoryList) ? window.directoryList.find(d => String(d.uid) === String(m.uid))?.nickname : '') || m.nickname || '';
+    const bal = (m) => Number(S.credits[m.uid]?.balanceCents || 0);
+    const joined = (m) => tsMs(m.joinedAt);
+    const name = (m) => String(m.name || 'Player');
+
+    const q = foldText(MV.q.trim());
+    let list = S.members.filter(m => !q || foldText(name(m)).includes(q) || foldText(nick(m)).includes(q));
+    const byName = (a, b) => name(a).localeCompare(name(b), undefined, { sensitivity: 'base' });
+    const sorters = {
+        newest: (a, b) => (joined(b) || 0) - (joined(a) || 0) || byName(a, b),
+        oldest: (a, b) => (joined(a) || Infinity) - (joined(b) || Infinity) || byName(a, b),
+        az: byName,
+        za: (a, b) => byName(b, a),
+        games: (a, b) => (games[b.uid] || 0) - (games[a.uid] || 0) || byName(a, b),
+        admins: (a, b) => (isAdminRole(b, c) ? 1 : 0) - (isAdminRole(a, c) ? 1 : 0) || byName(a, b),
+        credit: (a, b) => bal(b) - bal(a) || byName(a, b)
+    };
+    list.sort(sorters[MV.sort] || sorters.newest);
+
+    const countEl = document.getElementById('cm-count');
+    if (countEl) countEl.textContent = q ? `${list.length} of ${S.members.length}` : `${S.members.length} member${S.members.length === 1 ? '' : 's'}`;
+
+    if (!list.length) return `<p class="text-xs text-white/50 italic text-center py-8">${q ? 'No members match your search.' : 'No members yet.'}</p>`;
+    return list.map(m => {
+        const isNew = MV.highlight && String(m.uid) === String(MV.highlight);
+        const creator = String(m.uid) === String(c.adminId);
+        const sc = suspendedScopes(m);
+        const bits = [];
+        if (joined(m)) bits.push(`Joined ${esc(fmtDate(joined(m)))}`);
+        bits.push(`${games[m.uid] || 0} game${(games[m.uid] || 0) === 1 ? '' : 's'}`);
+        if (showCredit) bits.push(`$${(bal(m) / 100).toFixed(2)}`);
+        return `
+        <button onclick="openMemberBox('${jsArg(m.uid)}')" class="w-full text-left flex items-center gap-3 bg-black/40 border ${isNew ? 'border-[#00F296] shadow-[0_0_12px_rgba(0,242,150,0.35)]' : 'border-white/10 hover:border-[#00F296]/50'} rounded-xl p-3 transition">
+            ${avatarImg(m, 'w-11 h-11 rounded-full object-cover border border-emerald-500/40')}
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5"><span class="text-sm font-bold text-white truncate">${esc(name(m))}</span>
+                    ${isNew ? '<span class="text-[8px] font-black uppercase text-slate-950 bg-[#00F296] rounded-full px-1.5 py-0.5">New</span>' : ''}</div>
+                <div class="text-[10px] ${sc ? 'text-red-300' : 'text-white/50'} truncate">${sc ? `Suspended: ${esc(scopeLabels(sc))}` : bits.join(' • ')}</div>
+            </div>
+            ${isAdminRole(m, c) ? `<span class="text-[9px] font-black uppercase tracking-wider text-slate-950 bg-[#00F296] rounded-full px-2 py-0.5">${creator ? 'Creator' : 'Admin'}</span>` : ''}
+            <i class="fa-solid fa-chevron-right text-white/30 text-xs"></i>
+        </button>`;
+    }).join('');
+}
+
+window.refreshCommunityMembersList = () => {
+    const box = document.getElementById('cm-list'); if (box) box.innerHTML = membersListHtml();
+};
+window.searchCommunityMembers = (v) => { MV.q = String(v || ''); window.refreshCommunityMembersList(); };
+window.sortCommunityMembers = (v) => { MV.sort = v; window.refreshCommunityMembersList(); };
+
+// highlightUid (optional): a member to point out, e.g. the person who just joined.
+window.showCommunityMembers = (id, highlightUid) => {
     const c = window.communitiesCache[id]; if (!c) return;
-    const people = S.members.slice().sort((a, b) => (isAdminRole(b, c) ? 1 : 0) - (isAdminRole(a, c) ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
-    fullScreenShell('community-members-modal', `Members (${people.length})`, esc(c.name), `
-        <div class="space-y-2">${people.map(m => `
-            <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3">
-                ${avatarImg(m, 'w-11 h-11 rounded-full object-cover border border-emerald-500/40')}
-                <span class="flex-1 text-sm font-bold text-white truncate">${esc(m.name || 'Player')}</span>
-                ${isAdminRole(m, c) ? '<span class="text-[9px] font-black uppercase tracking-wider text-slate-950 bg-[#00F296] rounded-full px-2 py-0.5">Admin</span>' : ''}
-            </div>`).join('') || '<p class="text-xs text-white/50 italic">No members yet.</p>'}</div>`);
+    MV.id = id; MV.q = ''; MV.sort = 'newest'; MV.highlight = highlightUid || '';
+    const amAdmin = myRole(c.id) === 'admin' || c.adminId === me().uid;
+    const sorts = MEMBER_SORTS.filter(([k]) => k !== 'credit' || (amAdmin && creditOn(c)));
+    fullScreenShell('community-members-modal', 'Members', esc(c.name), `
+        <div class="sticky top-0 z-10 bg-[#040E13] pb-2 space-y-2">
+            <div class="flex gap-2">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-xs"></i>
+                    <input id="cm-search" type="search" placeholder="Search members" autocomplete="off" oninput="searchCommunityMembers(this.value)"
+                        class="w-full bg-black/50 border border-white/15 focus:border-[#00F296] outline-none rounded-xl pl-8 pr-3 py-2.5 text-sm text-white placeholder-white/40">
+                </div>
+                <select onchange="sortCommunityMembers(this.value)" aria-label="Sort members"
+                    class="bg-black/50 border border-white/15 rounded-xl px-2 py-2.5 text-xs font-bold text-white max-w-[45%]">
+                    ${sorts.map(([k, l]) => `<option value="${k}" ${k === MV.sort ? 'selected' : ''}>${l}</option>`).join('')}
+                </select>
+            </div>
+            <div id="cm-count" class="text-[10px] font-bold text-white/50 uppercase tracking-wider"></div>
+        </div>
+        <div id="cm-list" class="space-y-2">${membersListHtml()}</div>`);
+    window.refreshCommunityMembersList();   // fills the count line too
 };
 const LB_TABS = [['wins', 'Most Won Matches', 'matchesWon', 'won'], ['sessions', 'Most Won Sessions', 'sessionsWon', 'won'], ['goals', 'Most Goals', 'goals', 'goals']];
 function leaderboardHtml(c, tab) {
@@ -1271,7 +1363,8 @@ window.approveCommunityRequest = async function(uid) {
     const id = S.activeId; const req = S.requests.find(r => r.uid === uid); if (!id || !req) return;
     try {
         await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', uid),
-            { uid, name: req.name || 'Player', avatar: req.avatar || '', role: 'member', joinedAt: serverTimestamp() });
+            { uid, name: req.name || 'Player', avatar: req.avatar || '', role: 'member', joinedAt: serverTimestamp(),
+              approvedBy: me().uid, approvedAt: serverTimestamp() });   // approvedBy tells the server to send "You're in!"
         await deleteDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid));
         await updateDoc(commRef(id), { membersCount: increment(1) });
         toast(`${req.name || 'Player'} approved`);

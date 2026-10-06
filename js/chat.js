@@ -422,16 +422,7 @@ window.handleSendActiveChatMessage = async function(e) {
             });
         }
         await setDoc(recipientDocRef, { chats: recipientThreads }, { merge: true });
-
-        await addDoc(collection(db, 'artifacts', appId, 'notifications'), {
-            recipientUid: th.id,
-            senderUid: window.currentUser.uid,
-            type: "chat_message",
-            title: senderName,
-            body: text,
-            read: false,
-            timestamp: serverTimestamp()
-        });
+        // The push notification is sent by the server (onChatMessage) as soon as this saves.
     } catch (err) {
         console.error("Error saving chat or sending notification:", err);
     }
