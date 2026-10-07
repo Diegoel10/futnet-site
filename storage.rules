@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// Photos and videos sent in chats, game comments and the feed.
+// Anyone signed in can view them. You can only upload into your own folder,
+// only pictures or videos, and only up to the size limits below.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function okUpload() {
+      return (request.resource.contentType.matches('image/.*') && request.resource.size < 10 * 1024 * 1024)
+          || (request.resource.contentType.matches('video/.*') && request.resource.size < 60 * 1024 * 1024);
+    }
+
+    match /chat/{conversation}/{uid}/{file} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && okUpload();
+      allow delete: if isOwner(uid);
+    }
+    match /community/{communityId}/{uid}/{file} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && okUpload();
+      allow delete: if isOwner(uid);
+    }
+    match /comments/{eventId}/{uid}/{file} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && okUpload();
+      allow delete: if isOwner(uid);
+    }
+    match /feed/{communityId}/{uid}/{file} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && okUpload();
+      allow delete: if isOwner(uid);
+    }
+
+    // Everything else stays closed.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

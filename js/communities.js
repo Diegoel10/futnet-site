@@ -16,6 +16,7 @@ import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-stor
 import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readPayOptions } from './credits.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { computePlayerStats } from './leaderboard.js';
+import { renderWhatsApp, typingBubbleHtml, typingText, watchTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText } from './wa-chat.js';
 
 const DEFAULT_THUMB = 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800';
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -1174,7 +1175,7 @@ function postCard(p, c, isAdmin) {
                     <span class="absolute inset-y-0 left-0 bg-[#00F296]/20" style="width:${pct}%"></span>
                     <span class="relative flex justify-between"><span>${esc(o)}</span><span class="text-white/60">${n} • ${pct}%</span></span></button>`;
             }).join('')}</div>` : ''}
-        ${p.mediaUrl && /^(https?:|data:image\/)/i.test(p.mediaUrl) ? `<img src="${esc(p.mediaUrl)}" class="w-full rounded-xl max-h-80 object-cover">` : ''}
+        ${feedMediaHtml(p)}
         <div class="flex items-center gap-4 text-xs">
             <button onclick="likeCommunityPost('${jsArg(p.id)}')" class="${liked ? 'text-[#00F296]' : 'text-white/60'} font-bold"><i class="fa-${liked ? 'solid' : 'regular'} fa-heart mr-1"></i>${p.likes || 0}</button>
             <span class="text-white/60"><i class="fa-regular fa-comment mr-1"></i>${(p.comments || []).length}</span>
@@ -1184,7 +1185,20 @@ function postCard(p, c, isAdmin) {
     </div>`;
 }
 
+// Photo or video on a post. New posts keep it in Storage (`media`); older posts saved the photo itself (`mediaUrl`).
+function feedMediaHtml(p) {
+    const m = p.media && p.media.url ? p.media : null;
+    if (m && m.type === 'video') {
+        return `<video src="${esc(m.url)}" ${m.thumbUrl ? `poster="${esc(m.thumbUrl)}"` : ''} controls playsinline preload="metadata"
+            class="w-full rounded-xl max-h-[28rem] bg-black"></video>`;
+    }
+    const url = m ? m.url : p.mediaUrl;
+    if (!url || !/^(https?:|data:image\/)/i.test(url)) return '';
+    return `<img src="${esc(url)}" loading="lazy" onclick="waOpenMedia('image', '${jsArg(url)}')" class="w-full rounded-xl max-h-[28rem] object-cover cursor-pointer">`;
+}
+
 window._postPhoto = null;
+window._postFile = null;
 
 // Full-screen "New post" composer (Facebook style): text, Gallery and Poll only.
 window.openPostComposer = function() {
@@ -1208,6 +1222,7 @@ window.openPostComposer = function() {
             <textarea id="post-text" rows="6" class="w-full bg-transparent text-white text-lg placeholder-white/40 focus:outline-none resize-none" placeholder="What's on your mind?"></textarea>
             <div id="post-photo-preview" class="hidden relative">
                 <img id="post-photo-img" class="w-full rounded-xl max-h-80 object-cover">
+                <video id="post-video-el" class="hidden w-full rounded-xl max-h-80 bg-black" controls playsinline muted></video>
                 <button onclick="removePostPhoto()" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/70 text-white" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div id="post-poll-box" class="hidden space-y-2 bg-black/30 border border-white/10 rounded-xl p-3">
@@ -1219,8 +1234,8 @@ window.openPostComposer = function() {
         <div class="shrink-0 border-t border-white/10 px-4 pt-3 pb-4 space-y-3">
             <div class="flex gap-3 max-w-2xl mx-auto w-full">
                 <label class="flex-1 cursor-pointer bg-black/40 border border-white/15 rounded-2xl py-3 flex flex-col items-center gap-1 text-white text-xs font-bold hover:bg-black/60">
-                    <i class="fa-regular fa-image text-xl"></i>Gallery
-                    <input type="file" accept="image/*" class="hidden" onchange="pickPostPhoto(this)">
+                    <i class="fa-regular fa-image text-xl"></i>Photo / Video
+                    <input type="file" accept="image/*,video/*" class="hidden" onchange="pickPostPhoto(this)">
                 </label>
                 <button onclick="togglePostPoll()" class="flex-1 bg-black/40 border border-white/15 rounded-2xl py-3 flex flex-col items-center gap-1 text-white text-xs font-bold hover:bg-black/60">
                     <i class="fa-solid fa-chart-simple text-xl"></i>Poll
@@ -1235,23 +1250,35 @@ window.openPostComposer = function() {
     setTimeout(() => document.getElementById('post-text')?.focus(), 50);
 };
 
-window.closePostComposer = function() { document.getElementById('post-composer')?.remove(); window._postPhoto = null; };
+window.closePostComposer = function() {
+    document.getElementById('post-composer')?.remove();
+    if (window._postPreviewUrl) { URL.revokeObjectURL(window._postPreviewUrl); window._postPreviewUrl = null; }
+    window._postPhoto = null; window._postFile = null;
+};
 
 window.togglePostPoll = function() { document.getElementById('post-poll-box')?.classList.toggle('hidden'); };
 
 window.removePostPhoto = function() {
-    window._postPhoto = null;
+    window._postPhoto = null; window._postFile = null;
+    if (window._postPreviewUrl) { URL.revokeObjectURL(window._postPreviewUrl); window._postPreviewUrl = null; }
+    const v = document.getElementById('post-video-el'); if (v) { v.pause(); v.removeAttribute('src'); }
     document.getElementById('post-photo-preview')?.classList.add('hidden');
 };
 
+// Photo or video for a new post: kept as a file and uploaded when you tap Post.
 window.pickPostPhoto = async (input) => {
-    const f = input.files && input.files[0]; if (!f) return;
-    try {
-        window._postPhoto = await resizeImageToJpeg(f, 900, 0.65);
-        const img = document.getElementById('post-photo-img'); if (img) img.src = window._postPhoto;
-        document.getElementById('post-photo-preview')?.classList.remove('hidden');
-    } catch (e) { toast('Could not read that image', 'error'); }
-    input.value = '';
+    const f = input.files && input.files[0]; input.value = ''; if (!f) return;
+    const isVideo = String(f.type).startsWith('video/');
+    if (!isVideo && !String(f.type).startsWith('image/')) { toast('Only photos and videos can be posted', 'error'); return; }
+    if (isVideo && f.size > 60 * 1024 * 1024) { toast('That video is too big (max 60 MB). Try a shorter clip.', 'error'); return; }
+    window.removePostPhoto();
+    window._postFile = f;
+    window._postPreviewUrl = URL.createObjectURL(f);
+    const img = document.getElementById('post-photo-img');
+    const vid = document.getElementById('post-video-el');
+    if (img) { img.classList.toggle('hidden', isVideo); if (!isVideo) img.src = window._postPreviewUrl; }
+    if (vid) { vid.classList.toggle('hidden', !isVideo); if (isVideo) vid.src = window._postPreviewUrl; }
+    document.getElementById('post-photo-preview')?.classList.remove('hidden');
 };
 
 window.publishCommunityPost = async function() {
@@ -1261,7 +1288,7 @@ window.publishCommunityPost = async function() {
     const question = pollOpen ? document.getElementById('poll-q').value.trim() : '';
     const options = pollOpen ? [1, 2, 3, 4].map(i => document.getElementById(`poll-o${i}`).value.trim()).filter(Boolean) : [];
     if (pollOpen && (!question || options.length < 2)) { toast('A poll needs a question and at least 2 options', 'error'); return; }
-    if (!text && !question && !window._postPhoto) return;
+    if (!text && !question && !window._postPhoto && !window._postFile) return;
     const postId = 'post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const post = {
         id: postId, authorId: me().uid, authorName: myName(), authorAvatar: myAvatar(),
@@ -1271,9 +1298,25 @@ window.publishCommunityPost = async function() {
     if (window._postPhoto) post.mediaUrl = window._postPhoto;
     S.busy = true;
     const btn = document.getElementById('post-submit-btn'); if (btn) btn.disabled = true;
-    try { await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'feed', postId), post); window.closePostComposer(); }
-    catch (e) { console.error(e); toast('Could not publish post', 'error'); if (btn) btn.disabled = false; }
-    finally { S.busy = false; }
+    try {
+        if (window._postFile) {
+            const kind = String(window._postFile.type).startsWith('video/') ? 'video' : 'photo';
+            const label = `Uploading ${kind}…`;
+            showUploadProgress(label, 0);
+            const media = await uploadMedia(window._postFile, `feed/${id}`, (pr) => showUploadProgress(label, pr));
+            post.media = media;
+            if (media.type === 'image') post.mediaUrl = media.url;   // older app versions show photos from here
+        }
+        await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'feed', postId), post);
+        window.closePostComposer();
+    }
+    catch (e) {
+        console.error(e);
+        const m = String((e && (e.message || e.code)) || '');
+        toast(/TOO_BIG|NOT_MEDIA|unauthorized/.test(m) ? mediaErrorText(e) : 'Could not publish post', 'error');
+        if (btn) btn.disabled = false;
+    }
+    finally { S.busy = false; hideUploadProgress(); }
 };
 
 window.likeCommunityPost = async function(postId) {
@@ -1591,8 +1634,10 @@ window.openCommunityChatThread = function(tid) {
     const communityId = tid.replace(/^community:/, '');
     const c = window.communitiesCache[communityId]; if (!c) return;
     if (S.chatUnsub) { S.chatUnsub(); S.chatUnsub = null; }
+    if (S.chatTypingUnsub) { S.chatTypingUnsub(); S.chatTypingUnsub = null; }
     window.activeChatThreadId = tid;
-    S.activeChatCommunity = communityId; S.chatMessages = [];
+    S.activeChatCommunity = communityId; S.chatMessages = []; S.chatTyping = [];
+    window._forceChatBottom = true;
     const si = document.getElementById('chats-search-input'); if (si) si.value = '';
     document.getElementById('no-chat-selected')?.classList.add('hidden');
     const box = document.getElementById('active-chat-box');
@@ -1600,44 +1645,66 @@ window.openCommunityChatThread = function(tid) {
     const n = document.getElementById('active-chat-name'); if (n) n.innerText = c.name;
     const a = document.getElementById('active-chat-avatar'); if (a) a.src = safeImg(c.thumbnail, DEFAULT_THUMB);
     const sub = document.getElementById('active-chat-subtitle');
-    if (sub) { sub.innerText = 'Community chat'; sub.classList.remove('hidden'); }
-    S.chatUnsub = onSnapshot(
+    const subDefault = `${S.members && S.activeId === communityId && S.members.length ? S.members.length + ' members' : 'Community chat'}`;
+    if (sub) { sub.innerText = subDefault; sub.classList.remove('hidden'); }
+    // "Diego is typing…" / "Multiple people are typing…"
+    S.chatTypingUnsub = watchTyping(tid, (names) => {
+        if (window.activeChatThreadId !== tid) return;
+        S.chatTyping = names;
+        const s2 = document.getElementById('active-chat-subtitle');
+        if (s2) s2.innerText = names.length ? typingText(names) : subDefault;
+        const box = document.getElementById('community-typing-bubble');
+        if (box) {
+            const atBottom = window.isChatNearBottom ? window.isChatNearBottom() : true;
+            box.innerHTML = typingBubbleHtml(names);
+            if (atBottom && window.scrollChatToBottom) window.scrollChatToBottom();
+        }
+    });
+    // Messages live in `messages`. Older app versions saved them in `chat`, so both are shown together.
+    let fromSite = [], fromOldApp = [];
+    const merge = () => {
+        S.chatMessages = [...fromSite, ...fromOldApp].sort((x, y) => msOf(x) - msOf(y)).slice(-150);
+        if (window.activeChatThreadId === tid) renderCommunityChatMessages();
+    };
+    const u1 = onSnapshot(
         query(collection(db, 'artifacts', appId, 'communities', communityId, 'messages'), orderBy('createdAt', 'desc'), limit(100)),
-        (snap) => {
-            S.chatMessages = snap.docs.map(d => ({ ...d.data(), id: d.id })).reverse();
-            if (window.activeChatThreadId === tid) renderCommunityChatMessages();
-        }, (err) => { console.error('community chat', err); toast('Could not load community chat', 'error'); });
+        (snap) => { fromSite = snap.docs.map(d => ({ ...d.data(), id: d.id })); merge(); },
+        (err) => { console.error('community chat', err); toast('Could not load community chat', 'error'); });
+    const u2 = onSnapshot(
+        query(collection(db, 'artifacts', appId, 'communities', communityId, 'chat'), orderBy('createdAt', 'desc'), limit(50)),
+        (snap) => { fromOldApp = snap.docs.map(d => ({ ...d.data(), id: 'app_' + d.id })); merge(); }, () => {});
+    S.chatUnsub = () => { u1(); u2(); };
     window.renderChatsList();
 };
 
 function renderCommunityChatMessages() {
     const container = document.getElementById('active-chat-messages'); if (!container) return;
-    container.classList.add('flex-1', 'overflow-y-auto', 'p-4');
+    container.classList.add('flex-1', 'overflow-y-auto', 'wa-wall', 'py-2');
+    container.classList.remove('space-y-3', 'p-4');
     if (!S.chatMessages.length) {
-        container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-500 space-y-2"><i class="fa-solid fa-people-group text-3xl opacity-40"></i><p class="text-xs font-semibold">No messages yet. Say hello to the community!</p></div>`;
+        container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-400 space-y-2"><i class="fa-solid fa-people-group text-3xl opacity-40"></i><p class="text-xs font-semibold">No messages yet. Say hello to the community! 👋</p></div>
+            <div id="community-typing-bubble">${typingBubbleHtml(S.chatTyping || [])}</div>`;
         return;
     }
     const uid = me().uid;
-    container.innerHTML = S.chatMessages.map(m => {
-        const mine = m.senderUid === uid;
-        const t = tsMs(m.createdAt) ? new Date(tsMs(m.createdAt)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-        return mine ? `
-            <div class="flex items-end justify-end gap-2 my-2"><div class="bg-[#14cc80] text-slate-900 px-4 py-2.5 rounded-2xl rounded-tr-sm max-w-md shadow-sm text-xs relative">
-                <p class="pr-10 pb-3 break-words">${esc(m.text)}</p><span class="absolute bottom-1 right-2.5 text-[9px] text-slate-700">${esc(t)}</span></div></div>` : `
-            <div class="flex items-end gap-2 my-2">${avatarImg({ uid: m.senderUid, name: m.sender, avatar: m.avatar }, 'w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200')}
-                <div class="bg-white border border-slate-200 text-slate-900 px-4 py-2.5 rounded-2xl rounded-tl-sm max-w-md shadow-sm text-xs relative">
-                <p class="text-[10px] font-bold text-emerald-600 mb-0.5">${esc(m.sender || 'Player')}</p>
-                <p class="pr-10 pb-3 break-words">${esc(m.text)}</p><span class="absolute bottom-1 right-2.5 text-[9px] text-slate-400">${esc(t)}</span></div></div>`;
-    }).join('');
-    container.scrollTop = container.scrollHeight;
+    const list = S.chatMessages.map(m => ({
+        id: m.id, uid: m.senderUid || m.senderId || '', name: m.sender || m.senderName || 'Player',
+        avatar: m.avatar, text: m.text, ms: msOf(m), media: m.media
+    }));
+    const atBottom = window.isChatNearBottom ? window.isChatNearBottom() : true;
+    container.innerHTML = renderWhatsApp(list, { myUid: uid, group: true, ticks: false, avatarOf: (u, n, a) => avatarOf({ uid: u, name: n, avatar: a }) })
+        + `<div id="community-typing-bubble">${typingBubbleHtml(S.chatTyping || [])}</div>`;
+    if (atBottom || window._forceChatBottom) container.scrollTop = container.scrollHeight;
+    window._forceChatBottom = false;
 }
 
 window.stopCommunityChat = function() {
     if (S.chatUnsub) { S.chatUnsub(); S.chatUnsub = null; }
+    if (S.chatTypingUnsub) { S.chatTypingUnsub(); S.chatTypingUnsub = null; }
     S.activeChatCommunity = null;
 };
 
-window.sendCommunityChatMessage = async function(text) {
+window.sendCommunityChatMessage = async function(text, media) {
     const cid = S.activeChatCommunity; if (!cid || !me() || !text) return;
     const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     try {
@@ -1646,7 +1713,8 @@ window.sendCommunityChatMessage = async function(text) {
         const _sc = ms.exists() ? suspendedScopes(ms.data()) : null;
         if (_sc && _sc.chat) { toast(`You are suspended from chat until ${fmtDate(tsMs(ms.data().suspendedUntil))}.${ms.data().suspendReason ? ' Reason: ' + esc(ms.data().suspendReason) : ''}`, 'error'); return; }
         await setDoc(doc(db, 'artifacts', appId, 'communities', cid, 'messages', msgId), {
-            id: msgId, senderUid: me().uid, sender: myName(), avatar: myAvatar(), text, createdAt: serverTimestamp()
+            id: msgId, senderUid: me().uid, sender: myName(), avatar: /^https?:\/\//i.test(myAvatar()) && myAvatar().length < 400 ? myAvatar() : '',
+            text, ...(media ? { media } : {}), createdAt: serverTimestamp()
         });
     } catch (e) { console.error(e); toast('Message failed to send', 'error'); }
 };

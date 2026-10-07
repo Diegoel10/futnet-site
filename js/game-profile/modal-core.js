@@ -9,6 +9,7 @@ import { renderStatsTab } from './stats-tab.js';
 import { renderCommentsTab } from './comments-tab.js';
 import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
+import { resultsBannerHtml } from './results.js';
 
 
 // Roster entries saved without a real name show up as "Player". Look the name up from the player's
@@ -487,6 +488,8 @@ window.renderEventDetailModalContent = function() {
                     </div>
                 </div>
             </div>
+
+            ${resultsBannerHtml(event)}
 
             <!-- Navigation Tabs Bar -->
             <div class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
@@ -1203,13 +1206,25 @@ window.toggleMatchFinished = async function(eventId, mIndex) {
     if (res.ok && !res.aborted) window.showToast(nowFinished ? "Game marked as finished!" : "Game reopened.");
 };
 
+// "End Event": locks the results, tells everyone who played, and opens the results page.
 window.toggleSessionEnded = async function(eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    if (ev && !ev.isSessionEnded) {
+        if (ev.liveMatchActive) { window.showToast('Save or discard the live match first.', 'error'); return; }
+        if (!confirm('End this event? The winner is decided by points (3 for a win, 1 for a draw) and everyone who played gets the results.')) return;
+    } else if (ev && !confirm('Reopen this event? You can add more matches, and the results page will be hidden until you end it again.')) {
+        return;
+    }
     let ended = false;
     const res = await mutateEvent(eventId, (draft) => {
         draft.isSessionEnded = !draft.isSessionEnded;
         ended = draft.isSessionEnded;
+        if (ended) draft.sessionEndedAt = Date.now();
     });
-    if (res.ok) window.showToast(ended ? "Session ended successfully!" : "Session reopened.");
+    if (res.ok) {
+        window.showToast(ended ? "Event ended! Everyone is getting the results 🏆" : "Event reopened.");
+        if (ended && window.openSessionResults) window.openSessionResults(eventId);
+    }
 };
 
 window.removeTeamGoal = async function(eventId, mIndex, teamNum, gIdx) {

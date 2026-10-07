@@ -1,6 +1,7 @@
 // js/chat.js: Handles WhatsApp-style messaging threads, directory user search, real-time chat sync, read receipts, and typing indicators
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { renderWhatsApp, typingBubbleHtml, msOf, reportTyping, stopTyping, uploadMedia, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -184,8 +185,10 @@ window.openChatThread = function(id) {
     window.markThreadAsReadLocally(th);
 
     // Listen to partner typing status
+    window._dmPartnerTyping = '';
     window.initTypingListener(id);
 
+    window._forceChatBottom = true;
     window.renderActiveChatMessages();
     window.renderChatsList();
 };
@@ -245,20 +248,31 @@ window.initTypingListener = function(partnerUid) {
         const subTitleEl = document.getElementById('active-chat-subtitle');
         if (!subTitleEl) return;
 
-        if (snap.exists() && snap.data().isTyping === true) {
-            const partnerName = document.getElementById('active-chat-name')?.innerText || 'They';
-            subTitleEl.innerText = `${partnerName} is typing...`;
+        const d = snap.exists() ? snap.data() : null;
+        // Old "typing" flags that were never switched off are ignored after 10 seconds.
+        const t = d && d.timestamp && d.timestamp.toMillis ? d.timestamp.toMillis() : Date.now();
+        const typing = !!(d && d.isTyping === true && Date.now() - t < 10000);
+        const partnerName = document.getElementById('active-chat-name')?.innerText || 'They';
+        window._dmPartnerTyping = typing ? partnerName : '';
+        if (typing) {
+            subTitleEl.innerText = 'typing…';
             subTitleEl.classList.remove('hidden');
         } else {
             subTitleEl.innerText = "";
             subTitleEl.classList.add('hidden');
+        }
+        const box = document.getElementById('dm-typing-bubble');
+        if (box) {
+            const atBottom = isNearBottom();
+            box.innerHTML = typingBubbleHtml(typing ? [partnerName] : []);
+            if (atBottom) scrollChatToBottom();
         }
     });
 };
 
 window.handleChatInputKeypress = function() {
     if (!window.currentUser || !window.activeChatThreadId) return;
-    if (String(window.activeChatThreadId).startsWith('community:')) return;
+    if (String(window.activeChatThreadId).startsWith('community:')) { reportTyping(String(window.activeChatThreadId)); return; }
 
     // Document ID format: myUid_partnerUid
     const typingRef = doc(db, 'artifacts', appId, 'typing', `${window.currentUser.uid}_${window.activeChatThreadId}`);
@@ -291,65 +305,46 @@ window.renderActiveChatMessages = function() {
     const container = document.getElementById('active-chat-messages');
     if (!container) return;
 
-    container.classList.add('flex-1', 'overflow-y-auto', 'p-4');
-    
+    container.classList.add('flex-1', 'overflow-y-auto', 'wa-wall');
+    container.classList.remove('space-y-3');
+
     if (!th.messages || th.messages.length === 0) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full text-slate-500 space-y-2">
+            <div class="flex flex-col items-center justify-center h-full text-slate-400 space-y-2">
                 <i class="fa-solid fa-comments text-3xl opacity-40"></i>
-                <p class="text-xs font-semibold">No chat history. Say hello!</p>
+                <p class="text-xs font-semibold">No messages yet. Say hello! 👋</p>
             </div>
         `;
         return;
     }
 
     const myUid = window.currentUser?.uid;
-    const myName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || 'Enzo';
-
-    // Get live directory avatar for partner if available
-    const livePartner = (window.cachedDirectoryList || []).find(d => d.uid === th.id);
-    const partnerAvatar = livePartner?.avatar || th.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
-
-    container.innerHTML = th.messages.map(m => {
-        const isMe = (m.senderUid && m.senderUid === myUid) || 
-                     (m.sender && m.sender.toLowerCase() === myName.toLowerCase());
-
-        const avatarUrl = isMe 
-            ? (window.userProfile?.avatar || window.currentUser?.photoURL || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100')
-            : (partnerAvatar);
-            
-        const senderDisplayName = isMe ? 'You' : th.name;
-        const checkColor = m.isRead === true ? 'text-blue-500' : 'text-slate-400';
-
-        if (isMe) {
-            return `
-                <div class="flex items-end justify-end gap-2 my-2">
-                    <div class="bg-[#14cc80] text-slate-900 px-4 py-2.5 rounded-2xl rounded-tr-sm max-w-md shadow-sm text-xs relative">
-                        <p class="pr-14 pb-3 break-words font-normal">${esc(m.text)}</p>
-                        <div class="absolute bottom-1 right-2.5 flex items-center gap-1 select-none">
-                            <span class="text-[9px] text-slate-700 font-medium">${esc(m.time)}</span>
-                            <span class="text-[11px] ${checkColor} font-bold tracking-tighter">✓✓</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            return `
-                <div class="flex items-end gap-2 my-2">
-                    <img src="${esc(avatarUrl)}" class="w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200">
-                    <div class="bg-white border border-slate-200 text-slate-900 px-4 py-2.5 rounded-2xl rounded-tl-sm max-w-md shadow-sm text-xs relative">
-                        <p class="text-[10px] font-bold text-emerald-600 mb-0.5">${esc(senderDisplayName)}</p>
-                        <p class="pr-12 pb-3 break-words font-normal">${esc(m.text)}</p>
-                        <div class="absolute bottom-1 right-2.5 flex items-center gap-1 select-none">
-                            <span class="text-[9px] text-slate-400 font-medium">${esc(m.time)}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-    }).join('');
-    container.scrollTop = container.scrollHeight;
+    const myName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || '';
+    const list = th.messages.map(m => {
+        const mine = (m.senderUid && m.senderUid === myUid) || (!m.senderUid && myName && m.sender && m.sender.toLowerCase() === myName.toLowerCase());
+        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms: msOf(m), time: m.time, isRead: m.isRead === true, media: m.media };
+    });
+    const atBottom = isNearBottom();
+    container.classList.add('wa-wall');
+    container.classList.remove('space-y-3', 'p-4');
+    container.classList.add('py-2');
+    container.innerHTML = renderWhatsApp(list, { myUid, group: false, ticks: true })
+        + `<div id="dm-typing-bubble">${typingBubbleHtml(window._dmPartnerTyping ? [window._dmPartnerTyping] : [])}</div>`;
+    if (atBottom || window._forceChatBottom) scrollChatToBottom();
+    window._forceChatBottom = false;
 };
+
+function isNearBottom() {
+    const c = document.getElementById('active-chat-messages');
+    return !c || c.scrollHeight - c.scrollTop - c.clientHeight < 120;
+}
+function scrollChatToBottom() {
+    const c = document.getElementById('active-chat-messages');
+    if (c) c.scrollTop = c.scrollHeight;
+}
+window.scrollChatToBottom = scrollChatToBottom;
+window.isChatNearBottom = isNearBottom;
+
 
 window.handleSendActiveChatMessage = async function(e) {
     e.preventDefault();
@@ -357,10 +352,47 @@ window.handleSendActiveChatMessage = async function(e) {
     if (!input) return;
     const text = input.value.trim();
     if (!text || !window.activeChatThreadId || !window.currentUser) return;
+    input.value = '';
+    await sendToActiveChat(text, null);
+};
 
+// 📎 A photo or video was picked in the open chat (private or community).
+async function sendChatFile(file) {
+    const tid = String(window.activeChatThreadId || '');
+    if (!tid || !window.currentUser) return;
+    const isCommunity = tid.startsWith('community:');
+    const folder = isCommunity
+        ? `community/${tid.slice(10)}`
+        : `chat/${[window.currentUser.uid, tid].sort().join('_')}`;
+    const kind = String(file.type).startsWith('video/') ? 'video' : 'image';
+    const input = document.getElementById('active-chat-input');
+    const caption = input ? input.value.trim() : '';
+    try {
+        showUploadProgress(kind === 'video' ? 'Sending video…' : 'Sending photo…', 0);
+        const media = await uploadMedia(file, folder, (p) => showUploadProgress(kind === 'video' ? 'Sending video…' : 'Sending photo…', p));
+        if (input) input.value = '';
+        await sendToActiveChat(caption || MEDIA_LABEL[kind], media);
+    } catch (err) {
+        console.error('media upload failed', err);
+        if (window.showToast) window.showToast(mediaErrorText(err), 'error');
+    } finally {
+        hideUploadProgress();
+    }
+}
+
+// The 📎 button next to the message box (added once).
+function ensureChatAttach() {
+    addAttachButton(document.getElementById('active-chat-input'), sendChatFile);
+}
+document.addEventListener('DOMContentLoaded', ensureChatAttach);
+setTimeout(ensureChatAttach, 1500);
+
+async function sendToActiveChat(text, media) {
+    ensureChatAttach();
     if (String(window.activeChatThreadId).startsWith('community:')) {
-        input.value = '';
-        window.sendCommunityChatMessage(text);
+        stopTyping(String(window.activeChatThreadId));
+        window._forceChatBottom = true;
+        window.sendCommunityChatMessage(text, media);
         return;
     }
 
@@ -378,7 +410,9 @@ window.handleSendActiveChatMessage = async function(e) {
     }
 
     const senderName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || 'Player';
-    const senderAvatar = window.userProfile?.avatar || window.currentUser?.photoURL || '';
+    const rawAvatar = window.userProfile?.avatar || window.currentUser?.photoURL || '';
+    // Only short web links are copied into messages (big saved photos would fill the chat record).
+    const senderAvatar = /^https?:\/\//i.test(rawAvatar) && rawAvatar.length < 400 ? rawAvatar : '';
 
     const newMessage = {
         id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
@@ -389,14 +423,17 @@ window.handleSendActiveChatMessage = async function(e) {
         avatar: senderAvatar,
         isRead: false
     };
+    if (media) newMessage.media = media;
 
     th.messages.push(newMessage);
     
     // Trim messages to keep the last 100 messages (protecting against the 1MB document limit)
     th.messages = th.messages.slice(-100);
 
-    input.value = '';
+    if (typingTimeout) clearTimeout(typingTimeout);
+    setDoc(doc(db, 'artifacts', appId, 'typing', `${window.currentUser.uid}_${th.id}`), { isTyping: false }, { merge: true }).catch(() => {});
 
+    window._forceChatBottom = true;
     window.renderActiveChatMessages();
     window.renderChatsList();
 

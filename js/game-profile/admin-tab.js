@@ -229,6 +229,11 @@ export function renderAdminTab(event) {
                         <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl text-xs border border-red-500/40">Cancel Game</button>
                     </div>
                 </div>
+                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2">
+                    <h5 class="text-xs font-black uppercase text-[#00F296]">Need players?</h5>
+                    <p class="text-[11px] text-white/60">Send a push notification about this game to everyone on FutNet (once an hour).</p>
+                    <button onclick="notifyEveryoneAboutGame('${event.id}')" class="w-full bg-amber-400 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow flex items-center justify-center gap-2"><i class="fa-solid fa-bullhorn"></i> Notify everyone</button>
+                </div>
             </div>
         `;
     } else if (currentTab === 'manage-players') {
@@ -268,8 +273,9 @@ export function renderAdminTab(event) {
                     <button onclick="checkAndOpenStartMatch('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
                         <i class="fa-solid fa-play"></i> Start Match
                     </button>
-                    <button onclick="toggleSessionEnded('${event.id}')" class="px-3 py-2.5 rounded-xl text-xs font-black ${isSessionEnded ? 'bg-amber-400 text-slate-950 shadow' : 'bg-black/60 text-white/70 border border-white/15'}">${isSessionEnded ? 'Session Ended' : 'End Session'}</button>
+                    <button onclick="toggleSessionEnded('${event.id}')" class="px-3 py-2.5 rounded-xl text-xs font-black ${isSessionEnded ? 'bg-black/60 text-white/70 border border-white/15' : 'bg-amber-400 text-slate-950 shadow'}"><i class="fa-solid ${isSessionEnded ? 'fa-rotate-left' : 'fa-flag-checkered'} mr-1"></i>${isSessionEnded ? 'Reopen Event' : 'End Event'}</button>
                 </div>
+                ${isSessionEnded ? `<button onclick="openSessionResults('${event.id}')" class="w-full bg-amber-400/15 border border-amber-400/50 text-amber-300 font-black py-2.5 rounded-xl text-xs flex items-center justify-center gap-2"><i class="fa-solid fa-trophy"></i> View final results</button>` : ''}
                 <div class="space-y-3">
                     ${liveBannerHtml}
                     ${matchesListHtml}

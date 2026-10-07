@@ -202,11 +202,20 @@ const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/pers
 const safeImg = (u) => { u = String(u || ''); return (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) ? u : DEFAULT_AVATAR; };
 const tsMs = (t) => t?.toMillis ? t.toMillis() : (t?.seconds ? t.seconds * 1000 : 0);
 
+// Live profile picture (player directory first), then the saved one, then a letter avatar.
+const photoOf = (who) => {
+    if (window.resolvePlayerAvatar) return window.resolvePlayerAvatar(who);
+    const d = (window.directoryList || []).find(u => String(u.uid) === String(who.uid));
+    return safeImg(d?.avatar || d?.photoURL || who.avatar);
+};
+const photoImg = (who, cls) => `<img src="${esc(photoOf(who))}" class="${cls} rounded-full object-cover shrink-0" onerror="this.src='${DEFAULT_AVATAR}'">`;
+
 const ledgerLine = (l, showName) => {
     const plus = (l.amountCents || 0) > 0;
     const when = tsMs(l.at) ? new Date(tsMs(l.at)).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'just now';
     const label = l.type === 'topup' ? 'Credit added' : l.type === 'game' ? `Game: ${l.eventTitle || ''}` : l.type === 'refund' ? `Refund: ${l.eventTitle || l.note || ''}` : 'Adjustment';
     return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2">
+        ${showName ? photoImg({ uid: l.uid, name: l.name }, 'w-7 h-7') : ''}
         <div class="flex-1 min-w-0">
             <div class="text-[11px] font-bold text-white truncate">${showName ? esc(l.name || 'Member') + ' • ' : ''}${esc(label)}</div>
             <div class="text-[10px] text-white/50 truncate">${when}${l.note && l.type !== 'game' && l.type !== 'refund' ? ' • ' + esc(l.note) : ''}${l.byName && l.type === 'topup' ? ' • by ' + esc(l.byName) : ''}</div>
@@ -241,7 +250,7 @@ export function adminCreditHtml(c, members, credits, ledger) {
             <div class="space-y-2">${members.map(m => {
                 const bal = credits[m.uid]?.balanceCents || 0;
                 return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
-                    <img src="${esc(safeImg(m.avatar))}" class="w-8 h-8 rounded-full object-cover">
+                    ${photoImg(m, 'w-9 h-9 border border-emerald-500/40')}
                     <div class="flex-1 min-w-0"><div class="text-xs font-bold text-white truncate">${esc(m.name || 'Player')}</div>
                     <div class="text-[10px] ${bal > 0 ? 'text-[#00F296]' : 'text-white/50'}">Balance ${dollars(bal)}</div></div>
                     <button onclick="openCreditModal('${jsArg(c.id)}', '${jsArg(m.uid)}', '${jsArg(m.name || 'Member')}')" class="${BTN_PRIMARY}">Add / Edit</button>

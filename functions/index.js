@@ -142,7 +142,15 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
   }
 
   // One person can be signed in on several phones.
-  const tokens = uniq([dir.fcmToken, dir.fcmToke, ...arr(dir.fcmTokens)]);
+  let tokens = uniq([dir.fcmToken, dir.fcmToke, ...arr(dir.fcmTokens)]);
+
+  // A phone that is also signed in as the person who did the action (for example a test
+  // account used on the same phone) never gets a push about its own action.
+  if (n.senderUid && n.senderUid !== recipientUid) {
+    const sender = (await col("directory").doc(n.senderUid).get()).data() || {};
+    const senderTokens = new Set(uniq([sender.fcmToken, sender.fcmToke, ...arr(sender.fcmTokens)]));
+    tokens = tokens.filter((t) => !senderTokens.has(t));
+  }
   if (!tokens.length) {
     logger.info("No FCM token for", recipientUid);
     return;
@@ -311,7 +319,7 @@ function teamName(game, idx) {
   return names[idx] || (Array.isArray(names) && names[Number(idx)]) || `Team ${Number(idx) + 1}`;
 }
 
-const commentAuthor = (c) => (c && (c.uid || c.userId || c.authorId || c.authorUid || c.senderUid)) || "";
+const commentAuthor = (c) => (c && (c.uid || c.userId || c.authorId || c.authorUid || c.senderUid || c.senderId || c.createdBy || c.ownerId || c.userUid)) || "";
 const commentText = (c) => (c && (c.text || c.comment || c.message || c.body)) || "";
 const commentName = (c) => (c && (c.name || c.authorName || c.author || c.senderName)) || "";
 
@@ -556,4 +564,148 @@ exports.notifyEveryone = onCall(async (request) => {
 
   await gameRef.update({ lastBroadcastAt: admin.firestore.FieldValue.serverTimestamp() });
   return { sent };
+});
+
+// ---------------------------------------------------------------------------
+// 7. Community feed: new posts (tailored to the kind of post) and comments
+// ---------------------------------------------------------------------------
+
+/** The message line, tailored to the kind of post. */
+function describePost(p) {
+  if (p.poll && p.poll.question) return `📊 Poll: ${clip(p.poll.question, 100)}`;
+  if (p.media && p.media.type === "video") return p.text ? `🎥 ${clip(p.text, 100)}` : "🎥 Shared a video";
+  if (p.mediaUrl || (p.media && p.media.url)) return p.text ? `📸 ${clip(p.text, 100)}` : "📸 Shared a photo";
+  return clip(p.text, 120) || "New post";
+}
+
+exports.onFeedPostCreated = onDocumentCreated(`${BASE}/communities/{communityId}/feed/{postId}`, async (event) => {
+  const p = (event.data && event.data.data()) || {};
+  const { communityId, postId } = event.params;
+  const author = p.authorId || "";
+  const { all, community } = await communityMembers(communityId);
+  const who = p.authorName || (await nameOf(author));
+  const cName = String(community.name || "your").replace(/\s+community$/i, "");
+
+  await notify(all, {
+    type: "community_post",
+    senderUid: author,
+    communityId,
+    title: `${who} posted on ${cName} Community`,
+    body: describePost(p),
+  }, { exclude: [author], key: `post_${postId}` });
+});
+
+exports.onFeedPostUpdated = onDocumentUpdated(`${BASE}/communities/{communityId}/feed/{postId}`, async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  const { communityId, postId } = event.params;
+  const oldCount = arr(before.comments).length;
+  const comments = arr(after.comments);
+  if (comments.length <= oldCount) return;            // likes, votes, edits: no push
+
+  const author = after.authorId || "";
+  const { community } = await communityMembers(communityId);
+  const cName = community.name || "your community";
+
+  for (let i = oldCount; i < comments.length; i++) {
+    const c = comments[i] || {};
+    const by = c.authorId || c.uid || "";
+    const who = c.authorName || c.name || (await nameOf(by));
+    // The post's author, plus everyone who commented before (so replies reach the conversation).
+    const earlier = comments.slice(0, i).map((x) => x.authorId || x.uid);
+    const toAuthor = author && author !== by;
+
+    if (toAuthor) {
+      await notify([author], {
+        type: "community_post_comment",
+        senderUid: by,
+        communityId,
+        title: `${who} commented on your post 💬`,
+        body: `${clip(c.text, 120)} · ${cName}`,
+      }, { key: `postc_${postId}_${i}` });
+    }
+    await notify(uniq(earlier), {
+      type: "community_post_comment",
+      senderUid: by,
+      communityId,
+      title: `${who} also commented 💬`,
+      body: `${clip(c.text, 120)} · ${cName}`,
+    }, { exclude: [by, author], key: `postc_${postId}_${i}` });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Credit added or removed by an admin
+// ---------------------------------------------------------------------------
+
+exports.onCreditLedger = onDocumentCreated(`${BASE}/communities/{communityId}/creditLedger/{entryId}`, async (event) => {
+  const l = (event.data && event.data.data()) || {};
+  const { communityId, entryId } = event.params;
+  if (l.type !== "topup" && l.type !== "adjust") return;   // game fees and refunds are covered by the game pushes
+  if (!l.uid || l.by === l.uid) return;
+
+  const cents = Math.round(Number(l.amountCents) || 0);
+  if (!cents) return;
+  const money = `$${(Math.abs(cents) / 100).toFixed(2)}`;
+  const balance = `$${((Number(l.balanceAfterCents) || 0) / 100).toFixed(2)}`;
+  const { community } = await communityMembers(communityId);
+  const who = l.byName || (await nameOf(l.by));
+  const cName = community.name || "your community";
+
+  await notify([l.uid], {
+    type: "community_credit",
+    senderUid: l.by || "",
+    communityId,
+    title: cents > 0 ? `${money} credit added 💰` : `${money} credit removed`,
+    body: `${who} ${cents > 0 ? "added" : "removed"} ${money} ${cents > 0 ? "to" : "from"} your ${cName} credit. Balance: ${balance}.${l.note ? " Note: " + clip(l.note, 60) : ""}`,
+  }, { key: `credit_${entryId}` });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Someone asked to join a community -> tell the admins
+// ---------------------------------------------------------------------------
+
+exports.onCommunityJoinRequest = onDocumentCreated(`${BASE}/communities/{communityId}/requests/{uid}`, async (event) => {
+  const r = (event.data && event.data.data()) || {};
+  const { communityId, uid } = event.params;
+  const { admins, community } = await communityMembers(communityId);
+  const who = r.name || (await nameOf(uid));
+
+  await notify(admins, {
+    type: "community_join_request",
+    senderUid: uid,
+    communityId,
+    title: "New join request 🙋",
+    body: `${who} wants to join ${community.name || "your community"}. Tap to review.`,
+  }, { exclude: [uid], key: `joinreq_${communityId}_${uid}_${tenMinuteBucket()}` });
+});
+
+// ---------------------------------------------------------------------------
+// 10. One phone = one account: when a phone signs in to an account, remove it
+//     from any other account it was saved on (so test accounts don't get your pushes)
+// ---------------------------------------------------------------------------
+
+exports.onPhoneTokenSaved = onDocumentWritten(`${BASE}/directory/{uid}`, async (event) => {
+  if (!event.data.after.exists) return;
+  const uid = event.params.uid;
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const after = event.data.after.data() || {};
+  const had = new Set(uniq([before.fcmToken, ...arr(before.fcmTokens)]));
+  const added = uniq([after.fcmToken, ...arr(after.fcmTokens)]).filter((t) => !had.has(t));
+  if (!added.length) return;
+
+  for (const token of added) {
+    const [inList, asMain] = await Promise.all([
+      col("directory").where("fcmTokens", "array-contains", token).get(),
+      col("directory").where("fcmToken", "==", token).get(),
+    ]);
+    const others = new Map();
+    [...inList.docs, ...asMain.docs].forEach((d) => { if (d.id !== uid) others.set(d.id, d); });
+    for (const [otherUid, d] of others) {
+      const patch = { fcmTokens: admin.firestore.FieldValue.arrayRemove(token) };
+      if ((d.data() || {}).fcmToken === token) patch.fcmToken = admin.firestore.FieldValue.delete();
+      await d.ref.update(patch);
+      logger.info("Moved phone token from", otherUid, "to", uid);
+    }
+  }
 });
