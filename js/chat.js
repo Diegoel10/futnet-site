@@ -1,7 +1,7 @@
 // js/chat.js: Handles WhatsApp-style messaging threads, directory user search, real-time chat sync, read receipts, and typing indicators
 import { db, appId } from './firebase-config.js';
-import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { renderWhatsApp, typingBubbleHtml, msOf, reportTyping, stopTyping, uploadMedia, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
+import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot, query as fsQuery, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -12,13 +12,9 @@ let typingUnsubscribe = null;
 let typingTimeout = null;
 window.chatsTab = 'chats';
 
+// WhatsApp-style filter chips: All · Unread · Groups ('chats' = All, 'community' = Groups, kept for older links)
 window.setChatsTab = function(tab) {
-    window.chatsTab = tab === 'community' ? 'community' : 'chats';
-    const on = 'flex-1 py-3 text-xs font-black uppercase tracking-wider text-[#00F296] border-b-2 border-[#00F296]';
-    const off = 'flex-1 py-3 text-xs font-black uppercase tracking-wider text-white/50 border-b-2 border-transparent';
-    const a = document.getElementById('chats-tab-btn-chats'), b = document.getElementById('chats-tab-btn-community');
-    if (a) a.className = window.chatsTab === 'chats' ? on : off;
-    if (b) b.className = window.chatsTab === 'community' ? on : off;
+    window.chatsTab = tab === 'community' ? 'community' : (tab === 'unread' ? 'unread' : 'all');
     window.renderChatsList();
 };
 
@@ -51,6 +47,135 @@ window.initChatListener = function() {
     });
 };
 
+// ---- Community chats in the list: last message + unread count (read marks are kept on this device)
+const commLast = {};          // communityId -> latest messages (newest first)
+const commUnsubs = {};
+const READ_KEY = (cid) => `futnet_commread_${cid}`;
+const lastReadOf = (cid) => { try { return parseInt(localStorage.getItem(READ_KEY(cid)) || '0', 10) || 0; } catch (e) { return 0; } };
+function markCommunityRead(cid) { try { localStorage.setItem(READ_KEY(cid), String(Date.now())); } catch (e) { /* private mode */ } }
+window.markCommunityChatRead = markCommunityRead;
+
+function watchCommunityChats() {
+    (window.communityChatThreads || []).forEach(t => {
+        const cid = t.communityId || String(t.id).slice(10);
+        if (!cid || commUnsubs[cid]) return;
+        commUnsubs[cid] = onSnapshot(
+            fsQuery(collection(db, 'artifacts', appId, 'communities', cid, 'messages'), orderBy('createdAt', 'desc'), limit(30)),
+            (snap) => {
+                commLast[cid] = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+                if (window.activeChatThreadId === 'community:' + cid) markCommunityRead(cid);
+                window.renderChatsList();
+            }, () => {});
+    });
+}
+
+const fmtListTime = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms), now = new Date();
+    if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const y = new Date(); y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    if ((now - d) / 86400000 < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+    return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' });
+};
+const mediaIcon = (m) => m && m.media && m.media.url
+    ? (m.media.type === 'video' ? '<i class="fa-solid fa-video mr-1"></i>' : '<i class="fa-solid fa-camera mr-1"></i>') : '';
+const previewText = (m) => {
+    const t = String(m?.text || '');
+    if (m && m.media && (t === '📷 Photo' || t === '🎥 Video')) return m.media.type === 'video' ? 'Video' : 'Photo';
+    return t;
+};
+
+/** One row per conversation (private + community), newest first. */
+function buildChatRows() {
+    const myUid = window.currentUser?.uid;
+    const rows = [];
+    (window.chatsThreads || []).forEach(th => {
+        const msgs = th.messages || [];
+        if (!msgs.length) return;
+        const last = msgs[msgs.length - 1];
+        const live = (window.cachedDirectoryList || []).find(d => d.uid === th.id);
+        rows.push({
+            id: th.id, isGroup: false,
+            name: (live && (live.name || `${live.firstName || ''} ${live.lastName || ''}`.trim())) || th.name || 'Player',
+            avatar: (live && live.avatar) || th.avatar || '',
+            last, lastMine: last.senderUid === myUid, ms: msOf(last),
+            unread: msgs.filter(m => m.senderUid !== myUid && m.isRead !== true).length
+        });
+    });
+    (window.communityChatThreads || []).forEach(t => {
+        const cid = t.communityId || String(t.id).slice(10);
+        const list = commLast[cid] || [];
+        const last = list[0] || null;
+        const readAt = lastReadOf(cid);
+        rows.push({
+            id: t.id, isGroup: true, name: t.name || 'Community', avatar: t.avatar || '',
+            last, lastMine: last && last.senderUid === myUid, ms: last ? msOf(last) : 0,
+            unread: list.filter(m => m.senderUid !== myUid && msOf(m) > readAt).length
+        });
+    });
+    return rows.sort((a, b) => b.ms - a.ms);
+}
+
+function chatRowHtml(r) {
+    const selected = window.activeChatThreadId === r.id;
+    const time = fmtListTime(r.ms);
+    let preview = '';
+    if (r.last) {
+        const ticks = r.lastMine && !r.isGroup
+            ? `<span class="${r.last.isRead ? 'text-[#53BDEB]' : 'text-[#8696A0]'} font-bold tracking-[-3px] mr-1.5">✓✓</span>` : '';
+        const who = r.isGroup && !r.lastMine && r.last.sender
+            ? `<span style="color:${nameColor(r.last.senderUid || r.last.sender)}">${esc(String(r.last.sender).split(' ')[0])}:</span> `
+            : (r.isGroup && r.lastMine ? 'You: ' : '');
+        preview = `${ticks}${who}${mediaIcon(r.last)}${esc(previewText(r.last))}`;
+    } else {
+        preview = r.isGroup ? '<span class="italic">Community chat · Say hello 👋</span>' : '';
+    }
+    const fallback = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    return `
+        <div onclick="openChatThread('${esc(r.id)}')" class="flex items-center gap-3 px-3 py-2.5 cursor-pointer transition ${selected ? 'bg-[#2A3942]' : 'hover:bg-[#202C33]'}">
+            <img src="${esc(r.avatar || fallback)}" onerror="this.src='${fallback}'" class="w-12 h-12 rounded-full object-cover shrink-0 bg-[#202C33]">
+            <div class="flex-1 min-w-0 border-b border-white/5 pb-2.5 -mb-2.5">
+                <div class="flex items-baseline justify-between gap-2">
+                    <span class="text-[15px] font-semibold text-[#E9EDEF] truncate">${r.isGroup ? '<i class="fa-solid fa-people-group text-[11px] text-[#8696A0] mr-1.5"></i>' : ''}${esc(r.name)}</span>
+                    <span class="text-[11px] shrink-0 ${r.unread ? 'text-[#25D366] font-semibold' : 'text-[#8696A0]'}">${esc(time)}</span>
+                </div>
+                <div class="flex items-center justify-between gap-2 mt-0.5">
+                    <span class="text-[13px] text-[#8696A0] truncate">${preview}</span>
+                    ${r.unread ? `<span class="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#25D366] text-[#0B141A] text-[11px] font-bold flex items-center justify-center">${r.unread > 99 ? '99+' : r.unread}</span>` : ''}
+                </div>
+            </div>
+        </div>`;
+}
+
+// Turns the old "Chats / Community Chats" tabs into WhatsApp's look: chips + rounded search, dark list.
+function styleChatsPanel() {
+    const a = document.getElementById('chats-tab-btn-chats');
+    const bar = a && a.parentElement;
+    if (bar && !document.getElementById('wa-chat-chips')) {
+        bar.style.display = 'none';
+        const chips = document.createElement('div');
+        chips.id = 'wa-chat-chips';
+        chips.className = 'flex gap-2 px-3 py-2 overflow-x-auto';
+        bar.parentElement.insertBefore(chips, bar.nextSibling);
+    }
+    const chips = document.getElementById('wa-chat-chips');
+    if (chips) {
+        const cur = window.chatsTab === 'community' ? 'community' : (window.chatsTab === 'unread' ? 'unread' : 'all');
+        const totalUnread = buildChatRows().reduce((n, r) => n + (r.unread ? 1 : 0), 0);
+        const chip = (key, label) => `<button onclick="setChatsTab('${key}')" class="shrink-0 px-3.5 py-1.5 rounded-full text-[13px] font-semibold transition ${cur === key ? 'bg-[#103529] text-[#25D366]' : 'bg-[#202C33] text-[#8696A0] hover:text-[#E9EDEF]'}">${label}</button>`;
+        chips.innerHTML = chip('all', 'All') + chip('unread', `Unread${totalUnread ? ' ' + totalUnread : ''}`) + chip('community', 'Groups');
+    }
+    const search = document.getElementById('chats-search-input');
+    if (search && !search.dataset.waStyled) {
+        search.dataset.waStyled = '1';
+        search.placeholder = 'Search or start a new chat';
+        search.style.cssText = 'background-color:#202C33 !important;color:#E9EDEF !important;border:0;border-radius:9999px;padding:9px 16px;';
+    }
+    const list = document.getElementById('chats-threads-container');
+    if (list) list.style.background = '#111B21';
+}
+
 window.renderChatsList = async function() {
     const query = (document.getElementById('chats-search-input')?.value || '').toLowerCase().trim();
     const container = document.getElementById('chats-threads-container');
@@ -59,80 +184,56 @@ window.renderChatsList = async function() {
     if (!window.cachedDirectoryList) {
         try {
             const snap = await getDocs(collection(db, 'artifacts', appId, 'directory'));
-            window.cachedDirectoryList = snap.docs.map(d => d.data());
+            window.cachedDirectoryList = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         } catch (e) {
             window.cachedDirectoryList = [];
         }
     }
+    watchCommunityChats();
+    styleChatsPanel();
 
-    const inCommunityTab = window.chatsTab === 'community';
-    let activeThreads = inCommunityTab ? [] : [...(window.chatsThreads || [])];
+    let rows = buildChatRows();
+    if (window.chatsTab === 'unread') rows = rows.filter(r => r.unread);
+    if (window.chatsTab === 'community') rows = rows.filter(r => r.isGroup);
+    if (query) rows = rows.filter(r => r.name.toLowerCase().includes(query));
 
-    if (inCommunityTab) {
-        // only community group chats are listed here
-    } else if (query !== '') {
-        activeThreads = activeThreads.filter(th => th.name.toLowerCase().includes(query));
-
-        const existingThreadIds = new Set(activeThreads.map(t => t.id));
-        const matchingDirectoryUsers = (window.cachedDirectoryList || []).filter(u => {
-            if (u.uid === window.currentUser?.uid) return false;
-            const fullName = (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase();
-            const nickName = (u.nickname || '').toLowerCase();
-            return (fullName.includes(query) || nickName.includes(query)) && !existingThreadIds.has(u.uid);
-        });
-
-        matchingDirectoryUsers.forEach(u => {
-            const displayName = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Player';
-            activeThreads.push({
-                id: u.uid,
-                name: displayName,
-                avatar: u.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
-                messages: []
-            });
-        });
-    } else {
-        activeThreads = activeThreads.filter(th => th.messages && th.messages.length > 0);
+    // Searching also finds people on FutNet you haven't chatted with yet.
+    let people = '';
+    if (query) {
+        const have = new Set(rows.map(r => r.id));
+        const found = (window.cachedDirectoryList || []).filter(u => {
+            if (!u.uid || u.uid === window.currentUser?.uid || have.has(u.uid)) return false;
+            const full = (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase();
+            return full.includes(query) || (u.nickname || '').toLowerCase().includes(query);
+        }).slice(0, 25);
+        if (found.length) {
+            people = `<div class="px-4 pt-4 pb-1 text-[13px] font-semibold text-[#25D366]">Start a new chat</div>` + found.map(u => {
+                const n = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Player';
+                return `<div onclick="startChatWithPlayer('${esc(u.uid)}')" class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-[#202C33]">
+                    <img src="${esc(u.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-12 h-12 rounded-full object-cover shrink-0">
+                    <div class="min-w-0"><div class="text-[15px] font-semibold text-[#E9EDEF] truncate">${esc(n)}</div>
+                    <div class="text-[13px] text-[#8696A0] truncate">${esc(u.position || 'Player')}</div></div></div>`;
+            }).join('');
+        }
     }
 
-    // Community group chats (messages live in communities/{id}/messages)
-    const commThreads = (window.communityChatThreads || []).filter(t => !query || (t.name || '').toLowerCase().includes(query));
-    activeThreads = inCommunityTab ? commThreads : activeThreads;
-
-    if (activeThreads.length === 0) {
-        container.innerHTML = inCommunityTab
-            ? `<div class="p-6 text-center text-xs text-slate-500 italic">No community chats yet. Join a community to chat with its members.</div>`
-            : `<div class="p-6 text-center text-xs text-slate-500 italic">No conversations found. Search above to start chatting with anyone!</div>`;
+    if (!rows.length && !people) {
+        const empty = window.chatsTab === 'unread' ? 'No unread chats 🎉'
+            : window.chatsTab === 'community' ? 'No community chats yet. Join a community to chat with its members.'
+            : (query ? 'No chats or players found.' : 'No chats yet. Search above to start chatting with anyone!');
+        container.innerHTML = `<div class="p-8 text-center text-sm text-[#8696A0]">${empty}</div>`;
         return;
     }
-
-    container.innerHTML = activeThreads.map(th => {
-        const hasMessages = th.messages && th.messages.length > 0;
-        const lastMsg = th.isCommunity ? 'Community chat' : (hasMessages ? th.messages[th.messages.length - 1].text : 'Click to start conversation');
-        const lastTime = hasMessages ? th.messages[th.messages.length - 1].time : '';
-        
-        // Check live directory cache for freshest avatar/name
-        const liveUser = th.isCommunity ? null : (window.cachedDirectoryList || []).find(d => d.uid === th.id);
-        const avatarSrc = (liveUser && liveUser.avatar) ? liveUser.avatar : (th.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100');
-        const displayName = (liveUser && (liveUser.name || liveUser.firstName)) ? (liveUser.name || `${liveUser.firstName} ${liveUser.lastName || ''}`) : th.name;
-
-        return `
-            <div onclick="openChatThread('${esc(th.id)}')" class="p-3.5 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition ${window.activeChatThreadId === th.id ? 'bg-slate-50' : ''}">
-                <div class="flex items-center gap-3 truncate">
-                    <img src="${esc(avatarSrc)}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200">
-                    <div class="truncate">
-                        <h3 class="text-xs font-black text-slate-900 truncate">${esc(displayName)}</h3>
-                        <p class="text-[11px] text-slate-500 mt-0.5 truncate">${esc(lastMsg)}</p>
-                    </div>
-                </div>
-                <span class="text-[9px] text-slate-400 shrink-0 ml-2">${lastTime}</span>
-            </div>
-        `;
-    }).join('');
+    container.innerHTML = rows.map(chatRowHtml).join('') + people;
 };
 
 window.openChatThread = function(id) {
-    if (String(id).startsWith('community:')) { if (window.chatsTab !== 'community') window.setChatsTab('community'); window.openCommunityChatThread(id); return; }
-    if (window.chatsTab !== 'chats') window.setChatsTab('chats');
+    if (String(id).startsWith('community:')) {
+        markCommunityRead(String(id).slice(10));
+        window.openCommunityChatThread(id);
+        return;
+    }
+    if (window.chatsTab === 'community') window.setChatsTab('all');
     if (window.stopCommunityChat) window.stopCommunityChat();
     window.activeChatThreadId = id;
     let th = (window.chatsThreads || []).find(t => t.id === id);
@@ -285,6 +386,10 @@ window.handleChatInputKeypress = function() {
 };
 
 window.startChatWithPlayer = function(uid, name, avatar) {
+    const u = (window.cachedDirectoryList || []).find(d => d.uid === uid);
+    if (!name && u) name = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Player';
+    if (!avatar && u) avatar = u.avatar;
+    const si = document.getElementById('chats-search-input'); if (si) si.value = '';
     let th = (window.chatsThreads || []).find(t => t.id === uid);
     if (!th) {
         th = {

@@ -635,6 +635,38 @@ exports.onFeedPostUpdated = onDocumentUpdated(`${BASE}/communities/{communityId}
 });
 
 // ---------------------------------------------------------------------------
+// 7b. Community group chat: WhatsApp-style push to every member except the sender
+//     ("Sunday Futsal" / "Diego: see you at 7")
+// ---------------------------------------------------------------------------
+
+async function onCommunityChat(event) {
+  const m = (event.data && event.data.data()) || {};
+  const { communityId, msgId } = event.params;
+  const by = m.senderUid || m.senderId || m.uid || "";
+  if (!by) return;
+  const { all, community } = await communityMembers(communityId);
+  const who = (m.sender || m.senderName || m.name || (await nameOf(by))).split(" ")[0];
+  let text = clip(m.text, 120);
+  if (m.media && m.media.type) {
+    const icon = m.media.type === "video" ? "🎥" : "📷";
+    const isLabel = text === "📷 Photo" || text === "🎥 Video" || !text;
+    text = isLabel ? `${icon} ${m.media.type === "video" ? "Video" : "Photo"}` : `${icon} ${text}`;
+  }
+  await notify(all, {
+    type: "chat_community",
+    senderUid: by,
+    communityId,
+    chatId: `community_${communityId}`,   // groups the pushes in one stack on the lock screen
+    title: community.name || "Community chat",
+    body: `${who}: ${text || "New message"}`,
+  }, { exclude: [by], key: `cchat_${communityId}_${msgId}` });
+}
+
+exports.onCommunityChatMessage = onDocumentCreated(`${BASE}/communities/{communityId}/messages/{msgId}`, onCommunityChat);
+// Older app versions saved group messages here.
+exports.onCommunityChatMessageOld = onDocumentCreated(`${BASE}/communities/{communityId}/chat/{msgId}`, onCommunityChat);
+
+// ---------------------------------------------------------------------------
 // 8. Credit added or removed by an admin
 // ---------------------------------------------------------------------------
 
