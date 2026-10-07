@@ -718,7 +718,8 @@ function renderCommunityPage() {
                     <button onclick="showCommunityMembers('${jsArg(id)}')" class="${HDR_BTN}"><i class="fa-solid fa-user-group text-[#00F296]"></i><span>Members</span></button>
                     <button onclick="showCommunityLeaderboard('${jsArg(id)}')" class="${HDR_BTN}"><i class="fa-solid fa-trophy text-[#00F296]"></i><span>Leaderboard</span></button>
                     <button onclick="openCommunityChat('${jsArg(id)}')" class="${HDR_BTN}"><i class="fa-solid fa-comments text-[#00F296]"></i><span>Chat</span></button>` : ''}
-                    <button onclick="shareCommunity('${jsArg(id)}')" class="${HDR_BTN} ${isMember ? '' : 'col-span-4'}"><i class="fa-solid fa-share-nodes text-[#00F296]"></i><span>Share</span></button>
+                    ${isMember ? '' : `<button onclick="messageCommunityAdmin('${jsArg(id)}')" class="${HDR_BTN} col-span-2"><i class="fa-solid fa-paper-plane text-[#00F296]"></i><span>Message admin</span></button>`}
+                    <button onclick="shareCommunity('${jsArg(id)}')" class="${HDR_BTN} ${isMember ? '' : 'col-span-2'}"><i class="fa-solid fa-share-nodes text-[#00F296]"></i><span>Share</span></button>
                 </div>
             </div>
         </div>
@@ -739,7 +740,9 @@ function renderCommunityPage() {
 }
 
 function joinButton(c) {
-    if (S.pending) return `<button disabled class="${BTN_DARK} shrink-0 opacity-70">Pending Approval...</button>`;
+    if (S.pending) return `<div class="flex items-center gap-2 shrink-0">
+        <span class="text-[11px] font-bold text-white/70"><i class="fa-solid fa-clock mr-1 text-amber-300"></i>Requested</span>
+        <button onclick="cancelJoinRequest('${jsArg(c.id)}')" class="${BTN_DARK} shrink-0">Cancel request</button></div>`;
     const needs = c.requireApproval !== false;
     return `<button onclick="joinCommunity('${jsArg(c.id)}')" class="${BTN_PRIMARY} shrink-0">${needs ? 'Ask to Join' : 'Join Community'}</button>`;
 }
@@ -762,6 +765,26 @@ window.joinCommunity = async function(id) {
         }
         renderCommunityPage();
     } catch (e) { console.error(e); toast('Could not join community', 'error'); }
+};
+
+// Take back a join request that is still waiting for approval.
+window.cancelJoinRequest = async function(id) {
+    if (!me()) return;
+    if (!confirm('Cancel your request to join?')) return;
+    try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', me().uid));
+        S.pending = false; toast('Request cancelled.');
+        renderCommunityPage();
+    } catch (e) { console.error(e); toast('Could not cancel the request', 'error'); }
+};
+
+// Non-members can message the community's admin (opens a private chat).
+window.messageCommunityAdmin = function(id) {
+    const c = window.communitiesCache[id] || {};
+    const adminUid = c.creatorId || c.adminId || '';
+    if (!adminUid) { toast('No admin found for this community.', 'error'); return; }
+    if (me() && adminUid === me().uid) { toast('You are the admin of this community.'); return; }
+    if (window.openDirectChat) window.openDirectChat(adminUid);
 };
 
 // Used by the "community game only" window: ask to join (or join right away if no approval is needed).
