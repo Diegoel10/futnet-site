@@ -169,9 +169,109 @@ window.openSessionResults = function(eventId) {
                     <div class="text-[11px] text-white/60 truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml(ev.date || '')} · ${r.matches} match${r.matches === 1 ? '' : 'es'}</div>
                 </div>
             </div>
+            ${isCelebrationOwner() && r.winner ? `<button onclick="openCelebration('${escapeHtml(String(ev.id))}')" class="w-full bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-sm shadow-[0_0_20px_rgba(251,191,36,0.35)]">🎉 Open celebration page</button>` : ''}
             ${hero}
             <div class="space-y-2"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Standings</div>${standings}</div>
             ${scorers ? `<div class="space-y-2"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Top scorers</div>${scorers}</div>` : ''}
+        </div>`;
+};
+
+// ---------------------------------------------------------------------------
+// 🎉 Celebration page (only Diego for now): winners, top scorers, and the losers to laugh at.
+// Made to look good in a screenshot for the group chat / Instagram.
+// ---------------------------------------------------------------------------
+const CELEBRATION_OWNERS = ['XytHMG8nIRg4BbLRHOmp5jVK1T23'];
+function isCelebrationOwner() {
+    return !!(window.currentUser && CELEBRATION_OWNERS.includes(String(window.currentUser.uid)));
+}
+
+function photoGrid(players, ring, size) {
+    if (!players.length) return '<p class="text-xs text-white/50 italic">No players were placed on this team.</p>';
+    return `<div class="flex flex-wrap justify-center gap-2">${players.map(p => `
+        <img src="${escapeHtml(avatarOf(p))}" title="${escapeHtml(p.name || '')}"
+             class="${size} rounded-full object-cover border-[3px] shadow-xl"
+             style="border-color:${ring}" onerror="this.src='${DEFAULT_AVATAR}'">`).join('')}</div>`;
+}
+
+const LOSER_LINES = [
+    'Thanks for showing up 😂',
+    'Cardio was the real win tonight 🏃‍♂️',
+    'Next week for sure... right? 🤡',
+    'Somebody check on them 😭',
+    'The donation team 🎁',
+];
+
+window.openCelebration = function(eventId) {
+    if (!isCelebrationOwner()) return;
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    if (!ev) return;
+    const r = computeSessionResults(ev);
+    const w = r.winner;
+    if (!w) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
+    const loser = r.standings.length > 1 ? r.standings[r.standings.length - 1] : null;
+    const wColor = accent(w.color);
+    const line = LOSER_LINES[Math.floor(Math.random() * LOSER_LINES.length)];
+    const gd = w.gf - w.ga;
+
+    let m = document.getElementById('celebration-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'celebration-modal'; document.body.appendChild(m); }
+    m.className = 'fixed inset-0 z-[185] overflow-y-auto text-white';
+    m.style.background = `radial-gradient(circle at 50% 0%, ${wColor}40, transparent 55%), #040E13`;
+
+    const stat = (v, label, color) => `
+        <div class="flex-1 bg-black/35 border border-white/10 rounded-2xl py-2.5 px-1">
+            <div class="text-2xl font-black" style="color:${color}">${v}</div>
+            <div class="text-[9px] font-extrabold uppercase tracking-[0.15em] text-white/60">${label}</div>
+        </div>`;
+
+    const medals = ['🥇', '🥈', '🥉'];
+    const scorers = r.scorers.slice(0, 5).map((s, i) => `
+        <div class="flex items-center gap-3 bg-black/35 border rounded-2xl px-3.5 py-2.5 ${i === 0 ? 'border-amber-300/40' : 'border-white/10'}">
+            <span class="w-7 text-center font-black text-white/60 ${i < 3 ? 'text-lg' : 'text-sm'}">${medals[i] || (i + 1)}</span>
+            <img src="${escapeHtml(s.avatar)}" class="${i === 0 ? 'w-11 h-11 border-amber-300' : 'w-9 h-9 border-white/30'} rounded-full object-cover border-[3px] shadow-lg" onerror="this.src='${DEFAULT_AVATAR}'">
+            <span class="flex-1 text-left text-[15px] font-extrabold truncate">${escapeHtml(s.name)}</span>
+            <span class="text-xl font-black text-[#00F296]">${s.goals} <span class="text-sm">⚽</span></span>
+        </div>`).join('');
+
+    m.innerHTML = `
+        <div class="max-w-md mx-auto px-4 pt-4 pb-10 text-center">
+            <div class="flex justify-between items-center">
+                <div class="text-[11px] text-white/50 font-bold truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml(ev.date || '')}</div>
+                <button onclick="document.getElementById('celebration-modal').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center shrink-0"><i class="fa-solid fa-xmark text-sm"></i></button>
+            </div>
+
+            <section class="mt-3">
+                <div class="text-5xl">🏆</div>
+                <div class="text-[13px] font-black uppercase tracking-[0.25em] text-amber-300 mt-2">Congratulations</div>
+                <div class="text-3xl font-black leading-tight mt-2 mb-4" style="color:${wColor}">${escapeHtml(w.name)}</div>
+                <div class="flex gap-1.5 mb-4">
+                    ${stat(w.points, 'Points', wColor)}${stat(w.wins, 'Wins', '#fff')}${stat(w.draws, 'Draws', '#fff')}${stat(w.losses, 'Losses', '#fff')}${stat(gd > 0 ? '+' + gd : gd, 'Goal diff', '#00F296')}
+                </div>
+                ${photoGrid(w.players, wColor, 'w-11 h-11')}
+            </section>
+
+            ${scorers ? `
+            <section class="mt-7">
+                <div class="text-[13px] font-black uppercase tracking-[0.25em] text-[#00F296] mb-3">⚽ Top scorers</div>
+                <div class="flex flex-col gap-2">${scorers}</div>
+            </section>` : ''}
+
+            ${loser && loser.index !== w.index ? `
+            <section class="mt-7 rounded-3xl border border-white/10 bg-black/30 p-5">
+                <div class="text-4xl">😂</div>
+                <div class="text-[13px] font-black uppercase tracking-[0.25em] text-red-300 mt-2">Loser team</div>
+                <div class="text-xs text-white/50 mt-1">${escapeHtml(loser.name)} · ${loser.points} pt${loser.points === 1 ? '' : 's'} · ${loser.wins}W ${loser.draws}D ${loser.losses}L</div>
+                <div class="text-[15px] font-extrabold text-white/85 mt-2.5 mb-3.5">${line}</div>
+                <div style="filter:grayscale(0.85)">${photoGrid(loser.players, '#6b7280', 'w-9 h-9')}</div>
+            </section>` : ''}
+
+            <div class="mt-8 flex flex-col items-center gap-1">
+                <div class="flex items-center gap-1">
+                    <img src="img/FutnetJustLogo.png" alt="" class="h-12 object-contain" onerror="this.style.display='none'">
+                    <img src="img/FutnetJustText.png" alt="FutNet" class="h-10 object-contain" style="mix-blend-mode:screen" onerror="this.outerHTML='<span class=\'text-2xl font-black italic\'>FUT<span class=\'text-[#00F296]\'>NET</span></span>'">
+                </div>
+                <div class="text-[11px] text-white/50">futnet.site</div>
+            </div>
         </div>`;
 };
 
