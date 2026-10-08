@@ -3,6 +3,7 @@
 // then goal difference, then goals scored), the full standings, each team with its players'
 // photos, and the top scorers. Same rules as the app and the community leaderboard.
 import { escapeHtml } from './event-store.js';
+import { openCelebrationCards } from './celebration-cards.js';
 
 const FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -169,7 +170,11 @@ window.openSessionResults = function(eventId) {
                     <div class="text-[11px] text-white/60 truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml(ev.date || '')} · ${r.matches} match${r.matches === 1 ? '' : 'es'}</div>
                 </div>
             </div>
-            ${isCelebrationOwner() && r.winner ? `<button onclick="openCelebration('${escapeHtml(String(ev.id))}')" class="w-full bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-sm shadow-[0_0_20px_rgba(251,191,36,0.35)]">🎉 Open celebration page</button>` : ''}
+            ${isCelebrationOwner() && r.winner ? `
+            <div class="flex gap-2">
+                <button onclick="shareCelebrationCards('${escapeHtml(String(ev.id))}')" class="flex-1 bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-sm shadow-[0_0_20px_rgba(251,191,36,0.35)]">📸 Make share images</button>
+                <button onclick="openCelebration('${escapeHtml(String(ev.id))}')" class="bg-black/50 border border-white/20 text-white font-bold py-3 px-4 rounded-2xl text-sm">🎉 Page</button>
+            </div>` : ''}
             ${hero}
             <div class="space-y-2"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Standings</div>${standings}</div>
             ${scorers ? `<div class="space-y-2"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Top scorers</div>${scorers}</div>` : ''}
@@ -239,6 +244,7 @@ window.openCelebration = function(eventId) {
                 <div class="text-[11px] text-white/50 font-bold truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml(ev.date || '')}</div>
                 <button onclick="document.getElementById('celebration-modal').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center shrink-0"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
+            <button onclick="shareCelebrationCards('${escapeHtml(String(ev.id))}')" class="w-full mt-3 bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3.5 rounded-2xl text-base shadow-[0_0_20px_rgba(251,191,36,0.35)]">📸 Share images for WhatsApp</button>
 
             <section class="mt-3">
                 <div class="text-5xl">🏆</div>
@@ -273,6 +279,24 @@ window.openCelebration = function(eventId) {
                 <div class="text-[11px] text-white/50">futnet.site</div>
             </div>
         </div>`;
+};
+
+/** 📸 The 3 WhatsApp images: champions, top scorers, losers. */
+window.shareCelebrationCards = function(eventId) {
+    if (!isCelebrationOwner()) return;
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    if (!ev) return;
+    const r = computeSessionResults(ev);
+    if (!r.winner) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
+    const withPhotos = (t) => t && ({ ...t, players: t.players.map(p => ({ name: p.name || 'Player', avatar: avatarOf(p) })) });
+    const results = { ...r, winner: withPhotos(r.winner), standings: r.standings.map(withPhotos) };
+    const info = {
+        title: ev.title || 'FutNet game',
+        date: ev.date || '',
+        location: ev.locationName || ev.location || ev.venue || '',
+        format: ev.format || ev.gameFormat || '',
+    };
+    openCelebrationCards(results, info, { accent, logo: 'img/celebration_logo.png' });
 };
 
 window.computeSessionResults = computeSessionResults;
