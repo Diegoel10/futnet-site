@@ -286,29 +286,77 @@ function scribble(ctx, str, x, y, rot, color = GREEN, size = 40) {
 }
 
 /** Lays out photos in rows so any team size fits. Returns the y after the last row. */
+/** Gold "C" badge for the team captain. */
+function captainBadge(ctx, cx, cy, size) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(cx, cy, size / 2, 0, Math.PI * 2);
+    ctx.fillStyle = GOLD; ctx.fill();
+    ctx.lineWidth = Math.max(3, size * 0.08); ctx.strokeStyle = '#0b0f14'; ctx.stroke();
+    ctx.restore();
+    text(ctx, 'C', cx, cy + 2, { font: `900 ${Math.round(size * 0.6)}px ${BODY}`, color: '#0b0f14', shadow: false });
+}
+
+/**
+ * Lays out photos in rows so any team size fits. The captain (if any) goes in the
+ * middle of the first row, bigger, with a gold (C) badge.
+ */
 async function photoRows(ctx, players, { top, maxRowWidth, ring, grey, showNames }) {
-    const n = players.length || 1;
-    const perRow = n <= 5 ? n : n <= 8 ? Math.ceil(n / 2) : n <= 12 ? Math.ceil(n / 2) : Math.ceil(n / 3);
-    const rows = Math.ceil(n / perRow);
+    // put the captain in the middle of the first row
+    const capIdx = players.findIndex(p => p.captain);
+    let list = players.slice();
+    const n = list.length || 1;
+    const per = n <= 5 ? n : n <= 12 ? Math.ceil(n / 2) : Math.ceil(n / 3);
+    const sizes = [];
+    for (let left = n; left > 0; left -= per) sizes.push(Math.min(per, left));
+    const hasCap = capIdx !== -1;
+    // odd first row so the captain is dead center (e.g. 7 players → 3 on top, 4 below)
+    if (hasCap && sizes.length > 1 && sizes[0] % 2 === 0) { sizes[0] -= 1; sizes[sizes.length - 1] += 1; }
+    const rows = sizes.length;
+    const perRow = Math.max(...sizes);
+    if (hasCap) {
+        const [cap] = list.splice(capIdx, 1);
+        list.splice(Math.floor((sizes[0] - 1) / 2), 0, cap);
+    }
+    const BIG = 1.35;
     const gap = 26;
     const extra = showNames ? 62 : 26;
-    const fitH = ((FOOTER_TOP - 15 - top) / rows - extra) / 2; // never run into the footer
-    const r = Math.max(30, Math.min(78, (maxRowWidth - gap * (perRow - 1)) / perRow / 2, fitH));
+    const avail = FOOTER_TOP - 15 - top;
+    // height: first row is taller when the captain is in it
+    const fitH = (avail - rows * extra) / (2 * (rows - 1) + 2 * (hasCap ? BIG : 1));
+    const fitW = (maxRowWidth - gap * (perRow - 1)) / (2 * (perRow - 1) + 2 * (hasCap ? BIG : 1));
+    const r = Math.max(30, Math.min(hasCap ? 70 : 78, fitW, fitH));
+    const rc = hasCap ? r * BIG : r;
+    const row0H = rc * 2 + extra;
     const rowH = r * 2 + extra;
-    const imgs = await Promise.all(players.map(p => loadImage(p.avatar)));
-    for (let i = 0; i < players.length; i++) {
-        const row = Math.floor(i / perRow), col = i % perRow;
-        const inRow = Math.min(perRow, players.length - row * perRow);
-        const rowW = inRow * r * 2 + (inRow - 1) * gap;
-        const cx = W / 2 - rowW / 2 + r + col * (r * 2 + gap);
-        const cy = top + r + row * rowH;
-        avatar(ctx, imgs[i], players[i].name, cx, cy, r, ring, { grey });
-        if (showNames) {
-            text(ctx, String(players[i].name || 'Player').split(' ')[0].toUpperCase(), cx, cy + r + 30,
-                { font: `900 ${Math.round(Math.max(20, r * 0.36))}px ${BODY}`, maxWidth: r * 2 + gap - 4 });
-        }
+    const imgs = await Promise.all(list.map(p => loadImage(p.avatar)));
+
+    let start = 0;
+    for (let row = 0; row < rows; row++) {
+        const rowStart = start;
+        const items = list.slice(start, start + sizes[row]);
+        start += sizes[row];
+        const radii = items.map(p => (p.captain ? rc : r));
+        const rowW = radii.reduce((a, x) => a + x * 2, 0) + gap * (items.length - 1);
+        const cy = row === 0 ? top + rc : top + row0H + (row - 1) * rowH + r;
+        let x = W / 2 - rowW / 2;
+        items.forEach((p, k) => {
+            const rr0 = radii[k];
+            const cx = x + rr0;
+            const i = rowStart + k;
+            avatar(ctx, imgs[i], p.name, cx, cy, rr0, p.captain ? GOLD : ring, { grey, ringWidth: p.captain ? Math.max(6, rr0 * 0.1) : undefined });
+            if (p.captain) captainBadge(ctx, cx + rr0 * 0.72, cy + rr0 * 0.72, Math.max(40, rr0 * 0.55));
+            if (showNames) {
+                const nm = String(p.name || 'Player').split(' ')[0].toUpperCase();
+                text(ctx, nm, cx, cy + rr0 + 30, {
+                    font: `900 ${Math.round(Math.max(20, rr0 * (p.captain ? 0.3 : 0.36)))}px ${BODY}`,
+                    color: p.captain ? GOLD : '#fff', maxWidth: rr0 * 2 + gap - 4,
+                });
+            }
+            x += rr0 * 2 + gap;
+        });
     }
-    return top + rows * rowH;
+    return top + row0H + (rows - 1) * rowH;
 }
 
 function statPills(ctx, stats, y, accent) {
@@ -334,8 +382,8 @@ async function drawChampions(ctx, d, assets) {
     header(ctx, assets.logo, d.info);
     scribble(ctx, pick(WIN_LINES, d.seed), W - 210, 110, -0.18, GREEN, 38);
 
-    brush(ctx, W / 2, 238, 820, 150, color, 3);
-    text(ctx, '🏆 CHAMPIONS', W / 2, 236, { font: `110px ${MARKER}`, color: '#0b0f14', shadow: false, maxWidth: 780 });
+    brush(ctx, W / 2, 238, 820, 150, '#1D4ED8', 3);
+    text(ctx, '🏆 CHAMPIONS', W / 2, 236, { font: `110px ${MARKER}`, color: '#ffffff', maxWidth: 780 });
     text(ctx, t.name.toUpperCase(), W / 2, 352, { font: fitFont(ctx, t.name.toUpperCase(), BLOCK, '', 66, 1000), color, stroke: { width: 6, color: 'rgba(0,0,0,0.6)' } });
     infoBar(ctx, d.info, 420);
 

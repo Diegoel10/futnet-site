@@ -288,7 +288,15 @@ window.shareCelebrationCards = function(eventId) {
     if (!ev) return;
     const r = computeSessionResults(ev);
     if (!r.winner) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
-    const withPhotos = (t) => t && ({ ...t, players: t.players.map(p => ({ name: p.name || 'Player', avatar: avatarOf(p) })) });
+    const caps = ev.teamCaptains || {};
+    const isCap = (p, teamIndex) => {
+        const capUid = caps[teamIndex] ?? caps[String(teamIndex)];
+        if (capUid && p.uid && String(capUid) === String(p.uid)) return true;
+        if (p.isCaptain && (p.captainTeamIndex === undefined || Number(p.captainTeamIndex) === teamIndex)) return true;
+        const att = (ev.attendees || []).find(a => p.uid && String(a.uid) === String(p.uid));
+        return !!(att && att.isCaptain && Number(att.captainTeamIndex) === teamIndex);
+    };
+    const withPhotos = (t) => t && ({ ...t, players: t.players.map(p => ({ name: p.name || 'Player', avatar: avatarOf(p), captain: isCap(p, t.index) })) });
     const results = { ...r, winner: withPhotos(r.winner), standings: r.standings.map(withPhotos) };
     const info = {
         title: ev.title || 'FutNet game',
