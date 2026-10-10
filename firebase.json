@@ -27,6 +27,23 @@
       "**/*.p8",
       "**/*.log",
       "storage.rules"
+    ],
+    "rewrites": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "destination": "/well-known/assetlinks.json"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/**/assetlinks.json",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ]
+      }
     ]
   },
   "storage": {

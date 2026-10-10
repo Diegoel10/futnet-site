@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.futnet.socceranyone",
+      "sha256_cert_fingerprints": [
+        "CE:C7:68:9F:54:37:5D:10:60:C5:C5:82:8E:AA:01:0F:E2:5A:D3:F2:0E:A7:13:A7:2D:2F:82:F2:36:B2:F8:D9",
+        "B8:D1:3D:08:44:18:57:D2:1C:6C:96:31:82:9C:EC:39:DF:96:BE:4A:63:7B:06:93:A2:87:B1:0E:C1:D3:2F:8F"
+      ]
+    }
+  }
+]
