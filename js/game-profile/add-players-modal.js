@@ -101,7 +101,8 @@ window.renderAddPlayersList = function(eventId, queryStr) {
 
     container.innerHTML = filtered.map(u => {
         const name = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim();
-        const avatar = u.avatar || u.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+        const realAvatar = u.avatar || u.photoURL || '';   // only a real photo is saved on the roster
+        const avatar = realAvatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
         const isFriend = friendUids.has(u.uid);
         const freqCount = attendanceFrequency[u.uid] || 0;
 
@@ -123,7 +124,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
                         </div>
                     </div>
                 </div>
-                <input type="checkbox" value="${escapeHtml(u.uid)}" data-name="${escapeHtml(name)}" data-avatar="${escapeHtml(avatar)}" onchange="updateSelectedPlayerCounter()" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
+                <input type="checkbox" value="${escapeHtml(u.uid)}" data-name="${escapeHtml(name)}" data-avatar="${escapeHtml(realAvatar)}" onchange="updateSelectedPlayerCounter()" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
             </div>
         `;
     }).join('');
@@ -177,7 +178,7 @@ window.submitBatchAddPlayers = async function(eventId) {
         draft.attendees = Array.isArray(draft.attendees) ? draft.attendees : [];
         picked.forEach(pl => {
             if (draft.attendees.some(a => String(a.uid) === String(pl.uid))) return;
-            const entry = { uid: pl.uid, name: pl.name, position: pl.position, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [] };
+            const entry = { uid: pl.uid, name: pl.name, position: pl.position, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [], addedByAdmin: true };
             if (pl.avatar) entry.avatar = pl.avatar;
             draft.attendees.push(entry);
             draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(pl.uid));

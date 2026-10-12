@@ -120,6 +120,23 @@ async function updateTeamToolFirestore(event) {
     if (res.ok) window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
 }
 
+// How many spots the pitch has for a team (players past that are on the bench).
+function pitchSlotCount(event, teamIndex) {
+    const saved = (window.teamFormations[event.id] || {})[teamIndex] ?? (event.teamFormations || {})[teamIndex] ?? (event.teamFormations || {})[String(teamIndex)];
+    const parts = String(saved || '').split('-').map(n => parseInt(n, 10)).filter(n => n > 0);
+    if (parts.length) return parts.reduce((a, b) => a + b, 0) + 1;   // + goalkeeper
+    return parseInt(event.format, 10) || 8;
+}
+
+// The captain stops being captain when he leaves that team.
+function dropCaptainIfGone(eventId, teamIndex) {
+    const caps = window.teamCaptains[eventId];
+    if (!caps) return;
+    const roster = (window.teamAssignments[eventId] || {})[teamIndex] || [];
+    const cap = caps[teamIndex] ?? caps[String(teamIndex)];
+    if (cap && !roster.some(p => p && String(p.uid) === String(cap))) { delete caps[teamIndex]; delete caps[String(teamIndex)]; }
+}
+
 function getFlattenedPlayersList(attendees) {
     const list = [];
     (attendees || []).forEach(att => {
@@ -820,14 +837,14 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     const allPlayers = getFlattenedPlayersList(event.attendees);
 
     if (slotIndex !== null && slotIndex !== 'null') {
+        // Players on the pitch = the first N of the team (N = spots in the formation); the rest are on the bench.
+        const slots = pitchSlotCount(event, teamIndex);
         const assignedPitchUIDs = new Set();
-        Object.entries(window.teamAssignments[event.id][teamIndex] || {}).forEach(([sIdx, player]) => {
-            if (player && player.uid && parseInt(sIdx) !== slotIndex) {
-                assignedPitchUIDs.add(String(player.uid));
-            }
+        teamRoster.slice(0, slots).forEach((player, i) => {
+            if (i !== slotIndex) assignedPitchUIDs.add(String(player.uid));
         });
-        
-        const unplacedPitchPlayers = teamRoster.filter(p => !assignedPitchUIDs.has(String(p.uid)));
+
+        const unplacedPitchPlayers = teamRoster.filter((p, i) => !assignedPitchUIDs.has(String(p.uid)) && i !== slotIndex);
         
         let picker = document.getElementById('assign-picker-modal');
         if (!picker) {
@@ -965,15 +982,34 @@ window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     if (!player) return;
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
-    window.teamAssignments[event.id][teamIndex] = (window.teamAssignments[event.id][teamIndex] || []).filter(p => p && p.uid);
+    const all = window.teamAssignments[event.id];
+    const same = (p) => p && String(p.uid) === String(uid);
+    let arr = (all[teamIndex] || []).filter(p => p && p.uid);
+    const oldIdx = arr.findIndex(same);
+
+    // A player is only ever on one team, once (before, moving someone could add him twice).
+    Object.keys(all).forEach(k => {
+        if (String(k) !== String(teamIndex) && Array.isArray(all[k]) && all[k].some(same)) {
+            all[k] = all[k].filter(p => p && p.uid && !same(p));
+            dropCaptainIfGone(event.id, k);
+        }
+    });
 
     if (slotIndex !== null && slotIndex !== 'null') {
-        window.teamAssignments[event.id][teamIndex][slotIndex] = player;
-    } else {
-        if (!window.teamAssignments[event.id][teamIndex].some(p => p && String(p.uid) === String(uid))) {
-            window.teamAssignments[event.id][teamIndex].push(player);
+        if (oldIdx !== -1) {
+            if (slotIndex < arr.length) { const t = arr[slotIndex]; arr[slotIndex] = arr[oldIdx]; arr[oldIdx] = t; }   // swap spots
+            else { arr.splice(oldIdx, 1); arr.push(player); }
+        } else if (slotIndex < arr.length) {
+            const displaced = arr[slotIndex];
+            arr[slotIndex] = player;
+            arr.push(displaced);   // the player who had that spot goes to the bench
+        } else {
+            arr.push(player);
         }
+    } else if (oldIdx === -1) {
+        arr.push(player);
     }
+    all[teamIndex] = arr;
 
     event.teamAssignments = window.teamAssignments[event.id];
     try {
@@ -991,6 +1027,7 @@ window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
 
     window.teamAssignments[event.id][teamIndex][slotIndex] = null;
     window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && p.uid);
+    dropCaptainIfGone(event.id, teamIndex);
     event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
@@ -1006,6 +1043,7 @@ window.unassignPlayerFromTeamSlot = async function(eventId, teamIndex, uid) {
     if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
 
     window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && p.uid && String(p.uid) !== String(uid));
+    dropCaptainIfGone(event.id, teamIndex);
     event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);

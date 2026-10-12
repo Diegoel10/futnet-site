@@ -1,6 +1,6 @@
 // js/chat.js: Handles WhatsApp-style messaging threads, directory user search, real-time chat sync, read receipts, and typing indicators
 import { db, appId } from './firebase-config.js';
-import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot, query as fsQuery, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot, query as fsQuery, orderBy, limit, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -307,33 +307,32 @@ window.markThreadAsReadLocally = async function(th) {
     });
 
     if (updated) {
-        try {
-            // Trim messages array to keep document size well under 1MB
-            th.messages = th.messages.slice(-100);
-
-            await setDoc(doc(db, 'artifacts', appId, 'directory', myUid), { chats: window.chatsThreads }, { merge: true });
-
-            // Instantly update sender's copy in Firestore so checkmarks turn blue on their screen
-            const senderDocRef = doc(db, 'artifacts', appId, 'directory', th.id);
-            const senderSnap = await getDoc(senderDocRef);
-            if (senderSnap.exists()) {
-                let senderThreads = senderSnap.data().chats || [];
-                let modified = false;
-                senderThreads.forEach(st => {
-                    if (st.id === myUid && st.messages) {
-                        st.messages.forEach(sm => {
-                            if (!sm.isRead) {
-                                sm.isRead = true;
-                                modified = true;
-                            }
-                        });
-                        st.messages = st.messages.slice(-100);
-                    }
+        // Marked read on the LIVE copies of both chat lists (never from this page's copy, so a
+        // message that arrives at the same moment from the app is never lost).
+        const partner = th.id;
+        const markRead = (threads, threadId, isTheirs) => {
+            let changed = false;
+            (threads || []).forEach(t => {
+                if (t.id !== threadId) return;
+                (t.messages || []).forEach(m => {
+                    if (isTheirs(m) && m.isRead !== true) { m.isRead = true; changed = true; }
                 });
-                if (modified) {
-                    await setDoc(senderDocRef, { chats: senderThreads }, { merge: true });
-                }
-            }
+            });
+            return changed;
+        };
+        try {
+            const myRef = doc(db, 'artifacts', appId, 'directory', myUid);
+            const theirRef = doc(db, 'artifacts', appId, 'directory', partner);
+            await runTransaction(db, async (tx) => {
+                const mine = await tx.get(myRef);
+                const theirs = await tx.get(theirRef);
+                const myThreads = mine.exists() ? (mine.data().chats || []) : [];
+                const theirThreads = theirs.exists() ? (theirs.data().chats || []) : [];
+                // my copy: their messages to me are now read
+                if (markRead(myThreads, partner, m => m.senderUid !== myUid)) tx.set(myRef, { chats: myThreads }, { merge: true });
+                // their copy: blue ticks on what they sent me
+                if (theirs.exists() && markRead(theirThreads, myUid, m => m.senderUid === partner)) tx.set(theirRef, { chats: theirThreads }, { merge: true });
+            });
         } catch (err) {
             console.error("Error updating read status:", err);
         }
@@ -542,31 +541,35 @@ async function sendToActiveChat(text, media) {
     window.renderActiveChatMessages();
     window.renderChatsList();
 
+    // Saved on the LIVE copies of both chat lists in one step (same as the apps). Before, this page
+    // re-saved its own copy of the whole list, which could erase a message that had just arrived.
+    const myUid = window.currentUser.uid;
+    const partnerName = th.name || 'Player';
+    const partnerAvatar = /^https?:\/\//i.test(th.avatar || '') && String(th.avatar).length < 400 ? th.avatar : '';
+    const addTo = (threads, threadId, name, avatar) => {
+        let t = threads.find(x => x.id === threadId);
+        if (!t) { t = { id: threadId, name, avatar, messages: [] }; threads.push(t); }
+        t.messages = Array.isArray(t.messages) ? t.messages : [];
+        if (!t.messages.some(m => m.id === newMessage.id)) t.messages.push(newMessage);
+        t.messages = t.messages.slice(-100);   // keeps the record well under Firestore's size limit
+    };
     try {
-        await setDoc(doc(db, 'artifacts', appId, 'directory', window.currentUser.uid), { chats: window.chatsThreads }, { merge: true });
-
-        const recipientDocRef = doc(db, 'artifacts', appId, 'directory', th.id);
-        const recipientSnap = await getDoc(recipientDocRef);
-        let recipientThreads = recipientSnap.exists() ? (recipientSnap.data().chats || []) : [];
-        
-        let recipientThread = recipientThreads.find(t => t.id === window.currentUser.uid);
-
-        if (recipientThread) {
-            if (!recipientThread.messages) recipientThread.messages = [];
-            recipientThread.messages.push(newMessage);
-            recipientThread.messages = recipientThread.messages.slice(-100);
-        } else {
-            recipientThreads.push({
-                id: window.currentUser.uid,
-                name: senderName,
-                avatar: senderAvatar,
-                messages: [newMessage]
-            });
-        }
-        await setDoc(recipientDocRef, { chats: recipientThreads }, { merge: true });
+        const myRef = doc(db, 'artifacts', appId, 'directory', myUid);
+        const theirRef = doc(db, 'artifacts', appId, 'directory', th.id);
+        await runTransaction(db, async (tx) => {
+            const mine = await tx.get(myRef);
+            const theirs = await tx.get(theirRef);
+            const myThreads = mine.exists() ? (mine.data().chats || []) : [];
+            const theirThreads = theirs.exists() ? (theirs.data().chats || []) : [];
+            addTo(myThreads, th.id, partnerName, partnerAvatar);
+            addTo(theirThreads, myUid, senderName, senderAvatar);
+            tx.set(myRef, { chats: myThreads }, { merge: true });
+            tx.set(theirRef, { chats: theirThreads }, { merge: true });
+        });
         // The push notification is sent by the server (onChatMessage) as soon as this saves.
     } catch (err) {
-        console.error("Error saving chat or sending notification:", err);
+        console.error("Error saving chat:", err);
+        if (window.showToast) window.showToast('Message not sent. Check your connection and try again.', 'error');
     }
 };
 

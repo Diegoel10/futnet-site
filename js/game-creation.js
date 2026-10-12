@@ -3,6 +3,7 @@ import { db, appId } from './firebase-config.js';
 import { collection, doc, setDoc, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 import { saveParkIfNew } from './parks.js';
+import { safeAvatar } from './game-profile/event-store.js';
 
 let cachedParks = [];
 let isParksLoaded = false;
@@ -223,21 +224,25 @@ window.handleCreateEvent = async function(e) {
     const locationStr = `${parkname} (${city || 'Park'}, ${state || 'FL'})`;
     let eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-    const organizerName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim();
-    const defaultAvatar = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
-    const organizerAvatar = (window.userProfile.avatar && window.userProfile.avatar.trim() !== '') 
-        ? window.userProfile.avatar 
-        : (window.currentUser.photoURL || defaultAvatar);
+    // Same name the apps use (full name first), and only a short web photo link: a big saved photo
+    // copied into the game made the game record heavy (the apps look the photo up in the profile).
+    const p = window.userProfile;
+    const organizerName = (p.name && String(p.name).trim())
+        || `${p.firstName || ''} ${p.lastName || ''}`.trim()
+        || (window.currentUser.displayName || '').trim()
+        || 'Player';
+    const organizerAvatar = safeAvatar(p.avatar) || safeAvatar(window.currentUser.photoURL);
 
-    let attendees = [{
+    const organizerEntry = {
         uid: window.currentUser.uid,
         name: organizerName,
-        avatar: organizerAvatar,
         role: 'Organizer',
         status: 'confirmed',
         paid: 'Free',
         guests: []
-    }];
+    };
+    if (organizerAvatar) organizerEntry.avatar = organizerAvatar;
+    let attendees = [organizerEntry];
 
     const newEvent = {
         id: eventId,
@@ -253,6 +258,7 @@ window.handleCreateEvent = async function(e) {
         fee,
         allowPlusOnes,
         plusOneLimit,
+        claimMinutes: parseInt(document.getElementById('ce-claim')?.value, 10) || 40,
         organizerId: window.currentUser.uid,
         organizer: organizerName,
         organizerAvatar: organizerAvatar,

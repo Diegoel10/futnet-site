@@ -2,7 +2,8 @@
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml } from './event-store.js';
-import { payOptionsHtml, plusExtraHtml } from '../credits.js';
+import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
+import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry } from '../money-rules.js';
 
 window.activeGameProfileTab = window.activeGameProfileTab || 'manage-event';
 
@@ -50,7 +51,7 @@ export function renderAdminTab(event) {
                 `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(att.name || 'Player')}`;
 
             const isOrg = att.uid === event.organizerId;
-            const paidStatus = att.paid || 'Unpaid';
+            const paidStatus = att.creditPaidCents > 0 ? `<span class="text-[#00F296] font-bold">Paid ${dollars(att.creditPaidCents)} (credit)</span>` : (att.paid === 'Paid' ? '<span class="text-[#00F296] font-bold">Paid</span>' : escapeHtml(att.paid || 'Unpaid'));
             const safeName = (att.name || 'Player').replace(/'/g, "\\'");
             const orgBadge = isOrg ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : '';
 
@@ -61,7 +62,7 @@ export function renderAdminTab(event) {
                         <div>
                             <span class="text-white/80 font-medium">➕ ${g.name || 'Guest'}</span>
                             <span class="text-[9px] text-[#00F296] ml-1">(+1 of ${att.name || 'Player'})</span>
-                            <div class="text-[10px] text-white/60 mt-0.5">${g.paid || 'Unpaid'}</div>
+                            <div class="text-[10px] mt-0.5 ${(g.paid === 'Paid' || g.paid === 'Credit') ? 'text-[#00F296] font-bold' : 'text-white/60'}">${g.paid === 'Credit' ? 'Paid (credit)' : escapeHtml(g.paid || 'Unpaid')}</div>
                         </div>
                         <button data-action="manage-guest" data-event-id="${event.id}" data-uid="${att.uid}" data-guest-idx="${gIdx}" data-guest-name="${(g.name || 'Guest').replace(/'/g, "\\'")}" class="bg-black/60 hover:bg-black text-white font-bold px-2.5 py-1 rounded-xl text-[10px] border border-white/10">Manage</button>
                     </div>
@@ -94,6 +95,17 @@ export function renderAdminTab(event) {
     const waitlistHtml = waitingList.length > 0 ? `
         <div class="space-y-2 pt-2 border-t border-white/10">
             <h5 class="text-[10px] font-black text-amber-400 uppercase tracking-wider">⏳ Waitlist (${waitingList.length})</h5>
+            ${(() => {
+                const now = Date.now(), st = startMsOf(event);
+                const elig = offerEligible(event, now, st);
+                if (!elig.length) return freeSpotsOf(event) > 0 ? '<p class="text-[10px] text-white/50">A spot is open: the waitlist is being notified.</p>' : '';
+                const names = elig.map(u => (waitingList.find(w => String(w.uid) === u) || {}).name || 'Player').join(', ');
+                const exp = event.spotOffer && event.spotOffer.expiresAt;
+                return `<div class="bg-emerald-500/10 border border-[#00F296]/40 rounded-xl p-2.5 space-y-2 text-[11px] text-white/85">
+                    <div><i class="fa-solid fa-bell text-[#00F296] mr-1"></i> Spot offered to <b>${escapeHtml(names)}</b>${event.spotOffer?.lastCall ? ' (last call: anyone can take it)' : (exp ? ` · <span data-countdown="${Number(exp)}">--:--</span> left` : '')}</div>
+                    ${event.spotOffer?.lastCall || elig.length >= waitingUids(event).length ? '' : `<button onclick="skipWaitlistOffer('${event.id}')" class="w-full bg-black/60 border border-white/20 text-white font-bold py-2 rounded-lg text-[11px]"><i class="fa-solid fa-forward mr-1"></i> Skip to next</button>`}
+                </div>`;
+            })()}
             ${waitingList.map(w => `
                 <div class="bg-amber-950/30 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs">
                     <span class="font-bold text-white">${w.name || 'Player'}</span>
@@ -377,13 +389,17 @@ window.checkAndOpenStartMatch = function(eventId) {
     }
 };
 
-window.approveGameRequest = async function(eventId, uid) {
-    let who = '';
-    const res = await mutateEvent(eventId, (draft) => {
+window.approveGameRequest = async function(eventId, uid, markPaid = false) {
+    let who = '', short = 0, have = 0, charged = 0, waitlisted = false;
+    const ev0 = (window.eventsList || []).find(e => e.id === eventId);
+    const credit = !markPaid && ev0 && creditGame(ev0);
+    const res = await mutateEvent(eventId, (draft, ctx) => {
+        short = 0; charged = 0; waitlisted = false;
+        if (ctx) ctx.charge = 0;
         const reqs = draft.joinRequests || [];
         const r = reqs.find(x => String(x.uid) === String(uid));
-        draft.joinRequests = reqs.filter(x => String(x.uid) !== String(uid));
         if (!r) return false;
+        draft.joinRequests = reqs.filter(x => String(x.uid) !== String(uid));
         who = r.name || 'Player';
         draft.attendees = draft.attendees || [];
         draft.waitingList = draft.waitingList || [];
@@ -391,17 +407,33 @@ window.approveGameRequest = async function(eventId, uid) {
         const perSide = parseInt(String(draft.format || '7v7').match(/(\d+)/)?.[1], 10) || 7;
         let teams = typeof draft.teamsCount === 'number' ? draft.teamsCount : (parseInt(String(draft.teamsCount || '3').match(/(\d+)/)?.[1], 10) || 3);
         let heads = 0; draft.attendees.forEach(a => { heads += 1 + (a.guests ? a.guests.length : 0); });
-        const entry = { uid: String(uid), name: r.name || 'Player', position: r.position || 'Player', role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [] };
+        const entry = { uid: String(uid), name: r.name || 'Player', position: r.position || 'Player', role: 'Player', status: 'confirmed', paid: markPaid ? 'Paid' : 'Unpaid', guests: [], approvedBy: String(window.currentUser?.uid || '') };
+        if (markPaid) entry.addedByAdmin = true;
         if (r.avatar) entry.avatar = r.avatar;
         if (r.acceptedRules) { entry.acceptedRules = true; entry.acceptedAt = r.acceptedAt || Date.now(); }
-        if (heads + 1 <= perSide * teams) draft.attendees.push(entry);
-        else draft.waitingList.push({ ...entry, status: 'waiting' });
-    });
+        if (heads + 1 > perSide * teams) { draft.waitingList.push({ ...entry, status: 'waiting', waitingSince: Date.now() }); waitlisted = true; return; }
+        if (credit && ctx) {
+            const cost = costCents(draft, 0);
+            if (ctx.balance < cost) { short = cost; have = ctx.balance; return false; }
+            ctx.charge = cost; charged = cost;
+            Object.assign(entry, { paid: 'Credit', creditPaidCents: cost, creditCommunityId: draft.communityId });
+        }
+        draft.attendees.push(entry);
+    }, credit ? joinHooks(ev0, String(uid)) : undefined);
+    if (res.ok && res.aborted && short > 0) {
+        if (confirm(`${who || 'This player'} has ${dollars(have)} credit but the game costs ${dollars(short)}.\n\nApprove anyway and mark them as paid (they paid you outside the app)?`)) {
+            window.approveGameRequest(eventId, uid, true);
+        }
+        return;
+    }
     if (res.ok && !res.aborted) {
-        window.showToast(`${who} approved. Remember to mark them Paid once they send payment.`);
+        window.showToast(waitlisted ? `${who} approved and put on the waitlist (the game is full).`
+            : charged ? `${who} approved. ${dollars(charged)} was taken from their credit.`
+            : markPaid ? `${who} approved and marked as paid.` : `${who} approved. Remember to mark them Paid once they send payment.`);
         try {
             await setDoc(doc(db, 'artifacts', appId, 'notifications', 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)), {
-                recipientUid: String(uid), title: 'You are in! ✅', body: `Your request to join "${res.event?.title || 'the game'}" was approved.`,
+                recipientUid: String(uid), title: waitlisted ? 'Request approved ⏳' : 'You are in! ✅',
+                body: waitlisted ? `You're on the waitlist for "${res.event?.title || 'the game'}". We'll tell you when a spot opens.` : `Your request to join "${res.event?.title || 'the game'}" was approved.`,
                 eventId, createdAt: new Date().toISOString(), read: false
             });
         } catch (e) { /* notification is optional */ }
@@ -444,6 +476,10 @@ window.openTwoPageGameWizard = function(eventId, mode) {
         openToNonMembers: event.openToNonMembers === true,
         payWithCredit: event.payWithCredit === true,
         refundPolicy: event.refundPolicy || 'hours:1',
+        partialRefundPct: event.partialRefundPct || 0,
+        refundIfSpotFilled: event.refundIfSpotFilled === true,
+        refundOnCancel: event.refundOnCancel !== false,
+        claimMinutes: event.claimMinutes || 40,
         plusOneExtra: event.plusOneExtra !== undefined ? event.plusOneExtra : 0
     };
 
@@ -523,10 +559,16 @@ window.renderWizardPage1 = function() {
                     <div>
                         <label class="block font-black uppercase text-[9px] tracking-wider text-[#00F296] mb-1">Format</label>
                         <select id="wiz-format" class="w-full bg-black/80 border border-white/20 rounded-xl px-2 py-2.5 font-bold text-white">
+                            <option value="3v3" ${d.format === '3v3' ? 'selected' : ''}>3v3</option>
+                            <option value="4v4" ${d.format === '4v4' ? 'selected' : ''}>4v4</option>
                             <option value="5v5" ${d.format === '5v5' ? 'selected' : ''}>5v5</option>
+                            <option value="6v6" ${d.format === '6v6' ? 'selected' : ''}>6v6</option>
                             <option value="7v7" ${d.format === '7v7' ? 'selected' : ''}>7v7</option>
                             <option value="8v8" ${d.format === '8v8' ? 'selected' : ''}>8v8</option>
+                            <option value="9v9" ${d.format === '9v9' ? 'selected' : ''}>9v9</option>
+                            <option value="10v10" ${d.format === '10v10' ? 'selected' : ''}>10v10</option>
                             <option value="11v11" ${d.format === '11v11' ? 'selected' : ''}>11v11</option>
+                            <option value="12v12" ${d.format === '12v12' ? 'selected' : ''}>12v12</option>
                         </select>
                     </div>
                     <div>
@@ -535,7 +577,9 @@ window.renderWizardPage1 = function() {
                     </div>
                 </div>
 
-                ${(d.communityId && wizCreditOn(d)) ? `<div id="wiz-pay-wrap" class="${wizIsPaid(d.fee) ? '' : 'hidden'}">${payOptionsHtml('wiz', { payWithCredit: d.payWithCredit, refundPolicy: d.refundPolicy })}</div>` : ''}
+                ${(d.communityId && wizCreditOn(d)) ? `<div id="wiz-pay-wrap" class="${wizIsPaid(d.fee) ? '' : 'hidden'}">${payOptionsHtml('wiz', d)}</div>` : ''}
+
+                ${waitlistOptionsHtml('wiz', d)}
 
                 <button onclick="window.goToWizardPage2()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-md transition flex items-center justify-center gap-2 mt-4">
                     Next: Description & Rules <i class="fa-solid fa-arrow-right"></i>
@@ -556,10 +600,11 @@ window.goToWizardPage2 = function() {
     if (d.communityId) {
         d.openToNonMembers = !!document.getElementById('wiz-open')?.checked;
         if (document.getElementById('wiz-must')) {
-            d.payWithCredit = !!document.getElementById('wiz-must').checked;
-            d.refundPolicy = document.getElementById('wiz-refund')?.value || d.refundPolicy;
+            const o = readPayOptions('wiz');
+            Object.assign(d, { payWithCredit: o.payWithCredit, refundPolicy: o.refundPolicy, partialRefundPct: o.partialRefundPct, refundIfSpotFilled: o.refundIfSpotFilled, refundOnCancel: o.refundOnCancel });
         }
     }
+    d.claimMinutes = readWaitlistOptions('wiz').claimMinutes;
     d.title = document.getElementById('wiz-title')?.value.trim() || '';
     d.date = document.getElementById('wiz-date')?.value || '';
     d.time = document.getElementById('wiz-time')?.value || '';
@@ -646,9 +691,13 @@ window.submitTwoPageGameWizard = async function() {
         openToNonMembers: !!d.openToNonMembers,
         visibility: d.openToNonMembers ? 'Public' : 'Private',
         payWithCredit: !!d.payWithCredit && wizIsPaid(d.fee),
-        refundPolicy: d.refundPolicy || 'always',
+        refundPolicy: d.refundPolicy || 'hours:1',
+        partialRefundPct: d.partialRefundPct || 0,
+        refundIfSpotFilled: !!d.refundIfSpotFilled,
+        refundOnCancel: d.refundOnCancel !== false,
         plusOneExtra: (d.allowPlusOnes && wizIsPaid(d.fee)) ? (d.plusOneExtra || 0) : 0
     } : {};
+    communityFields.claimMinutes = d.claimMinutes || 40;
 
     if (!d.date || !d.location) {
         window.showToast("Please fill in Date and Location.", "error");
@@ -677,6 +726,8 @@ window.submitTwoPageGameWizard = async function() {
             plusOneLimit: d.plusOneLimit,
             ...communityFields,
             joinRequests: [],
+            spotOffer: null,
+            pendingRefunds: [],
             attendees: [],
             waitingList: [],
             declinedList: [],
@@ -729,18 +780,8 @@ window.submitTwoPageGameWizard = async function() {
     }
 };
 
-window.confirmCancelGame = async function(eventId) {
-    if (confirm("Are you sure you want to cancel this match? All participants will be notified.")) {
-        try {
-            const realDocId = (window.eventDocIds && window.eventDocIds[eventId]) || eventId;
-            await deleteDoc(doc(db, 'artifacts', appId, 'eventsList', realDocId));
-            window.showToast("Game cancelled successfully.");
-            window.switchTab('events');
-        } catch (err) {
-            console.error("Cancel error:", err);
-            window.showToast("Failed to cancel game", "error");
-        }
-    }
+window.confirmCancelGame = function(eventId) {
+    window.cancelGameEvent(eventId);   // one cancel path: confirm, delete, server refunds credit
 };
 
 window.openEditMatchModal = function(eventId, matchIndex) {
@@ -1013,10 +1054,20 @@ window.updateGuestPaidStatus = async function(eventId, attendeeUid, guestIndex, 
 };
 
 window.removeGuestFromAttendee = async function(eventId, uid, guestIndex) {
-    const res = await mutateEvent(eventId, (draft) => {
+    const ev0 = (window.eventsList || []).find(e => e.id === eventId);
+    const host0 = ev0 && (ev0.attendees || []).find(a => String(a.uid) === String(uid));
+    const credit = !!(ev0 && ev0.communityId && host0 && host0.creditPaidCents > 0);
+    let refunded = 0;
+    const res = await mutateEvent(eventId, (draft, ctx) => {
+        refunded = 0;
+        if (ctx) ctx.refund = 0;
         const att = (draft.attendees || []).find(a => String(a.uid) === String(uid));
         if (!att || !att.guests || !att.guests[guestIndex]) return false;
         att.guests.splice(guestIndex, 1);
+        if (ctx && att.creditPaidCents > 0) {
+            const back = Math.min(att.creditPaidCents, Math.max(0, att.creditPaidCents - costCents(draft, att.guests.length)));
+            if (back > 0) { ctx.refund = back; ctx.note = 'Guest removed by the organizer'; refunded = back; att.creditPaidCents -= back; }
+        }
         // Team members use ids `${uid}_guest_${index}`: the removed guest leaves the teams and the
         // guests after it move up one position.
         const prefix = `${uid}_guest_`;
@@ -1041,8 +1092,8 @@ window.removeGuestFromAttendee = async function(eventId, uid, guestIndex) {
         }));
         const caps = draft.teamCaptains || {};
         Object.keys(caps).forEach(k => { const nu = remap(caps[k]); if (nu === null) delete caps[k]; else caps[k] = nu; });
-    });
-    if (res.ok && !res.aborted) window.showToast("Guest removed successfully!");
+    }, credit ? refundHooks(ev0, String(uid)) : undefined);
+    if (res.ok && !res.aborted) window.showToast(refunded ? `Guest removed. ${dollars(refunded)} was returned to the player's credit.` : "Guest removed successfully!");
 };
 
 window.openPlayerManagementModal = function(eventId, uid, playerName) {
@@ -1079,6 +1130,10 @@ window.openPlayerManagementModal = function(eventId, uid, playerName) {
                         ${paidText}
                     </button>
                 </div>
+                ${(player.creditPaidCents > 0) ? `<div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-white/50 mb-1.5">Credit paid: <span class="text-[#00F296]">${dollars(player.creditPaidCents)}</span></label>
+                    <button id="modal-player-refund-btn" class="w-full bg-black/40 border border-[#00F296]/40 text-[#00F296] py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2"><i class="fa-solid fa-rotate-left"></i> Refund credit</button>
+                </div>` : ''}
                 <div class="pt-2 border-t border-white/10">
                     <button id="modal-player-remove-btn" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 py-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2">
                         <i class="fa-solid fa-user-minus"></i> Remove from Roster
@@ -1097,4 +1152,38 @@ window.openPlayerManagementModal = function(eventId, uid, playerName) {
         window.removePlayerFromEvent(eventId, uid);
         modal.remove();
     };
+    const refundBtn = document.getElementById('modal-player-refund-btn');
+    if (refundBtn) refundBtn.onclick = () => { modal.remove(); window.adminRefundPlayer(eventId, uid, playerName); };
+};
+
+/** Admin gives (part of) a player's credit payment back. The player stays on the roster. */
+window.adminRefundPlayer = async function(eventId, uid, name) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    const p = ev && (ev.attendees || []).find(a => String(a.uid) === String(uid));
+    if (!ev || !p || !(p.creditPaidCents > 0)) return;
+    const input = prompt(`Refund how much to ${name || 'this player'}? (paid ${dollars(p.creditPaidCents)})`, (p.creditPaidCents / 100).toFixed(2));
+    if (input === null) return;
+    const cents = Math.round((parseFloat(String(input).replace(/[^0-9.]/g, '')) || 0) * 100);
+    if (cents <= 0) { window.showToast('Enter an amount greater than $0', 'error'); return; }
+    let done = 0;
+    const res = await mutateEvent(eventId, (draft, ctx) => {
+        done = 0; if (ctx) ctx.refund = 0;
+        const a = (draft.attendees || []).find(x => String(x.uid) === String(uid));
+        if (!a || !(a.creditPaidCents > 0) || !ctx) return false;
+        const amt = Math.min(cents, a.creditPaidCents);
+        ctx.refund = amt; ctx.note = 'Refund from the organizer'; done = amt;
+        a.creditPaidCents -= amt;
+        if (!a.creditPaidCents) { a.paid = 'Refunded'; delete a.creditPaidCents; }
+    }, refundHooks(ev, String(uid)));
+    if (res.ok && !res.aborted) window.showToast(`${dollars(done)} returned to ${name || 'the player'}'s credit.`);
+};
+
+/** Waitlist: move the open-spot offer on to the next person now. */
+window.skipWaitlistOffer = async function(eventId) {
+    const res = await mutateEvent(eventId, (draft) => {
+        if (!draft.spotOffer) return false;
+        const now = Date.now(), st = startMsOf(draft);
+        draft.spotOffer = { ...draft.spotOffer, round: (Number(draft.spotOffer.round) || 1) + 1, expiresAt: offerExpiry(draft, now, st), skippedAt: now };
+    });
+    if (res.ok && !res.aborted) window.showToast('Offered to the next player too. First to confirm gets the spot.');
 };

@@ -446,22 +446,35 @@
                                     <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
                                         <label class="block text-[9px] font-black text-white/60 mb-1">⚽ FORMAT</label>
                                         <select id="ce-format" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="3v3">3v3</option>
+                                            <option value="4v4">4v4</option>
                                             <option value="5v5">5v5</option>
+                                            <option value="6v6">6v6</option>
                                             <option value="7v7" selected>7v7</option>
                                             <option value="8v8">8v8</option>
+                                            <option value="9v9">9v9</option>
+                                            <option value="10v10">10v10</option>
                                             <option value="11v11">11v11</option>
+                                            <option value="12v12">12v12</option>
                                         </select>
                                     </div>
                                     <div class="bg-black/30 p-3 rounded-2xl border border-white/10">
                                         <label class="block text-[9px] font-black text-white/60 mb-1">💵 FEE</label>
                                         <select id="ce-fee" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
                                             <option value="Free" selected>Free</option>
+                                            <option value="$2">$2</option>
+                                            <option value="$3">$3</option>
+                                            <option value="$4">$4</option>
                                             <option value="$5">$5</option>
                                             <option value="$6">$6</option>
                                             <option value="$7">$7</option>
                                             <option value="$8">$8</option>
+                                            <option value="$9">$9</option>
                                             <option value="$10">$10</option>
+                                            <option value="$11">$11</option>
                                             <option value="$12">$12</option>
+                                            <option value="$13">$13</option>
+                                            <option value="$14">$14</option>
                                             <option value="$15">$15</option>
                                         </select>
                                     </div>
@@ -489,6 +502,16 @@
                                     <div class="space-y-1">
                                         <label class="block text-[10px] font-black text-white/60 tracking-wider">📜 RULES</label>
                                         <textarea id="ce-rules" rows="3" class="w-full bg-black/50 border border-teal-500/50 rounded-xl p-3 text-white text-base sm:text-xs focus:outline-none focus:border-brand" style="background-color: #000000 !important; color: #ffffff !important;" placeholder="No sliding tackles, respect referee calls..."></textarea>
+                                    </div>
+
+                                    <!-- Waitlist claim timer -->
+                                    <div class="space-y-1">
+                                        <label class="block text-[10px] font-black text-white/60 tracking-wider">⏳ WAITLIST: TIME TO CLAIM AN OPEN SPOT</label>
+                                        <select id="ce-claim" class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-2 py-2 text-white text-base sm:text-xs" style="background-color: #000000 !important; color: #ffffff !important;">
+                                            <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option>
+                                            <option value="25">25 minutes</option><option value="30">30 minutes</option><option value="40" selected>40 minutes (default)</option><option value="60">1 hour</option>
+                                        </select>
+                                        <p class="text-[10px] text-white/50">When someone cancels, the next player on the waitlist has this long to confirm.</p>
                                     </div>
 
                                     <!-- Plus Ones -->
@@ -646,6 +669,7 @@
         import './js/communities.js';
         import './js/profile.js';
         import './js/leaderboard.js';
+        import './js/spot-offers.js';
         import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 

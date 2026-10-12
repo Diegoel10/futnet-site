@@ -21,8 +21,14 @@ export function renderStatsTab(event) {
         return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
     };
 
-    const getTeamNameByIndex = (idx) => {
-        return (window.teamNames && window.teamNames[event.id] && window.teamNames[event.id][idx]) || `Team ${idx + 1}`;
+    // Same team names as Team Builder and Final results.
+    const teamNamesNow = window.getTeamNames ? window.getTeamNames(event) : [];
+    const getTeamNameByIndex = (idx) => teamNamesNow[idx] || `Team ${idx + 1}`;
+    // Which team played: by its number first (renamed teams still match), then by name.
+    const teamIdx = (idx, name, fallback) => {
+        if (Number.isInteger(idx) && idx >= 0 && idx < teamsCount) return idx;
+        for (let i = 0; i < teamsCount; i++) if (name === getTeamNameByIndex(i)) return i;
+        return fallback;
     };
 
     return `
@@ -137,15 +143,13 @@ export function renderStatsTab(event) {
                                 }
 
                                 (event.matches || []).forEach(m => {
-                                    if (!m.isFinished) return;
+                                    if (m.isFinished === false) return;
                                     const t1Score = (m.team1Goals || []).length;
                                     const t2Score = (m.team2Goals || []).length;
                                     
-                                    let t1Idx = 0, t2Idx = 1;
-                                    for (let i = 0; i < teamsCount; i++) {
-                                        if (m.teamA === getTeamNameByIndex(i)) t1Idx = i;
-                                        if (m.teamB === getTeamNameByIndex(i)) t2Idx = i;
-                                    }
+                                    const t1Idx = teamIdx(m.teamAIndex, m.teamA, 0);
+                                    const t2Idx = teamIdx(m.teamBIndex, m.teamB, 1);
+                                    if (t1Idx === t2Idx) return;
 
                                     if (stats[t1Idx] && stats[t2Idx]) {
                                         stats[t1Idx].played++;
@@ -172,11 +176,8 @@ export function renderStatsTab(event) {
                                     const t1Score = (liveActive.team1Goals || []).length;
                                     const t2Score = (liveActive.team2Goals || []).length;
                                     
-                                    let t1Idx = 0, t2Idx = 1;
-                                    for (let i = 0; i < teamsCount; i++) {
-                                        if (liveActive.teamA === getTeamNameByIndex(i)) t1Idx = i;
-                                        if (liveActive.teamB === getTeamNameByIndex(i)) t2Idx = i;
-                                    }
+                                    const t1Idx = teamIdx(liveActive.teamAIndex, liveActive.teamA, 0);
+                                    const t2Idx = teamIdx(liveActive.teamBIndex, liveActive.teamB, 1);
 
                                     if (stats[t1Idx] && stats[t2Idx]) {
                                         stats[t1Idx].gf += t1Score;
@@ -211,7 +212,8 @@ export function renderStatsTab(event) {
                                     const gdFormatted = gd > 0 ? `+${gd}` : `${gd}`;
                                     const teamKey = `${event.id}_team_${st.index}`;
                                     const isExpanded = window.expandedLeaderboardTeams[teamKey] || false;
-                                    const teamPlayers = (window.teamAssignments && window.teamAssignments[event.id] && window.teamAssignments[event.id][st.index]) || [];
+                                    const ta = event.teamAssignments || {};
+                                    const teamPlayers = ((ta[st.index] ?? ta[String(st.index)]) || []).filter(p => p && p.name);
 
                                     return `
                                         <tr class="hover:bg-white/5 transition border-b border-white/5">

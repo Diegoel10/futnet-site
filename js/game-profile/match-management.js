@@ -56,7 +56,9 @@ window.openStartMatchScreen = function(eventId) {
 
     let active = event.liveMatchActive;
     let needsSync = false;
+    let isNew = false;
     if (!active) {
+        isNew = true;
         active = {
             teamA: teamNamesArr[0],
             teamB: teamNamesArr[1] || teamNamesArr[0],
@@ -94,7 +96,7 @@ window.openStartMatchScreen = function(eventId) {
     Object.keys(nextState).forEach(k => { if (active[k] !== nextState[k]) { active[k] = nextState[k]; needsSync = true; } });
 
     event.liveMatchActive = active;
-    if (needsSync) syncLiveMatchState(eventId, active);
+    if (needsSync) syncLiveMatchState(eventId, active, { create: isNew });
 
     window.liveMatchState = active;
     window.liveMatchMode = active.mode || 'timer';
@@ -341,10 +343,26 @@ window.resetLiveMatchTimer = async function(eventId) {
     startLiveMatchInterval(eventId);
 };
 
-async function syncLiveMatchState(eventId, activeState) {
+// Saves the timer / teams of the live match on top of the LIVE game:
+//  - goals are never overwritten here (another phone may have just added one)
+//  - if the match was already saved or discarded somewhere else, nothing is brought back
+async function syncLiveMatchState(eventId, activeState, opts = {}) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (event) event.liveMatchActive = activeState;
-    await mutateEvent(eventId, (draft) => { draft.liveMatchActive = activeState; });
+    await mutateEvent(eventId, (draft) => {
+        const live = draft.liveMatchActive;
+        if (!live) {
+            if (!opts.create) return false;
+            draft.liveMatchActive = activeState;
+            return;
+        }
+        draft.liveMatchActive = {
+            ...live,
+            ...activeState,
+            team1Goals: Array.isArray(live.team1Goals) ? live.team1Goals : [],
+            team2Goals: Array.isArray(live.team2Goals) ? live.team2Goals : []
+        };
+    });
 }
 
 window.updateLiveMatchTeamNames = async function(eventId) {
@@ -450,18 +468,19 @@ window.recordLiveGoal = async function(eventId, teamKey, scorerName) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !event.liveMatchActive) return;
 
-    event.liveMatchActive.team1Goals = Array.isArray(event.liveMatchActive.team1Goals) ? event.liveMatchActive.team1Goals : [];
-    event.liveMatchActive.team2Goals = Array.isArray(event.liveMatchActive.team2Goals) ? event.liveMatchActive.team2Goals : [];
-
-    if (teamKey === 'A') {
-        event.liveMatchActive.team1Goals.push(scorerName);
-        document.getElementById('score-teamA').innerText = event.liveMatchActive.team1Goals.length;
-    } else {
-        event.liveMatchActive.team2Goals.push(scorerName);
-        document.getElementById('score-teamB').innerText = event.liveMatchActive.team2Goals.length;
-    }
-
-    await syncLiveMatchState(eventId, event.liveMatchActive);
+    // The goal is added to the LIVE match, so a goal added at the same moment on a phone is kept too.
+    const key = teamKey === 'A' ? 'team1Goals' : 'team2Goals';
+    const res = await mutateEvent(eventId, (draft) => {
+        if (!draft.liveMatchActive) return false;   // the match was already saved somewhere else
+        draft.liveMatchActive[key] = Array.isArray(draft.liveMatchActive[key]) ? draft.liveMatchActive[key] : [];
+        draft.liveMatchActive[key].push(scorerName);
+    });
+    if (!res.ok) return;
+    if (res.aborted) { window.showToast && window.showToast('This match was already saved.', 'error'); return; }
+    const live = res.event.liveMatchActive || {};
+    event.liveMatchActive = live;
+    const a = document.getElementById('score-teamA'); if (a) a.innerText = (live.team1Goals || []).length;
+    const b = document.getElementById('score-teamB'); if (b) b.innerText = (live.team2Goals || []).length;
     if (typeof window.showToast === 'function') {
         window.showToast(`⚽ Goal! ${scorerName}`);
     }
@@ -471,30 +490,38 @@ window.saveLiveMatchResult = async function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !event.liveMatchActive) return;
 
-    const live = event.liveMatchActive;
-    const namesNow = mmTeamNames(event);
-    const colorsNow = mmTeamColors(event);
-    const iA = Number.isInteger(live.teamAIndex) ? live.teamAIndex : namesNow.indexOf(live.teamA);
-    const iB = Number.isInteger(live.teamBIndex) ? live.teamBIndex : namesNow.indexOf(live.teamB);
-    const finishedMatch = {
-        teamA: iA >= 0 ? namesNow[iA] : live.teamA,
-        teamB: iB >= 0 ? namesNow[iB] : live.teamB,
-        teamAIndex: iA >= 0 ? iA : null,
-        teamBIndex: iB >= 0 ? iB : null,
-        teamAColor: iA >= 0 ? colorsNow[iA] : (live.teamAColor || null),
-        teamBColor: iB >= 0 ? colorsNow[iB] : (live.teamBColor || null),
-        team1Goals: event.liveMatchActive.team1Goals || [],
-        team2Goals: event.liveMatchActive.team2Goals || [],
-        isFinished: true,
-        timestamp: new Date().toISOString()
-    };
-
+    // Built from the LIVE game: if a phone (or another browser) already saved this match when the
+    // timer hit 00:00, nothing is saved twice. Goals added on other devices are included.
     const res = await mutateEvent(eventId, (draft) => {
+        const live = draft.liveMatchActive;
+        if (!live) return false;
+        const namesNow = mmTeamNames(draft.id ? draft : { ...draft, id: eventId });
+        const colorsNow = mmTeamColors(draft.id ? draft : { ...draft, id: eventId });
+        const iA = Number.isInteger(live.teamAIndex) ? live.teamAIndex : namesNow.indexOf(live.teamA);
+        const iB = Number.isInteger(live.teamBIndex) ? live.teamBIndex : namesNow.indexOf(live.teamB);
         draft.matches = Array.isArray(draft.matches) ? draft.matches : [];
-        draft.matches.push(finishedMatch);
+        draft.matches.push({
+            teamA: iA >= 0 ? namesNow[iA] : live.teamA,
+            teamB: iB >= 0 ? namesNow[iB] : live.teamB,
+            teamAIndex: iA >= 0 ? iA : null,
+            teamBIndex: iB >= 0 ? iB : null,
+            teamAColor: iA >= 0 ? colorsNow[iA] : (live.teamAColor || null),
+            teamBColor: iB >= 0 ? colorsNow[iB] : (live.teamBColor || null),
+            team1Goals: live.team1Goals || [],
+            team2Goals: live.team2Goals || [],
+            isFinished: true,
+            timestamp: new Date().toISOString()
+        });
         draft.liveMatchActive = null;
     });
+    if (res.ok && res.aborted) {
+        // Already saved somewhere else: just close the screen.
+        if (window.liveMatchTimerInterval) clearInterval(window.liveMatchTimerInterval);
+        document.getElementById('start-match-screen-modal')?.remove();
+        return;
+    }
     if (res.ok) {
+        if (window.liveMatchTimerInterval) clearInterval(window.liveMatchTimerInterval);
         window.showToast("Match saved and recorded!");
         const modal = document.getElementById('start-match-screen-modal');
         if (modal) modal.remove();

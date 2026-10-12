@@ -87,6 +87,7 @@ async function notify(recipients, payload, { exclude = [], key = "" } = {}) {
         eventId: payload.eventId || "",
         communityId: payload.communityId || "",
         chatId: payload.chatId || "",
+        sound: payload.sound || "",
         read: false,
         source: "server",
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -163,16 +164,20 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
     eventId: n.eventId || "",
     communityId: n.communityId || "",
     chatId: n.chatId || "",
+    sound: n.sound || "",
   };
+  // Money in: custom "cha-ching" sound (the file ships inside the apps; falls back to the normal sound).
+  const special = n.sound === "cha_ching";
 
   const res = await admin.messaging().sendEachForMulticast({
     tokens,
     notification: { title: n.title || "FutNet", body: n.body || "" },
     data,
+    android: special ? { notification: { channelId: "futnet_money", sound: "cha_ching" } } : undefined,
     apns: {
       payload: {
         aps: {
-          sound: "default",
+          sound: special ? "cha_ching.wav" : "default",
           // Groups notifications on the lock screen (one stack per chat / per game).
           "thread-id": n.chatId || n.eventId || n.communityId || type,
         },
@@ -688,6 +693,7 @@ exports.onCreditLedger = onDocumentCreated(`${BASE}/communities/{communityId}/cr
     type: "community_credit",
     senderUid: l.by || "",
     communityId,
+    sound: cents > 0 ? "cha_ching" : "",
     title: cents > 0 ? `${money} credit added 💰` : `${money} credit removed`,
     body: `${who} ${cents > 0 ? "added" : "removed"} ${money} ${cents > 0 ? "to" : "from"} your ${cName} credit. Balance: ${balance}.${l.note ? " Note: " + clip(l.note, 60) : ""}`,
   }, { key: `credit_${entryId}` });
@@ -738,6 +744,305 @@ exports.onPhoneTokenSaved = onDocumentWritten(`${BASE}/directory/{uid}`, async (
       if ((d.data() || {}).fcmToken === token) patch.fcmToken = admin.firestore.FieldValue.delete();
       await d.ref.update(patch);
       logger.info("Moved phone token from", otherUid, "to", uid);
+    }
+  }
+});
+// ---------------------------------------------------------------------------
+// 11. Money + waitlist (same rules as the website: money-rules.js)
+//   a) Must-pay games: nobody keeps a spot without paying, whatever app or link they used
+//   b) Late cancels with "refund if the spot gets filled": refunded when someone takes the spot
+//   c) Game cancelled (deleted): everyone's credit back, unless the organizer turned that off
+//   d) Waitlist: when a spot opens, offer it to the next player(s) with a timer (scheduled below)
+// ---------------------------------------------------------------------------
+
+const rules = require("./money-rules");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const FV = admin.firestore.FieldValue;
+const DEFAULT_TZ = "America/New_York";
+const money = (c) => `$${(Math.abs(Number(c) || 0) / 100).toFixed(2)}`;
+
+/** Wall-clock time in a time zone -> ms (games are saved as "2026-10-20" + "7:00 PM", local time). */
+function tzOffsetMs(t, tz) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(t));
+  const g = (k) => Number((parts.find((p) => p.type === k) || {}).value);
+  return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - t;
+}
+function startOf(game) {
+  const tz = game.timeZone || DEFAULT_TZ;
+  return rules.startMsOf(game, (y, mo, d, h, mi) => {
+    const guess = Date.UTC(y, mo, d, h, mi);
+    let t = guess - tzOffsetMs(guess, tz);
+    t = guess - tzOffsetMs(t, tz);
+    return t;
+  });
+}
+
+const credRef = (cid, uid) => col("communities").doc(cid).collection("credits").doc(String(uid));
+const ledgerCol = (cid) => col("communities").doc(cid).collection("creditLedger");
+const isRealPlayer = (uid) => uid && !uid.startsWith("usr_") && !uid.includes("_guest_");
+
+/** Credit move inside a transaction (reads must already be done: pass the balance read before). */
+function writeCredit(tx, cid, uid, name, balanceBefore, amountCents, type, note, game, eventId) {
+  const after = balanceBefore + amountCents;
+  tx.set(credRef(cid, uid), { uid: String(uid), name: name || "Member", balanceCents: after, updatedAt: FV.serverTimestamp() }, { merge: true });
+  tx.set(ledgerCol(cid).doc(), {
+    uid: String(uid), name: name || "Member", amountCents, type, note,
+    eventId, eventTitle: (game && game.title) || "Game", by: "server", byName: "FutNet",
+    balanceAfterCents: after, at: FV.serverTimestamp(),
+  });
+  return after;
+}
+
+// ---- a) must-pay enforcement --------------------------------------------------
+async function enforcePayment(eventId, before, after) {
+  if (!rules.isCreditGame(after)) return false;
+  const beforeIn = new Set(arr(before.attendees).map(uidOf));
+  const suspects = arr(after.attendees).filter((a) => {
+    const u = uidOf(a);
+    return isRealPlayer(u) && !beforeIn.has(u) && u !== after.organizerId && a.role !== "Organizer" &&
+      !(Number(a.creditPaidCents) > 0) && a.paid !== "Paid" && a.paid !== "Free" && a.addedByAdmin !== true;
+  }).map(uidOf);
+  if (!suspects.length) return false;
+
+  const ref = col("eventsList").doc(eventId);
+  const removed = [], charged = [];
+  await db.runTransaction(async (tx) => {
+    removed.length = 0; charged.length = 0;
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const g = snap.data();
+    const cid = g.communityId;
+    const todo = arr(g.attendees).filter((a) => suspects.includes(uidOf(a)) && !(Number(a.creditPaidCents) > 0) && a.paid !== "Paid" && a.addedByAdmin !== true);
+    if (!todo.length) return;
+    const balances = {};
+    for (const a of todo) {
+      const s = await tx.get(credRef(cid, uidOf(a)));
+      balances[uidOf(a)] = s.exists ? (Number(s.data().balanceCents) || 0) : 0;
+    }
+    const attendees = [];
+    for (const a of arr(g.attendees)) {
+      const u = uidOf(a);
+      if (!todo.find((t) => uidOf(t) === u)) { attendees.push(a); continue; }
+      const cost = rules.costFor(g, arr(a.guests).length);
+      if (balances[u] >= cost) {
+        writeCredit(tx, cid, u, a.name, balances[u], -cost, "game", "Game fee", g, eventId);
+        attendees.push({ ...a, paid: "Credit", creditPaidCents: cost, creditCommunityId: cid, guests: arr(a.guests).map((x) => ({ ...x, paid: "Credit" })) });
+        charged.push({ uid: u, cost });
+      } else {
+        removed.push({ uid: u, cost, have: balances[u] });
+      }
+    }
+    tx.update(ref, { attendees });
+  });
+  for (const r of removed) {
+    await notify([r.uid], {
+      type: "game_payment_needed",
+      eventId,
+      communityId: after.communityId || "",
+      title: "Add credit to join 💳",
+      body: `${after.title || "This game"} costs ${money(r.cost)} and you have ${money(r.have)} credit. Send the money to your admin, then join again.`,
+    }, { key: `paycheck_${eventId}_${r.uid}_${tenMinuteBucket()}` });
+  }
+  if (removed.length || charged.length) logger.info(`Payment check ${eventId}: charged ${charged.length}, removed ${removed.length}`);
+  return removed.length > 0 || charged.length > 0;
+}
+
+// ---- b) refund late cancels once someone takes the spot ------------------------
+async function refundFilledSpots(eventId, before, after) {
+  const pending = arr(after.pendingRefunds);
+  if (!pending.length) return false;
+  const beforeIn = new Set(arr(before.attendees).map(uidOf));
+  const newcomers = arr(after.attendees).filter((a) => !beforeIn.has(uidOf(a)) && uidOf(a) !== after.organizerId).length;
+  if (!newcomers) return false;
+
+  const ref = col("eventsList").doc(eventId);
+  const paidBack = [];
+  await db.runTransaction(async (tx) => {
+    paidBack.length = 0;
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const g = snap.data();
+    const inNow = new Set(arr(g.attendees).map(uidOf));
+    // Oldest first; never someone who came back to the game themselves
+    const list = arr(g.pendingRefunds).filter((p) => p && p.cents > 0 && !inNow.has(String(p.uid)));
+    const take = list.slice(0, newcomers);
+    if (!take.length) return;
+    const bal = {};
+    for (const p of take) {
+      const k = `${p.cid}|${p.uid}`;
+      if (bal[k] === undefined) {
+        const s = await tx.get(credRef(p.cid || g.communityId, p.uid));
+        bal[k] = s.exists ? (Number(s.data().balanceCents) || 0) : 0;
+      }
+    }
+    for (const p of take) {
+      const k = `${p.cid}|${p.uid}`;
+      bal[k] = writeCredit(tx, p.cid || g.communityId, p.uid, p.name, bal[k], p.cents, "refund", "Your spot was filled", g, eventId);
+      paidBack.push(p);
+    }
+    const left = arr(g.pendingRefunds).filter((p) => !take.includes(p) && !inNow.has(String(p.uid)));
+    tx.update(ref, { pendingRefunds: left });
+  });
+  for (const p of paidBack) {
+    await notify([String(p.uid)], {
+      type: "community_credit",
+      eventId,
+      communityId: p.cid || after.communityId || "",
+      sound: "cha_ching",
+      title: `${money(p.cents)} refunded 💰`,
+      body: `Someone took your spot in ${after.title || "the game"}, so your ${money(p.cents)} is back in your credit.`,
+    }, { key: `spotrefund_${eventId}_${p.uid}_${p.at || ""}` });
+  }
+  return paidBack.length > 0;
+}
+
+// ---- c) game cancelled: give back what each player still has paid for this game ---
+async function refundCancelledGame(eventId, game) {
+  if (!game.communityId || !rules.refundsOnCancel(game)) return;
+  const cids = uniq([game.communityId, ...arr(game.attendees).map((a) => a.creditCommunityId), ...arr(game.pendingRefunds).map((p) => p.cid)]);
+  for (const cid of cids) {
+    // Net paid per player for this game = -(fees + refunds) in the ledger. Refunds the apps already made are counted.
+    const ledger = await ledgerCol(cid).where("eventId", "==", eventId).get();
+    const net = {};
+    ledger.docs.forEach((d) => {
+      const l = d.data() || {};
+      if (l.type !== "game" && l.type !== "refund") return;
+      net[l.uid] = (net[l.uid] || 0) - (Number(l.amountCents) || 0);
+    });
+    for (const [uid, owed] of Object.entries(net)) {
+      if (owed <= 0) continue;
+      const name = (arr(game.attendees).find((a) => uidOf(a) === uid) || arr(game.pendingRefunds).find((p) => String(p.uid) === uid) || {}).name;
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(credRef(cid, uid));
+        writeCredit(tx, cid, uid, name, s.exists ? (Number(s.data().balanceCents) || 0) : 0, owed, "refund", "Game was cancelled", game, eventId);
+      });
+      await notify([uid], {
+        type: "community_credit",
+        eventId,
+        communityId: cid,
+        sound: "cha_ching",
+        title: `${money(owed)} refunded 💰`,
+        body: `${game.title || "Your game"} was cancelled, so your ${money(owed)} is back in your credit.`,
+      }, { key: `cancelrefund_${eventId}_${uid}` });
+    }
+  }
+}
+
+// ---- d) waitlist spot offers ----------------------------------------------------
+async function updateSpotOffer(eventId, before, after) {
+  const now = Date.now();
+  const start = startOf(after);
+  const ended = after.isSessionEnded === true || (start && now > start + 3 * 3600000);
+  const free = rules.freeSpotsOf(after);
+  const waiting = rules.waitingUids(after);
+  const want = !ended && free > 0 && waiting.length > 0;
+  const ref = col("eventsList").doc(eventId);
+
+  if (!want) {
+    if (!after.spotOffer) return;
+    // Spot taken (or nobody waiting): close the offer, and tell the others who were offered it.
+    const offered = rules.offerEligible({ ...before, spotOffer: before.spotOffer || after.spotOffer }, now, start);
+    await ref.update({ spotOffer: null });
+    const inNow = new Set(arr(after.attendees).map(uidOf));
+    const stillWaiting = offered.filter((u) => !inNow.has(u) && waiting.includes(u));
+    if (free === 0 && stillWaiting.length) {
+      await notify(stillWaiting, {
+        type: "game_spot_taken",
+        eventId,
+        title: "Someone grabbed the spot",
+        body: `The open spot in ${after.title || "the game"} was taken. You're still on the waitlist.`,
+      }, { key: `spottaken_${eventId}_${(after.spotOffer && after.spotOffer.startedAt) || ""}` });
+    }
+    return;
+  }
+
+  let offer = after.spotOffer;
+  const patch = {};
+  if (!offer) {
+    offer = { round: 1, startedAt: now, expiresAt: rules.offerExpiry(after, now, start), lastCall: false, notified: [] };
+    if (offer.expiresAt <= now) { offer.lastCall = true; offer.expiresAt = null; }
+    patch.spotOffer = offer;
+  }
+  const g = { ...after, spotOffer: offer };
+  const eligible = rules.offerEligible(g, now, start);
+  const fresh = eligible.filter((u) => !arr(offer.notified).includes(u));
+  const next = { ...offer, notified: uniq([...arr(offer.notified), ...fresh]) };
+  if (!next.lastCall) {
+    if (eligible.length >= waiting.length) {
+      // Everyone waiting is already invited: nothing to widen. Wake up again only for last call.
+      const wake = start ? Math.max(now, start - rules.LAST_CALL_MS) : null;
+      if (next.expiresAt !== wake && (wake === null || !next.expiresAt || next.expiresAt > wake)) next.expiresAt = wake;
+    } else {
+      // More people joined the waitlist after the timer was parked: start ticking again.
+      const due = rules.offerExpiry(after, now, start);
+      if (!next.expiresAt || next.expiresAt > due) next.expiresAt = due;
+    }
+  }
+  if (!fresh.length && !patch.spotOffer && JSON.stringify(next) === JSON.stringify(offer)) return;
+  patch.spotOffer = next;
+  await ref.update(patch);
+
+  if (fresh.length) {
+    const mins = rules.claimMinutesOf(after);
+    const pay = rules.isCreditGame(after) ? ` and pay ${money(rules.feeCentsOf(after))} from your credit` : "";
+    const lastCall = patch.spotOffer.lastCall || rules.isLastCall(g, now, start);
+    await notify(fresh, {
+      type: "game_spot_offer",
+      eventId,
+      communityId: after.communityId || "",
+      title: lastCall ? "Last call: a spot is open! ⚽" : "Someone cancelled! You're up next ⚽",
+      body: lastCall
+        ? `A spot opened in ${after.title || "the game"}. First to confirm gets it${pay ? pay.replace(" and pay", ", you'll pay") : ""}.`
+        : `A spot opened in ${after.title || "the game"}. Confirm within ${mins === 60 ? "1 hour" : mins + " minutes"}${pay} to grab it.`,
+    }, { key: `spotoffer_${eventId}_${patch.spotOffer.startedAt}_${fresh.join("_")}`.slice(0, 900) });
+  }
+}
+
+exports.onGameMoney = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (event) => {
+  const eventId = event.params.eventId;
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+
+  if (before && !after) { await refundCancelledGame(eventId, before); return; }
+  if (!after) return;
+  const prev = before || {};
+  try {
+    // A fix writes the game again, and that write runs this function again for the next step.
+    if (await enforcePayment(eventId, prev, after)) return;
+    await refundFilledSpots(eventId, prev, after);
+    await updateSpotOffer(eventId, prev, after);
+  } catch (e) {
+    logger.error("onGameMoney failed", eventId, e.message);
+  }
+});
+
+// Every minute: offers whose timer ran out move on to the next player (or to "last call").
+exports.advanceSpotOffers = onSchedule({ schedule: "every 1 minutes", timeZone: DEFAULT_TZ }, async () => {
+  const now = Date.now();
+  const due = await col("eventsList").where("spotOffer.expiresAt", "<=", now).limit(200).get();
+  for (const d of due.docs) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(d.ref);
+        const g = snap.data();
+        const o = g && g.spotOffer;
+        if (!o || !o.expiresAt || o.expiresAt > now) return;
+        const start = startOf(g);
+        if (start && now >= start - rules.LAST_CALL_MS) {
+          tx.update(d.ref, { spotOffer: { ...o, lastCall: true, expiresAt: null } });
+          return;
+        }
+        const waiting = rules.waitingUids(g).length;
+        const round = (Number(o.round) || 1) + 1;
+        const covers = rules.freeSpotsOf(g) + round - 1 >= waiting;
+        const parked = start ? Math.max(now + 60000, start - rules.LAST_CALL_MS) : null;
+        tx.update(d.ref, { spotOffer: { ...o, round, expiresAt: covers ? parked : rules.offerExpiry(g, now, start) } });
+      });
+    } catch (e) {
+      logger.error("advance offer failed", d.id, e.message);
     }
   }
 });

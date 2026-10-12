@@ -56,7 +56,7 @@ export function renderRosterTab(event) {
     const currentList = window.activeRosterSubTab === 0 ? confirmedList : (window.activeRosterSubTab === 1 ? waitlistList : declinedList);
 
     const renderAttendeeCard = (att) => {
-        const isPaid = att.paid === 'Paid';
+        const isPaid = att.paid === 'Paid' || att.paid === 'Credit' || att.creditPaidCents > 0;
         const safeAvatar = resolveAvatar(att);
         const rawName = att.name || att.firstName || att.displayName || att.fullName || 'Player';
         const safeName = rawName.replace(/'/g, "\\'");
@@ -75,7 +75,7 @@ export function renderRosterTab(event) {
                             <span class="text-[9px] text-[#00F296] block">guest of ${escapeHtml(rawName)}</span>
                         </div>
                     </div>
-                    <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/40 text-white/60 border border-white/10">${g.paid || 'Unpaid'}</span>
+                    <span class="text-[9px] font-bold px-2 py-0.5 rounded-full border ${(g.paid === 'Paid' || g.paid === 'Credit') ? 'bg-emerald-500/20 text-[#00F296] border-emerald-500/40' : 'bg-black/40 text-white/60 border-white/10'}">${(g.paid === 'Paid' || g.paid === 'Credit') ? 'Paid' : escapeHtml(g.paid || 'Unpaid')}</span>
                 </div>
             `).join('');
         }
@@ -84,7 +84,7 @@ export function renderRosterTab(event) {
             ? (isPaid ? 'bg-emerald-500/20 text-[#00F296] border-emerald-500/40' : 'bg-black/40 text-white/70 border-white/15')
             : (window.activeRosterSubTab === 1 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40');
         
-        const statusLabel = window.activeRosterSubTab === 0 ? (att.paid || 'Unpaid') : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
+        const statusLabel = window.activeRosterSubTab === 0 ? (isPaid ? 'Paid' : escapeHtml(att.paid || 'Unpaid')) : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
         const organizerBadge = isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : '';
         const plusOnesBadge = att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
 

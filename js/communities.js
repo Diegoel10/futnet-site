@@ -13,7 +13,7 @@ import {
     onSnapshot, serverTimestamp, increment, arrayUnion, deleteField, runTransaction, where
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-store.js';
-import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readPayOptions } from './credits.js';
+import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readPayOptions, waitlistOptionsHtml, readWaitlistOptions, paymentMethodsFormHtml, readPaymentMethods } from './credits.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { computePlayerStats } from './leaderboard.js';
 import { renderWhatsApp, typingBubbleHtml, typingText, watchTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText } from './wa-chat.js';
@@ -1016,7 +1016,7 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
     const city0 = src ? (lm ? lm[2] : (c.city || '')) : (c.city || '');
     const state0 = src ? (lm ? lm[3] : (c.state || 'FL')) : (c.state || 'FL');
     const feeNow = src ? (String(src.fee || '').trim() && String(src.fee) !== '0' ? String(src.fee) : 'Free') : 'Free';
-    const feeOpts = ['Free', '$5', '$6', '$7', '$8', '$10', '$12', '$15']; if (!feeOpts.includes(feeNow)) feeOpts.push(feeNow);
+    const feeOpts = ['Free', ...Array.from({ length: 14 }, (_, i) => `$${i + 2}`)]; if (!feeOpts.includes(feeNow)) feeOpts.push(feeNow);
     const plusNow = src ? (src.allowPlusOnes ? 'Yes' : 'No') : 'No';
     const sel = (id, opts2, cur, extra = '') => `<select id="${id}" ${extra} class="${INPUT}">${opts2.map(o => `<option ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
     const heading = mode === 'edit' ? 'Edit Game' : mode === 'copy' ? 'Copy Game' : `Create Game in ${esc(c.name)}`;
@@ -1036,10 +1036,11 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
         </div>
         <div class="flex gap-3">
             <div class="flex-1">${lbl('Teams')}${sel('cg-teams', ['2', '3', '4'], String(src?.teamsCount || 3))}</div>
-            <div class="flex-1">${lbl('Format')}${sel('cg-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'], src?.format || '7v7')}</div>
+            <div class="flex-1">${lbl('Format')}${sel('cg-format', Array.from({ length: 10 }, (_, i) => `${i + 3}v${i + 3}`), src?.format || '7v7')}</div>
             <div class="flex-1">${lbl('Fee')}${sel('cg-fee', feeOpts, feeNow, 'onchange="refreshCgOptions()"')}</div>
         </div>
-        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', { payWithCredit: src ? src.payWithCredit === true : true, refundPolicy: src?.refundPolicy || 'hours:1' }) : ''}</div>
+        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', src ? { ...src, payWithCredit: src.payWithCredit === true, refundPolicy: src.refundPolicy || 'hours:1' } : {}) : ''}</div>
+        ${waitlistOptionsHtml('cg', src || {})}
         <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}">${esc(src?.description || '')}</textarea></div>
         <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}">${esc(src?.rules || '')}</textarea></div>
         ${toggleRow('cg-accept', 'Users must accept rules to be confirmed', 'Players see the rules and the refund policy and tap "I accept" before they join.', src ? src.requireAcceptance === true : true)}
@@ -1104,7 +1105,7 @@ window.submitCommunityGame = async function(communityId) {
     const credit = (() => {
         if (!creditOn(c) || fee === 'Free') return { payWithCredit: false, refundPolicy: 'always', plusOneExtra: 0 };
         const o = readPayOptions('cg');
-        return { payWithCredit: o.payWithCredit, refundPolicy: o.refundPolicy, plusOneExtra: allowPlusOnes ? o.plusOneExtra : 0 };
+        return { ...o, plusOneExtra: allowPlusOnes ? o.plusOneExtra : 0 };
     })();
     const fields = {
         title: v('cg-title') || 'Soccer pick-up (default)',
@@ -1114,6 +1115,7 @@ window.submitCommunityGame = async function(communityId) {
         teamsCount: parseInt(v('cg-teams'), 10) || 3, format: v('cg-format'),
         fee, price: parseFloat(fee.replace('$', '')) || 0,
         ...credit,
+        ...readWaitlistOptions('cg'),
         allowPlusOnes, plusOneLimit: allowPlusOnes ? (parseInt(v('cg-plus-limit'), 10) || 1) : 0
     };
     const btn = document.getElementById('cg-submit');
@@ -1401,6 +1403,10 @@ function adminTab(c) {
                 ${settingToggle(id, 'creditEnabled', 'Credit system', creditOn(c))}
             </div>
             <button onclick="editCommunityInfo('${jsArg(id)}')" class="${BTN_DARK} w-full mt-3"><i class="fa-solid fa-pen mr-1"></i> Edit name, info & thumbnail</button></div>
+        ${creditOn(c) ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Accepted payments</div>
+            <p class="text-[10px] text-white/50 mb-2">Members see these when they need to add credit. Leave blank the ones you don't use.</p>
+            ${paymentMethodsFormHtml(c)}
+            <button onclick="savePaymentMethods('${jsArg(id)}')" class="${BTN_PRIMARY} w-full mt-2">Save payment details</button></div>` : ''}
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Members (${S.members.length})</div>
             <div class="space-y-2">${others.map(m => {
                 const adm = isAdminRole(m, c); const sc = suspendedScopes(m);
@@ -1420,6 +1426,15 @@ const settingToggle = (id, key, label, on) => `
         <span class="text-xs font-bold text-white">${label}</span>
         <input type="checkbox" ${on ? 'checked' : ''} onchange="setCommunitySetting('${jsArg(id)}', '${key}', this.checked)" class="w-5 h-5 accent-[#00F296]">
     </label>`;
+
+window.savePaymentMethods = async (id) => {
+    try {
+        const pm = readPaymentMethods();
+        await updateDoc(commRef(id), { paymentMethods: pm });
+        if (window.communitiesCache?.[id]) window.communitiesCache[id].paymentMethods = pm;
+        toast('Payment details saved');
+    } catch (e) { console.error(e); toast('Could not save payment details', 'error'); }
+};
 
 window.setCommunitySetting = async (id, key, val) => {
     try { await updateDoc(commRef(id), { [key]: val }); if (key === 'creditEnabled' && val) toast('Credit system is on. Members now see a Credit tab.'); } catch (e) { console.error(e); toast('Could not update setting', 'error'); }

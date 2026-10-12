@@ -14,6 +14,7 @@ import {
     doc, collection, runTransaction, serverTimestamp, getDoc
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-store.js';
+import { policyLines, fullRefundAllowed, leaveRefund, startMsOf, refundsOnCancel, CLAIM_MINUTES, DEFAULT_CLAIM_MINUTES, claimMinutesOf, partialPctOf } from './money-rules.js';
 
 const toast = (m, t) => window.showToast && window.showToast(m, t);
 const credRef = (cid, uid) => doc(db, 'artifacts', appId, 'communities', cid, 'credits', String(uid));
@@ -48,37 +49,26 @@ export function eventStart(ev) {
 }
 
 export const REFUND_POLICIES = [
-    ['never', 'Never refund'],
+    ['hours:1', 'Full refund until 1 hour before'],
+    ['hours:2', 'Full refund until 2 hours before'],
+    ['hours:3', 'Full refund until 3 hours before'],
+    ['hours:4', 'Full refund until 4 hours before'],
+    ['sameday', 'Full refund until the day of the game'],
     ['always', 'Always refund'],
-    ['sameday', 'Refund unless the player cancels on the day of the match'],
-    ['hours:1', 'Refund unless the player cancels less than 1 hour before'],
-    ['hours:2', 'Refund unless the player cancels less than 2 hours before'],
-    ['hours:3', 'Refund unless the player cancels less than 3 hours before'],
-    ['hours:4', 'Refund unless the player cancels less than 4 hours before']
+    ['never', 'Never refund']
 ];
 
-export function policyText(ev) {
-    const p = (ev && ev.refundPolicy) || 'always';
-    const hit = REFUND_POLICIES.find(x => x[0] === p);
-    return hit ? hit[1] : 'Always refund';
+/** The refund policy in plain words (all the game's refund options). */
+export function policyText(ev) { return policyLines(ev).join(' '); }
+
+/** Does the game's rule give a FULL refund if the player cancels right now? */
+export function refundAllowed(ev, now = Date.now()) {
+    return fullRefundAllowed(ev, now, startMsOf(ev));
 }
 
-/** Does the game's rule allow giving the credit back if the player cancels right now? */
-export function refundAllowed(ev, now = Date.now()) {
-    const p = (ev && ev.refundPolicy) || 'always';
-    if (p === 'always') return true;
-    if (p === 'never') return false;
-    const start = eventStart(ev);
-    if (!start) return true;
-    if (p === 'sameday') {
-        const dayStart = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0).getTime();
-        return now < dayStart;
-    }
-    if (p.startsWith('hours:')) {
-        const hrs = parseInt(p.slice(6), 10) || 1;
-        return now <= start.getTime() - hrs * 3600000;
-    }
-    return true;
+/** What the player gets back if they leave right now: { now, later } in cents. */
+export function myLeaveRefund(ev, paid, now = Date.now()) {
+    return leaveRefund(ev, paid, now, startMsOf(ev));
 }
 
 /** Extra charge per +1 (cents), set by the game creator. 0 when none. */
@@ -170,26 +160,37 @@ export function refundHooks(ev, uid) {
     };
 }
 
-/** Game is being deleted: give every credit payment back. */
+/** One credit refund to one member, in its own transaction (used for cancels and admin refunds). */
+export async function refundMember(cid, uid, name, cents, ev, note) {
+    cents = Math.round(cents || 0);
+    if (!cid || !uid || cents <= 0) return false;
+    await runTransaction(db, async (tx) => {
+        const ref = credRef(cid, uid);
+        const s = await tx.get(ref);
+        const after = (s.exists() ? (s.data().balanceCents || 0) : 0) + cents;
+        tx.set(ref, { uid: String(uid), name: name || (s.exists() ? s.data().name : '') || 'Member', balanceCents: after, updatedAt: serverTimestamp() }, { merge: true });
+        await writeLedger(tx, cid, {
+            uid: String(uid), name: name || 'Member', amountCents: cents, type: 'refund', note: note || 'Refund',
+            eventId: ev?.id || '', eventTitle: ev?.title || 'Game', by: window.currentUser?.uid || '',
+            byName: window.userProfile?.name || window.userProfile?.firstName || 'Organizer', balanceAfterCents: after
+        });
+    });
+    return true;
+}
+
+/**
+ * Game is being cancelled: give every credit payment back, unless the organizer turned
+ * "Refund everyone if the game is cancelled" off. People who left late and were still
+ * waiting for their money (refund-if-spot-filled) get it back too.
+ */
 export async function refundEveryoneForGame(ev) {
-    if (!ev || !ev.communityId) return;
-    const paid = (ev.attendees || []).filter(a => a && a.creditPaidCents > 0 && (a.creditCommunityId || ev.communityId));
+    if (!ev || !ev.communityId || !refundsOnCancel(ev)) return;
+    const paid = (ev.attendees || []).filter(a => a && a.creditPaidCents > 0)
+        .map(a => ({ uid: a.uid, name: a.name, cents: a.creditPaidCents, cid: a.creditCommunityId || ev.communityId }));
+    (ev.pendingRefunds || []).forEach(r => { if (r && r.cents > 0) paid.push({ uid: r.uid, name: r.name, cents: r.cents, cid: r.cid || ev.communityId }); });
     for (const a of paid) {
-        const cid = a.creditCommunityId || ev.communityId;
-        try {
-            await runTransaction(db, async (tx) => {
-                const ref = credRef(cid, a.uid);
-                const s = await tx.get(ref);
-                const before = s.exists() ? (s.data().balanceCents || 0) : 0;
-                const after = before + a.creditPaidCents;
-                tx.set(ref, { uid: String(a.uid), name: a.name || 'Member', balanceCents: after, updatedAt: serverTimestamp() }, { merge: true });
-                await writeLedger(tx, cid, {
-                    uid: String(a.uid), name: a.name || 'Member', amountCents: a.creditPaidCents, type: 'refund', note: 'Game was canceled',
-                    eventId: ev.id, eventTitle: ev.title || 'Game', by: window.currentUser?.uid || '', byName: window.userProfile?.name || 'Organizer',
-                    balanceAfterCents: after
-                });
-            });
-        } catch (e) { console.error('refund failed for', a.uid, e); toast(`Could not refund ${a.name || 'a player'}'s credit`, 'error'); }
+        try { await refundMember(a.cid, a.uid, a.name, a.cents, ev, 'Game was cancelled'); }
+        catch (e) { console.error('refund failed for', a.uid, e); toast(`Could not refund ${a.name || 'a player'}'s credit`, 'error'); }
     }
 }
 
@@ -231,8 +232,9 @@ export function memberCreditHtml(c, myDoc, myLedger) {
         <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border border-[#00F296]/50 rounded-2xl p-4 text-center">
             <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Your credit in ${esc(c.name)}</div>
             <div class="text-3xl font-black text-white mt-1">${dollars(bal)}</div>
-            <p class="text-[11px] text-white/60 mt-2">Pay a community admin (Zelle, Cash App or cash) and they will add it here. Game fees come out of your credit automatically when you join.</p>
+            <p class="text-[11px] text-white/60 mt-2">Pay a community admin and they will add it here. Game fees come out of your credit automatically when you join.</p>
         </div>
+        <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">How to add credit</div>${paymentMethodsHtml(c, 0, c.adminName || 'a community admin')}</div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">History</div>
             <div class="space-y-1.5">${myLedger.length ? myLedger.slice(0, 30).map(l => ledgerLine(l, false)).join('') : '<p class="text-xs text-white/50 italic">No credit activity yet.</p>'}</div></div>
     </div>`;
@@ -308,21 +310,52 @@ window.saveCreditModal = async function(cid, uid, name) {
 };
 
 // ------------------------------------------------------------------ game options (create form + edit/copy wizard)
-// idp = id prefix of the inputs, v = current values { openToNonMembers, payWithCredit, refundPolicy, plusOneExtra }.
+// idp = id prefix of the inputs, v = current values of the game (or {} for a new one).
+const optToggle = (id, title, sub, on) => `
+        <label class="flex items-center justify-between gap-3 cursor-pointer">
+            <span><span class="block text-xs font-bold text-white">${title}</span><span class="block text-[10px] text-white/50">${sub}</span></span>
+            <input id="${id}" type="checkbox" ${on ? 'checked' : ''} class="w-5 h-5 accent-[#00F296] shrink-0">
+        </label>`;
+
 export function payOptionsHtml(idp, v = {}) {
     const must = v.payWithCredit !== false;
     const policy = v.refundPolicy || 'hours:1';
+    const pct = partialPctOf(v);
     return `
     <div id="${idp}-pay-block" class="space-y-3 bg-black/30 border border-emerald-500/30 rounded-2xl p-3">
         <label class="flex items-center justify-between gap-3 cursor-pointer">
             <span><span class="block text-xs font-bold text-white">Must pay to be confirmed</span><span class="block text-[10px] text-white/50">Credit system: the fee comes out of the member's credit. No credit, no spot.</span></span>
             <input id="${idp}-must" type="checkbox" ${must ? 'checked' : ''} onchange="document.getElementById('${idp}-refund-wrap').classList.toggle('hidden', !this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0">
         </label>
-        <div id="${idp}-refund-wrap" class="${must ? '' : 'hidden'}">
-            <label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Refund policy</label>
-            <select id="${idp}-refund" class="${INPUT}">${REFUND_POLICIES.map(([k, t]) => `<option value="${k}" ${k === policy ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+        <div id="${idp}-refund-wrap" class="${must ? '' : 'hidden'} space-y-3">
+            <div>
+                <label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Refund policy</label>
+                <select id="${idp}-refund" class="${INPUT}">${REFUND_POLICIES.map(([k, t]) => `<option value="${k}" ${k === policy ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Cancel after that</label>
+                <select id="${idp}-partial" class="${INPUT}">${[0, 25, 50, 75].map(n => `<option value="${n}" ${n === pct ? 'selected' : ''}>${n ? `Give ${n}% back` : 'No refund'}</option>`).join('')}</select>
+            </div>
+            ${optToggle(`${idp}-spotfill`, 'Refund if their spot gets filled', 'Late cancel: the player gets the money back once someone from the waitlist takes the spot.', v.refundIfSpotFilled === true)}
+            ${optToggle(`${idp}-oncancel`, 'Refund everyone if the game is cancelled', 'Weather included. Shown to players in the refund policy.', v.refundOnCancel !== false)}
         </div>
     </div>`;
+}
+
+/** Waitlist timer: works for free and paid games. */
+export function waitlistOptionsHtml(idp, v = {}) {
+    const cur = claimMinutesOf(v);
+    return `
+    <div class="space-y-1 bg-black/30 border border-emerald-500/30 rounded-2xl p-3">
+        <label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296]">Waitlist: time to claim an open spot</label>
+        <select id="${idp}-claim" class="${INPUT}">${CLAIM_MINUTES.map(n => `<option value="${n}" ${n === cur ? 'selected' : ''}>${n === 60 ? '1 hour' : n + ' minutes'}${n === DEFAULT_CLAIM_MINUTES ? ' (default)' : ''}</option>`).join('')}</select>
+        <p class="text-[10px] text-white/50">When someone cancels, the next player on the waitlist has this long to confirm. Then the next one is invited too, first to confirm gets it.</p>
+    </div>`;
+}
+
+export function readWaitlistOptions(idp) {
+    const n = parseInt(document.getElementById(`${idp}-claim`)?.value, 10);
+    return { claimMinutes: CLAIM_MINUTES.includes(n) ? n : DEFAULT_CLAIM_MINUTES };
 }
 
 export function plusExtraHtml(idp, v = {}) {
@@ -348,9 +381,72 @@ export function readPayOptions(idp) {
     const p1On = !!g('p1-on')?.checked;
     return {
         payWithCredit: must,
-        refundPolicy: g('refund')?.value || 'always',
+        refundPolicy: g('refund')?.value || 'hours:1',
+        partialRefundPct: parseInt(g('partial')?.value, 10) || 0,
+        refundIfSpotFilled: !!g('spotfill')?.checked,
+        refundOnCancel: g('oncancel') ? !!g('oncancel').checked : true,
         plusOneExtra: p1On ? (parseInt(g('p1-amt')?.value, 10) || 1) : 0
     };
+}
+
+// ------------------------------------------------------------------ accepted payments
+// Community admins save how members can pay them: communities/{id}.paymentMethods = { zelle, venmo, cashapp, paypal }
+const PAY_KINDS = [
+    ['zelle', 'Zelle', 'fa-solid fa-building-columns', 'Email or phone'],
+    ['venmo', 'Venmo', 'fa-brands fa-vimeo-v', '@username'],
+    ['cashapp', 'Cash App', 'fa-solid fa-dollar-sign', '$cashtag'],
+    ['paypal', 'PayPal', 'fa-brands fa-paypal', 'paypal.me name or email']
+];
+const clean = (v) => String(v || '').trim().slice(0, 80);
+
+function payLink(kind, value, cents) {
+    const amt = cents > 0 ? (cents / 100).toFixed(2) : '';
+    if (kind === 'venmo') return `https://venmo.com/u/${encodeURIComponent(value.replace(/^@/, ''))}`;
+    if (kind === 'cashapp') return `https://cash.app/$${encodeURIComponent(value.replace(/^\$/, ''))}${amt ? '/' + amt : ''}`;
+    if (kind === 'paypal' && !value.includes('@')) return `https://paypal.me/${encodeURIComponent(value.replace(/^https?:\/\/(www\.)?paypal\.me\//i, ''))}${amt ? '/' + amt : ''}`;
+    return '';
+}
+
+/** Payment details screen content: how to send money to the community admin. */
+export function paymentMethodsHtml(community, cents, adminName) {
+    const pm = (community && community.paymentMethods) || {};
+    const rows = PAY_KINDS.filter(([k]) => clean(pm[k])).map(([k, label, icon]) => {
+        const val = clean(pm[k]);
+        const link = payLink(k, val, cents);
+        return `<div class="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl p-2.5">
+            <i class="${icon} text-[#00F296] w-5 text-center"></i>
+            <div class="flex-1 min-w-0"><div class="text-[10px] font-black uppercase text-white/50">${label}</div><div class="text-xs font-bold text-white truncate">${esc(val)}</div></div>
+            ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="shrink-0 bg-[#00F296] text-slate-950 font-black text-[10px] uppercase px-2.5 py-1.5 rounded-lg">Pay</a>` : ''}
+            <button type="button" onclick="copyPayValue(this, '${jsArg(val)}')" class="shrink-0 bg-black/60 border border-white/20 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg"><i class="fa-solid fa-copy"></i></button>
+        </div>`;
+    });
+    if (!rows.length) return `<p class="text-xs text-white/70">Ask ${esc(adminName || 'your admin')} how to pay (Zelle, Venmo, Cash App or PayPal). Once they get it, they add it to your credit.</p>`;
+    return `<div class="space-y-2">${rows.join('')}</div>
+        <p class="text-[10px] text-white/50">Send it to ${esc(adminName || 'your admin')}. Once they get it, they add it to your credit and you can join.</p>`;
+}
+
+window.copyPayValue = async function(btn, val) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(val); ok = true; } catch (e) { ok = false; }
+    if (ok && btn) { btn.innerHTML = '<i class="fa-solid fa-check"></i>'; setTimeout(() => { btn.innerHTML = '<i class="fa-solid fa-copy"></i>'; }, 1500); }
+    toast(ok ? 'Copied!' : val, ok ? 'success' : 'info');
+};
+
+/** Admin form: how members can pay you. */
+export function paymentMethodsFormHtml(community) {
+    const pm = (community && community.paymentMethods) || {};
+    return `<div class="space-y-2">${PAY_KINDS.map(([k, label, icon, ph]) => `
+        <label class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2">
+            <i class="${icon} text-[#00F296] w-5 text-center"></i>
+            <span class="w-20 text-[11px] font-bold text-white shrink-0">${label}</span>
+            <input id="pm-${k}" maxlength="80" value="${esc(clean(pm[k]))}" placeholder="${ph}" class="flex-1 min-w-0 bg-black/60 border border-teal-500/40 rounded-lg px-2 py-1.5 text-white text-base sm:text-xs focus:outline-none focus:border-[#00F296]">
+        </label>`).join('')}</div>`;
+}
+
+export function readPaymentMethods() {
+    const out = {};
+    PAY_KINDS.forEach(([k]) => { out[k] = clean(document.getElementById(`pm-${k}`)?.value); });
+    return out;
 }
 
 /** What the game costs, in words: "$6, +$1 per guest". */
@@ -382,5 +478,6 @@ export async function myBalanceCents(cid) {
 window.creditTools = {
     plusOneExtraCents, costCents, payOptionsHtml, plusExtraHtml, readPayOptions, costSummary, hydrateBalances, myBalanceCents,
     dollars, feeCents, eventStart, refundAllowed, policyText, creditGame, REFUND_POLICIES,
-    joinHooks, refundHooks, refundEveryoneForGame, adminAdjustCredit, memberCreditHtml, adminCreditHtml
+    joinHooks, refundHooks, refundEveryoneForGame, refundMember, adminAdjustCredit, memberCreditHtml, adminCreditHtml,
+    waitlistOptionsHtml, readWaitlistOptions, myLeaveRefund, paymentMethodsHtml, paymentMethodsFormHtml, readPaymentMethods
 };
