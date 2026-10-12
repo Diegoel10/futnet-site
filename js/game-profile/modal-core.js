@@ -123,6 +123,11 @@ window.renderInfoTab = function(event) {
             </button>` : `<div class="bg-amber-500/10 border border-amber-400/40 rounded-2xl p-3 mb-2.5 text-center text-xs text-white/90">
                 <i class="fa-solid fa-hourglass-half text-amber-300 mr-1"></i> You're <b>#${pos || 1}</b> on the waitlist. We'll notify you when a spot opens.
             </div>`}
+            ${eligible ? '' : `<label class="flex items-center justify-between gap-3 bg-black/40 border border-white/10 rounded-2xl p-3 mb-2.5 cursor-pointer">
+                <span><span class="block text-xs font-bold text-white">Put me in automatically</span>
+                <span class="block text-[10px] text-white/55">${waitingEntry.autoJoin ? (creditGame(event) ? 'On: you are added (and charged) the moment a spot opens. Must have the funds.' : 'On: you are added the moment a spot opens.') : "Off: we'll ask you first and you have " + (claimMinutesOf(event) === 60 ? '1 hour' : claimMinutesOf(event) + ' min') + ' to confirm.'}</span></span>
+                <input type="checkbox" ${waitingEntry.autoJoin ? 'checked' : ''} onchange="setWaitlistAuto('${event.id}', this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0">
+            </label>`}
             <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3 rounded-2xl text-xs border-2 border-red-500/40 uppercase tracking-wider transition flex items-center justify-center gap-2">
                 <i class="fa-solid fa-user-xmark"></i> Leave waitlist
             </button>`;
@@ -161,6 +166,11 @@ window.renderInfoTab = function(event) {
 
     return `
         <div class="space-y-4 font-sans text-white">
+            <!-- Join / Leave first, so it's the first thing people see -->
+            <div>
+                ${rsvpButtonHtml}
+            </div>
+
             <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
                 <div class="flex items-center gap-3">
                     <img src="${finalHostAvatar}" class="w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
@@ -222,9 +232,6 @@ window.renderInfoTab = function(event) {
             </div>`;
             })() : ''}
 
-            <div class="pt-1">
-                ${rsvpButtonHtml}
-            </div>
 
             <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
                 <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
@@ -699,7 +706,71 @@ window.finishJoin = function(eventId, guests) {
             return;
         }
     }
+    // Going on the waitlist: "ask me first" or "put me in automatically"?
+    if (ev && window.currentUser && joinsWaitlist(ev) && window._waitAuto[eventId] === undefined) {
+        window.showWaitlistChoice(eventId, guests || []);
+        return;
+    }
     window.confirmJoinGameWithGuests(eventId, guests || []);
+};
+
+window._waitAuto = window._waitAuto || {};
+
+/** Joining the waitlist: what should happen when a spot opens? */
+window.showWaitlistChoice = async function(eventId, guests) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const pays = creditGame(ev);
+    const cost = costCents(ev, (guests || []).length);
+    const mins = claimMinutesOf(ev);
+    let m = document.getElementById('wait-choice-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'wait-choice-modal'; m.className = 'fixed inset-0 z-[146] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    window._waitChoiceGuests = guests || [];
+    m.innerHTML = `
+        <div class="bg-[#040E13] border border-amber-400/50 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="flex justify-between items-center border-b border-white/10 pb-3">
+                <h3 class="text-xs font-black uppercase text-amber-300"><i class="fa-solid fa-hourglass-half mr-1"></i> Join the waitlist</h3>
+                <button onclick="document.getElementById('wait-choice-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-sm font-black">If a spot opens up for me:</p>
+            <label class="flex gap-3 items-start bg-black/40 border border-white/10 rounded-2xl p-3 cursor-pointer has-[:checked]:border-[#00F296]">
+                <input type="radio" name="wait-choice" value="ask" checked class="mt-1 w-4 h-4 accent-[#00F296] shrink-0">
+                <span><span class="block text-xs font-bold">Ask me if I'm still available <span class="text-[10px] text-[#00F296]">(default)</span></span>
+                <span class="block text-[11px] text-white/60">You'll get a notification and have ${mins === 60 ? '1 hour' : mins + ' minutes'} to confirm${pays ? ' and pay' : ''}.</span></span>
+            </label>
+            <label class="flex gap-3 items-start bg-black/40 border border-white/10 rounded-2xl p-3 cursor-pointer has-[:checked]:border-[#00F296]">
+                <input type="radio" name="wait-choice" value="auto" class="mt-1 w-4 h-4 accent-[#00F296] shrink-0">
+                <span><span class="block text-xs font-bold">Put me in automatically</span>
+                <span class="block text-[11px] text-white/60">${pays ? `You're added the moment a spot opens and <b>${dollars(cost)}</b> is taken from your credit. You must have the funds, otherwise we'll ask you instead.` : "You're added the moment a spot opens. We'll let you know."}</span>
+                <span id="wait-choice-funds" class="block text-[11px] text-amber-300 mt-1"></span></span>
+            </label>
+            <button onclick="confirmWaitlistChoice('${escapeHtml(String(eventId))}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">Join waitlist</button>
+        </div>`;
+    if (pays) {
+        const have = await myBalanceCents(String(ev.communityId));
+        const el = document.getElementById('wait-choice-funds');
+        if (el) el.textContent = have >= cost ? `Your credit: ${dollars(have)} ✓` : `Your credit is ${dollars(have)}. Add ${dollars(cost - have)} so this can work.`;
+    }
+};
+
+window.confirmWaitlistChoice = function(eventId) {
+    const pick = document.querySelector('input[name="wait-choice"]:checked')?.value || 'ask';
+    window._waitAuto[eventId] = pick === 'auto';
+    document.getElementById('wait-choice-modal')?.remove();
+    window.finishJoin(eventId, window._waitChoiceGuests || []);
+};
+
+/** Waitlisted player switches between "ask me" and "put me in automatically". */
+window.setWaitlistAuto = async function(eventId, on) {
+    const uid = String(window.currentUser?.uid || '');
+    const res = await mutateEvent(eventId, (draft) => {
+        const w = (draft.waitingList || []).find(x => String(x.uid) === uid);
+        if (!w) return false;
+        if (on) w.autoJoin = true; else delete w.autoJoin;
+    });
+    if (res.ok && !res.aborted) {
+        window.showToast(on ? "You'll be added automatically when a spot opens." : "We'll ask you first when a spot opens.");
+        window.renderEventDetailModalContent();
+    }
 };
 
 const capacityOfDraft = (ev) => {
@@ -1085,6 +1156,8 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
             me.status = 'waiting';
             me.guests = guestsArray;
             me.waitingSince = me.waitingSince || nowMs;
+            const autoPick = window._waitAuto[eventId];
+            if (autoPick === true || (autoPick === undefined && prevWaiting && prevWaiting.autoJoin === true)) me.autoJoin = true;
             // Already waiting? Keep your place in line.
             if (prevWaitIdx >= 0) draft.waitingList.splice(Math.min(prevWaitIdx, draft.waitingList.length), 0, me);
             else draft.waitingList.push(me);
@@ -1121,6 +1194,7 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         }
     }, useCredit ? joinHooks(_creditEv, uid) : undefined);
 
+    delete window._waitAuto[eventId];
     if (res.ok && res.aborted && creditShortBy > 0) {
         window.showMustPayModal(_creditEv, creditNeeded, creditHave);
         return;
@@ -1129,7 +1203,8 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         if (outcome === 'in' && chargedCents > 0) window.showToast(`Joined! ${dollars(chargedCents)} was taken from your community credit.`);
         else if (outcome === 'in') window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
         else if (outcome === 'partial') window.showToast(`Roster capacity reached! Accepted player + ${acceptedCount} guest(s); remaining guest(s) placed on waitlist.`, "info");
-        else window.showToast("You're on the waitlist. We'll notify you as soon as a spot opens up.", "info");
+        else window.showToast(res.event && (res.event.waitingList || []).some(w => String(w.uid) === uid && w.autoJoin)
+            ? "You're on the waitlist. You'll be added automatically when a spot opens." : "You're on the waitlist. We'll notify you as soon as a spot opens up.", "info");
     }
     window.renderEventDetailModalContent();
 };

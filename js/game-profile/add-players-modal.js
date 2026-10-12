@@ -1,36 +1,61 @@
 // js/game-profile/add-players-modal.js: Dedicated screen with sticky bottom action button and dynamic count matching native app
 import { mutateEvent, escapeHtml, safeAvatar } from './event-store.js';
+import { db, appId } from '../firebase-config.js';
+import { collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+// Best name we have for a person, whatever app created their profile.
+const nameOf = (p) => String((p && (p.name || p.displayName || p.fullName ||
+    `${p.firstName || ''} ${p.lastName || ''}`.trim() || p.nickname || p.username)) || '').trim();
+
+// Community games: the community's members are always in the list (some profiles have no name saved
+// in the player directory, e.g. accounts made in the app; their member card has it).
+const _membersCache = {};
+async function loadCommunityMembers(cid) {
+    if (!cid) return [];
+    if (_membersCache[cid]) return _membersCache[cid];
+    try {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'communities', String(cid), 'members'));
+        _membersCache[cid] = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    } catch (e) { _membersCache[cid] = []; }
+    return _membersCache[cid];
+}
 
 window.openAddPlayersScreen = async function(eventId) {
     let modal = document.getElementById('add-players-screen-modal');
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'add-players-screen-modal';
-        modal.className = 'fixed inset-0 z-[130] flex flex-col justify-end bg-black/70 backdrop-blur-sm animate-in fade-in duration-200';
+        // Full screen page (phone and desktop): top bar, scrolling list, button pinned at the bottom
+        modal.className = 'fixed inset-0 z-[130] flex flex-col bg-[#040E13] text-white';
         document.body.appendChild(modal);
     }
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border-t border-emerald-500/40 rounded-t-[32px] p-6 space-y-4 max-w-lg w-full mx-auto shadow-2xl text-white max-h-[85vh] flex flex-col" onclick="event.stopPropagation()">
-            <div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-1 shrink-0"></div>
-            <div class="flex items-center justify-between border-b border-white/10 pb-3 shrink-0">
-                <h3 class="text-base font-black text-white uppercase tracking-wider">Add Players to Roster</h3>
-                <button onclick="document.getElementById('add-players-screen-modal').remove()" class="text-white/50 hover:text-white text-sm font-bold"><i class="fa-solid fa-xmark text-lg"></i></button>
+        <div class="shrink-0 border-b border-white/10 bg-[#040E13]/95 backdrop-blur" style="padding-top: env(safe-area-inset-top);">
+            <div class="max-w-2xl mx-auto w-full flex items-center gap-3 px-4 py-3">
+                <button onclick="document.getElementById('add-players-screen-modal').remove()" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center shrink-0"><i class="fa-solid fa-arrow-left"></i></button>
+                <div class="min-w-0">
+                    <h3 class="text-base font-black uppercase tracking-wider truncate">Add Players</h3>
+                    <p class="text-[11px] text-white/50 truncate">${escapeHtml((ev && ev.title) || 'Roster')}</p>
+                </div>
             </div>
-
-            <!-- Search Bar -->
-            <div class="relative shrink-0">
-                <input type="text" id="add-players-search" oninput="filterAddPlayersList('${eventId}')" placeholder="Search registered app users..." class="w-full bg-black/60 border border-teal-500/50 rounded-xl pl-9 pr-3 py-2.5 text-white text-xs focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
-                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-emerald-400 text-xs"></i>
+            <div class="max-w-2xl mx-auto w-full px-4 pb-3">
+                <div class="relative">
+                    <input type="text" id="add-players-search" oninput="filterAddPlayersList('${eventId}')" placeholder="Search registered app users..." class="w-full bg-black/60 border border-teal-500/50 rounded-xl pl-9 pr-3 py-3 text-white text-base sm:text-sm focus:outline-none focus:border-brand placeholder:text-white/30" style="background-color: #000000 !important; color: #ffffff !important;" autocomplete="off">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-3.5 text-emerald-400 text-xs"></i>
+                </div>
             </div>
+        </div>
 
-            <!-- Users Selection List Container (Scrollable) -->
-            <div id="add-players-list-container" class="space-y-2 overflow-y-auto pr-1 flex-1 divide-y divide-white/10 min-h-[200px]">
-                <!-- Rendered dynamically -->
-            </div>
+        <!-- Users list (scrolls) -->
+        <div class="flex-1 overflow-y-auto">
+            <div id="add-players-list-container" class="max-w-2xl mx-auto w-full px-4 py-3 space-y-2 divide-y divide-white/10"></div>
+        </div>
 
-            <!-- Sticky Bottom Action Button -->
-            <div class="pt-2 shrink-0">
+        <!-- Button pinned at the bottom -->
+        <div class="shrink-0 border-t border-white/10 bg-[#040E13]" style="padding-bottom: env(safe-area-inset-bottom);">
+            <div class="max-w-2xl mx-auto w-full px-4 py-3">
                 <button id="submit-batch-add-btn" onclick="submitBatchAddPlayers('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-md transition">
                     Add Selected Players (0)
                 </button>
@@ -39,6 +64,10 @@ window.openAddPlayersScreen = async function(eventId) {
     `;
 
     renderAddPlayersList(eventId, "");
+    if (ev && ev.communityId) {
+        await loadCommunityMembers(ev.communityId);
+        renderAddPlayersList(eventId, document.getElementById('add-players-search')?.value || "");
+    }
 };
 
 window.renderAddPlayersList = function(eventId, queryStr) {
@@ -60,16 +89,25 @@ window.renderAddPlayersList = function(eventId, queryStr) {
 
     const friendUids = new Set((window.friendsList || []).map(f => f.uid));
 
+    const members = (event && event.communityId && _membersCache[event.communityId]) || [];
+    const memberUids = new Set(members.map(m => String(m.uid)));
     const pool = [
-        ...(window.directoryList || []),
-        ...(window.friendsList || [])
+        ...members,
+        ...(window.friendsList || []),
+        ...(window.directoryList || [])
     ];
+    const onGame = new Set([...existingUids, ...(event?.waitingList || []).map(w => w.uid)].map(String));
 
+    // One entry per person; fill in a missing name/photo from any other copy of them.
     const uniquePoolMap = new Map();
     pool.forEach(p => {
-        if (p && p.uid && !existingUids.has(p.uid)) {
-            uniquePoolMap.set(p.uid, p);
-        }
+        if (!p || !p.uid || onGame.has(String(p.uid))) return;
+        const key = String(p.uid);
+        const prev = uniquePoolMap.get(key);
+        const merged = { ...(prev || {}), ...p };
+        merged.name = nameOf(p) || (prev && prev.name) || '';
+        merged.avatar = (prev && prev.avatar) || p.avatar || p.photoURL || '';
+        uniquePoolMap.set(key, merged);
     });
 
     let poolArray = Array.from(uniquePoolMap.values());
@@ -80,6 +118,8 @@ window.renderAddPlayersList = function(eventId, queryStr) {
 
         if (friendUids.has(a.uid)) scoreA += 50;
         if (friendUids.has(b.uid)) scoreB += 50;
+        if (memberUids.has(String(a.uid))) scoreA += 30;
+        if (memberUids.has(String(b.uid))) scoreB += 30;
 
         scoreA += (attendanceFrequency[a.uid] || 0) * 10;
         scoreB += (attendanceFrequency[b.uid] || 0) * 10;
@@ -87,11 +127,13 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         return scoreB - scoreA;
     });
 
+    const fold = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = fold(queryStr).trim();
     const filtered = poolArray.filter(p => {
-        const name = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim();
+        const name = p.name;
         if (!name) return false;
-        if (!queryStr) return true;
-        return name.toLowerCase().includes(queryStr.toLowerCase());
+        if (!q) return true;
+        return fold(name).includes(q) || fold(p.nickname).includes(q);
     });
 
     if (filtered.length === 0) {
@@ -100,8 +142,8 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     }
 
     container.innerHTML = filtered.map(u => {
-        const name = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim();
-        const realAvatar = u.avatar || u.photoURL || '';   // only a real photo is saved on the roster
+        const name = u.name;
+        const realAvatar = safeAvatar(u.avatar || u.photoURL || '');   // only a real photo is saved on the roster
         const avatar = realAvatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
         const isFriend = friendUids.has(u.uid);
         const freqCount = attendanceFrequency[u.uid] || 0;

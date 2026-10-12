@@ -931,6 +931,70 @@ async function refundCancelledGame(eventId, game) {
   }
 }
 
+// ---- d0) "Put me in automatically": waiting players who chose it get the open spot right away
+//      (fee taken from their credit on must-pay games). Same order as the offers: only players the
+//      spot would be offered to now. Not enough credit -> they are asked like everybody else.
+async function autoPlace(eventId, after) {
+  const now = Date.now();
+  const start = startOf(after);
+  if (after.isSessionEnded === true || (start && now > start + 3 * 3600000)) return false;
+  if (!rules.freeSpotsOf(after) || !rules.waitingUids(after).length) return false;
+  const ref = col("eventsList").doc(eventId);
+  const placed = [];
+  await db.runTransaction(async (tx) => {
+    placed.length = 0;
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const g = snap.data();
+    const probe = { ...g, spotOffer: g.spotOffer || { round: 1 } };
+    const candidates = rules.offerEligible(probe, now, startOf(g))
+      .map((u) => arr(g.waitingList).find((w) => uidOf(w) === u))
+      .filter((w) => w && w.autoJoin === true);
+    if (!candidates.length) return;
+    const pay = rules.isCreditGame(g);
+    const cid = g.communityId;
+    const balances = {};
+    if (pay) {
+      for (const w of candidates) {
+        const s = await tx.get(credRef(cid, uidOf(w)));
+        balances[uidOf(w)] = s.exists ? (Number(s.data().balanceCents) || 0) : 0;
+      }
+    }
+    let attendees = arr(g.attendees).slice();
+    let waitingList = arr(g.waitingList).slice();
+    for (const w of candidates) {
+      const u = uidOf(w);
+      const heads = 1 + arr(w.guests).length;
+      const free = rules.capacityOf(g) - rules.headsOf(attendees);
+      if (free < heads) continue;                       // not enough room for them + their guests: ask instead
+      const entry = { ...w, status: "confirmed", autoJoined: true, autoJoinedAt: now };
+      delete entry.autoJoin;
+      if (pay) {
+        const cost = rules.costFor(g, arr(w.guests).length);
+        if (balances[u] < cost) continue;                // not enough credit: they get asked
+        writeCredit(tx, cid, u, w.name, balances[u], -cost, "game", "Game fee (auto-joined from the waitlist)", g, eventId);
+        Object.assign(entry, { paid: "Credit", creditPaidCents: cost, creditCommunityId: cid, guests: arr(w.guests).map((x) => ({ ...x, paid: "Credit" })) });
+        placed.push({ uid: u, cost });
+      } else placed.push({ uid: u, cost: 0 });
+      attendees.push(entry);
+      waitingList = waitingList.filter((x) => uidOf(x) !== u);
+    }
+    if (!placed.length) return;
+    tx.update(ref, { attendees, waitingList, playersGoing: rules.headsOf(attendees) });
+  });
+  for (const p of placed) {
+    await notify([p.uid], {
+      type: "game_auto_joined",
+      eventId,
+      communityId: after.communityId || "",
+      title: "You're in! ⚽",
+      body: `A spot opened in ${after.title || "the game"} and we added you automatically${p.cost ? `. ${money(p.cost)} was taken from your credit` : ""}.`,
+    }, { key: `autojoin_${eventId}_${p.uid}_${now}` });
+  }
+  if (placed.length) logger.info(`Auto-joined ${placed.length} player(s) from the waitlist of ${eventId}`);
+  return placed.length > 0;
+}
+
 // ---- d) waitlist spot offers ----------------------------------------------------
 async function updateSpotOffer(eventId, before, after) {
   const now = Date.now();
@@ -989,15 +1053,19 @@ async function updateSpotOffer(eventId, before, after) {
     const mins = rules.claimMinutesOf(after);
     const pay = rules.isCreditGame(after) ? ` and pay ${money(rules.feeCentsOf(after))} from your credit` : "";
     const lastCall = patch.spotOffer.lastCall || rules.isLastCall(g, now, start);
-    await notify(fresh, {
+    const autoNoFunds = new Set(arr(after.waitingList).filter((w) => w.autoJoin === true).map(uidOf));
+    const why = (u) => (autoNoFunds.has(u) && rules.isCreditGame(after) ? "We couldn't add you automatically (not enough credit). " : "");
+    const groups = {};
+    fresh.forEach((u) => { (groups[why(u)] = groups[why(u)] || []).push(u); });
+    for (const [prefix, who] of Object.entries(groups)) await notify(who, {
       type: "game_spot_offer",
       eventId,
       communityId: after.communityId || "",
       title: lastCall ? "Last call: a spot is open! ⚽" : "Someone cancelled! You're up next ⚽",
       body: lastCall
         ? `A spot opened in ${after.title || "the game"}. First to confirm gets it${pay ? pay.replace(" and pay", ", you'll pay") : ""}.`
-        : `A spot opened in ${after.title || "the game"}. Confirm within ${mins === 60 ? "1 hour" : mins + " minutes"}${pay} to grab it.`,
-    }, { key: `spotoffer_${eventId}_${patch.spotOffer.startedAt}_${fresh.join("_")}`.slice(0, 900) });
+        : `${prefix}A spot opened in ${after.title || "the game"}. Confirm within ${mins === 60 ? "1 hour" : mins + " minutes"}${pay} to grab it.`,
+    }, { key: `spotoffer_${eventId}_${patch.spotOffer.startedAt}_${who.join("_")}`.slice(0, 900) });
   }
 }
 
@@ -1013,6 +1081,7 @@ exports.onGameMoney = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (e
     // A fix writes the game again, and that write runs this function again for the next step.
     if (await enforcePayment(eventId, prev, after)) return;
     await refundFilledSpots(eventId, prev, after);
+    if (await autoPlace(eventId, after)) return;      // the roster changed: the next run handles the offer
     await updateSpotOffer(eventId, prev, after);
   } catch (e) {
     logger.error("onGameMoney failed", eventId, e.message);

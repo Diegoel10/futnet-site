@@ -1,5 +1,5 @@
 // js/game-profile/match-management.js: Live match tracker with direct team builder roster lookups and custom team color styling
-import { mutateEvent } from './event-store.js';
+import { mutateEvent, escapeHtml } from './event-store.js';
 
 // Team names/colors come from team-tool.js (single source of truth). Fallbacks only if it isn't loaded yet.
 const MM_FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
@@ -46,7 +46,7 @@ window.openStartMatchScreen = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'start-match-screen-modal';
-        modal.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto';
+        modal.className = 'fixed inset-0 z-[200] flex flex-col bg-black/85 backdrop-blur-sm text-white';   // full-screen sheet
         document.body.appendChild(modal);
     }
 
@@ -109,100 +109,106 @@ window.openStartMatchScreen = function(eventId) {
 
     const colorA = mmAccent(teamColorsArr[idxA]);
     const colorB = mmAccent(teamColorsArr[idxB]);
+    const mode = window.liveMatchMode;
+    const alarmOn = active.alarmEnabled !== false;
+    const goalsA = active.team1Goals || [], goalsB = active.team2Goals || [];
+    const untouched = !goalsA.length && !goalsB.length &&
+        (mode === 'stopwatch' ? currentSecs === 0 : currentSecs === (active.durationSeconds || 600));
+    const status = active.isRunning ? ['LIVE', '#00F296', 'rgba(0,242,150,0.12)'] : untouched ? ['READY', '#9ca3af', 'rgba(255,255,255,0.06)'] : ['PAUSED', '#f59e0b', 'rgba(245,158,11,0.12)'];
+    const startLabel = active.isRunning ? '<i class="fa-solid fa-pause"></i> Pause' : (untouched ? '<i class="fa-solid fa-play"></i> Start' : '<i class="fa-solid fa-play"></i> Resume');
+    const shirt = (c) => `<i class="fa-solid fa-shirt" style="color:${c}"></i>`;
+    const scorerName = (g) => typeof g === 'string' ? g : (g && (g.name || g.scorer)) || 'Goal';
+    const goalList = (goals, key) => goals.length ? `<div class="space-y-1.5 pt-1 text-left">${goals.map((g, i) => `
+        <div class="flex items-center gap-2 text-sm text-white/90">
+            <span class="text-base leading-none">⚽</span><span class="flex-1 truncate">${escapeHtml(scorerName(g))}</span>
+            <button onclick="removeLiveGoal('${eventId}', '${key}', ${i})" class="w-6 h-6 rounded-full bg-white/15 hover:bg-white/25 text-white/80 text-[11px] flex items-center justify-center shrink-0" title="Remove goal"><i class="fa-solid fa-xmark"></i></button>
+        </div>`).join('')}</div>` : '';
+    const durations = [5, 10, 15, 20, 25, 30];
+    const curMins = Math.round((active.durationSeconds || 600) / 60);
+    if (!durations.includes(curMins)) durations.push(curMins);
+    const teamSelect = (id, idx, other, color) => `
+        <div class="relative">
+            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-xl pointer-events-none">${shirt(color)}</span>
+            <select id="${id}" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full appearance-none bg-[#0b151b] border-2 rounded-2xl pl-12 pr-9 py-3.5 text-white text-base font-bold focus:outline-none" style="border-color:${color}99">
+                ${teamNamesArr.map((t, i) => `<option value="${i}" ${i === idx ? 'selected' : ''} ${i === other ? 'disabled' : ''}>${escapeHtml(t)}</option>`).join('')}
+            </select>
+            <i class="fa-solid fa-sort absolute right-4 top-1/2 -translate-y-1/2 text-white/50 text-xs pointer-events-none"></i>
+        </div>`;
+    const scoreCard = (key, name, goals, color) => `
+        <div class="rounded-3xl p-4 space-y-3 text-center self-start" style="border:2px solid ${color}99; background:#081117;">
+            <div class="flex items-center justify-center gap-2 text-lg">${shirt(color)}<span id="label-team${key}" class="font-bold text-white truncate">${escapeHtml(name)}</span></div>
+            <div id="score-team${key}" class="text-7xl font-black leading-none py-1" style="color:${color}">${goals.length}</div>
+            <button onclick="openGoalScorerPicker('${eventId}', '${key}')" class="w-full font-black py-3 rounded-2xl text-base transition hover:opacity-90" style="background-color:${color}26; color:${color}; border:1.5px solid ${color}66;">+ Goal</button>
+            <div id="goals-team${key}">${goalList(goals, key)}</div>
+        </div>`;
 
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-[#00B4AE]/50 rounded-3xl p-6 space-y-4 max-w-lg w-full mx-auto shadow-2xl text-white relative max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
-            <div class="space-y-4">
-                <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                    <div>
-                        <h3 class="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                            Manage Live Match
-                        </h3>
-                        <p class="text-[10px] text-white/50">Track scores, timer, and match results.</p>
-                    </div>
-                    <button onclick="document.getElementById('start-match-screen-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="flex-1 flex flex-col min-h-0 bg-[#060d12] rounded-t-[32px] mt-3 sm:mt-6 border-t border-white/10 overflow-hidden" style="margin-top: max(12px, env(safe-area-inset-top));">
+        <div class="flex-1 overflow-y-auto">
+        <div class="max-w-2xl mx-auto w-full px-5 pt-7 pb-8 space-y-6">
+            <div class="space-y-2">
+                <div class="flex items-start justify-between gap-2">
+                    <h3 class="text-[26px] sm:text-4xl font-black text-white leading-tight whitespace-nowrap">Manage <span class="text-[#6ee7a0]">Live Match</span></h3>
+                    <span class="mt-1.5 shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black tracking-widest" style="color:${status[1]}; background:${status[2]}; border:1.5px solid ${status[1]}88;">
+                        <span class="w-2 h-2 rounded-full ${active.isRunning ? 'animate-pulse' : ''}" style="background:${status[1]}"></span>${status[0]}
+                    </span>
                 </div>
+                <p class="text-sm text-white/55 leading-snug">The clock keeps running even if you close this screen. Everyone sees the score live.</p>
+            </div>
 
-                <!-- Timer / Stopwatch Control Box -->
-                <div class="bg-black/50 border border-[#00B4AE]/40 rounded-2xl p-4 space-y-3 shadow-inner">
-                    <div class="grid grid-cols-2 gap-2 bg-black/60 p-1 rounded-xl border border-white/10">
-                        <button onclick="setLiveMatchMode('${eventId}', 'stopwatch')" id="mode-stopwatch-btn" class="py-2 rounded-lg text-[10px] font-black uppercase transition ${window.liveMatchMode === 'stopwatch' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/60 hover:text-white'}">
-                            <i class="fa-solid fa-stopwatch mr-1"></i> Stopwatch (Up)
-                        </button>
-                        <button onclick="setLiveMatchMode('${eventId}', 'timer')" id="mode-timer-btn" class="py-2 rounded-lg text-[10px] font-black uppercase transition ${window.liveMatchMode === 'timer' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/60 hover:text-white'}">
-                            <i class="fa-solid fa-hourglass-half mr-1"></i> Timer (Down)
-                        </button>
-                    </div>
-
-                    <div id="timer-settings-row" class="flex items-center justify-between text-xs px-1 ${window.liveMatchMode === 'stopwatch' ? 'hidden' : ''}">
-                        <span class="text-white/60 font-bold uppercase text-[10px]">Duration:</span>
-                        <select id="live-match-duration-select" onchange="updateLiveMatchDuration('${eventId}', this.value)" class="bg-black/80 text-white font-bold text-xs px-3 py-1.5 rounded-xl border border-white/20">
-                            <option value="5" ${active.durationSeconds === 300 ? 'selected' : ''}>5 min</option>
-                            <option value="10" ${active.durationSeconds === 600 ? 'selected' : ''}>10 min</option>
-                            <option value="15" ${active.durationSeconds === 900 ? 'selected' : ''}>15 min</option>
-                            <option value="20" ${active.durationSeconds === 1200 ? 'selected' : ''}>20 min</option>
-                        </select>
-                    </div>
-
-                    <div class="flex items-center justify-between pt-1">
-                        <div id="live-match-display" class="text-3xl font-black text-[#00F296] tracking-wider font-mono">${initialDisplay}</div>
-                        <div class="flex items-center gap-2">
-                            <button onclick="toggleLiveMatchTimer('${eventId}')" id="live-match-start-btn" class="bg-[#00F296] text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow flex items-center gap-1.5 transition">
-                                ${active.isRunning ? '<i class="fa-solid fa-pause"></i> Pause' : '<i class="fa-solid fa-play"></i> Start'}
-                            </button>
-                            <button onclick="resetLiveMatchTimer('${eventId}')" class="bg-black/60 text-white hover:bg-black p-2 rounded-xl border border-white/20 transition">
-                                <i class="fa-solid fa-rotate-right text-xs"></i>
-                            </button>
+            <!-- Clock -->
+            <div class="rounded-3xl p-4 sm:p-5 space-y-4 border-2 border-[#1f4a44]" style="background:#081117;">
+                <div class="grid grid-cols-2 gap-1 p-1 rounded-full bg-black/60 border border-[#1f4a44]">
+                    <button onclick="setLiveMatchMode('${eventId}', 'stopwatch')" id="mode-stopwatch-btn" class="py-2.5 rounded-full text-sm font-bold transition ${mode === 'stopwatch' ? 'bg-[#6ee7a0] text-slate-950' : 'text-white hover:text-white/80'}"><i class="fa-solid fa-stopwatch mr-1.5"></i>Stopwatch (Up)</button>
+                    <button onclick="setLiveMatchMode('${eventId}', 'timer')" id="mode-timer-btn" class="py-2.5 rounded-full text-sm font-bold transition ${mode === 'timer' ? 'bg-[#6ee7a0] text-slate-950' : 'text-white hover:text-white/80'}"><i class="fa-solid fa-hourglass-half mr-1.5"></i>Timer (Down)</button>
+                </div>
+                <div id="timer-settings-row" class="space-y-4 px-1 ${mode === 'stopwatch' ? 'hidden' : ''}">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-bold text-white/70">Duration:</span>
+                        <div class="relative">
+                            <select id="live-match-duration-select" onchange="updateLiveMatchDuration('${eventId}', this.value)" ${active.isRunning ? 'disabled' : ''} class="appearance-none bg-transparent text-[#3b9bff] text-xl font-medium pr-6 text-right focus:outline-none disabled:opacity-50">
+                                ${durations.sort((x, y) => x - y).map(m => `<option value="${m}" ${m === curMins ? 'selected' : ''} style="color:#000">${m} min</option>`).join('')}
+                            </select>
+                            <i class="fa-solid fa-sort absolute right-0 top-1/2 -translate-y-1/2 text-[#3b9bff] text-sm pointer-events-none"></i>
                         </div>
                     </div>
+                    <label class="flex items-center justify-between gap-3 cursor-pointer">
+                        <span class="text-sm font-bold text-white/85">Alarm at 00:00 (match ends automatically)</span>
+                        <input type="checkbox" class="sr-only peer" ${alarmOn ? 'checked' : ''} onchange="setLiveMatchAlarm('${eventId}', this.checked)">
+                        <span class="relative w-14 h-8 shrink-0 rounded-full bg-white/15 peer-checked:bg-[#6ee7a0] transition after:content-[''] after:absolute after:top-1 after:left-1 after:w-6 after:h-6 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-6"></span>
+                    </label>
                 </div>
-
-                <!-- Team Selection Row -->
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="space-y-1">
-                        <label class="block text-[9px] font-black text-white/60 uppercase">Team 1</label>
-                        <select id="live-match-teamA" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full bg-black/80 border-2 rounded-xl px-3 py-2 text-white text-xs font-bold" style="border-color: ${colorA};">
-                            ${teamNamesArr.map((t, i) => `<option value="${i}" ${i === idxA ? 'selected' : ''} ${i === idxB ? 'disabled' : ''}>${t}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="space-y-1">
-                        <label class="block text-[9px] font-black text-white/60 uppercase">Team 2</label>
-                        <select id="live-match-teamB" onchange="updateLiveMatchTeamNames('${eventId}')" class="w-full bg-black/80 border-2 rounded-xl px-3 py-2 text-white text-xs font-bold" style="border-color: ${colorB};">
-                            ${teamNamesArr.map((t, i) => `<option value="${i}" ${i === idxB ? 'selected' : ''} ${i === idxA ? 'disabled' : ''}>${t}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Score Cards (Styled with matching Team Colors) -->
-                <div class="grid grid-cols-2 gap-4 text-center">
-                    <div id="card-teamA-container" class="bg-black/40 border-2 rounded-2xl p-4 space-y-3 shadow-lg" style="border-color: ${colorA};">
-                        <div class="flex items-center justify-center gap-1.5">
-                            <i class="fa-solid fa-shirt text-xs" style="color: ${colorA};"></i>
-                            <span id="label-teamA" class="text-xs font-bold text-white truncate max-w-[120px]">${active.teamA}</span>
-                        </div>
-                        <div id="score-teamA" class="text-5xl font-black" style="color: ${colorA};">${(active.team1Goals || []).length}</div>
-                        <button onclick="openGoalScorerPicker('${eventId}', 'A')" class="w-full font-black py-2.5 rounded-xl text-xs shadow transition hover:opacity-90" style="background-color: ${colorA}33; color: ${colorA}; border: 1px solid ${colorA}66;">+ Goal</button>
-                    </div>
-                    <div id="card-teamB-container" class="bg-black/40 border-2 rounded-2xl p-4 space-y-3 shadow-lg" style="border-color: ${colorB};">
-                        <div class="flex items-center justify-center gap-1.5">
-                            <i class="fa-solid fa-shirt text-xs" style="color: ${colorB};"></i>
-                            <span id="label-teamB" class="text-xs font-bold text-white truncate max-w-[120px]">${active.teamB}</span>
-                        </div>
-                        <div id="score-teamB" class="text-5xl font-black" style="color: ${colorB};">${(active.team2Goals || []).length}</div>
-                        <button onclick="openGoalScorerPicker('${eventId}', 'B')" class="w-full font-black py-2.5 rounded-xl text-xs shadow transition hover:opacity-90" style="background-color: ${colorB}33; color: ${colorB}; border: 1px solid ${colorB}66;">+ Goal</button>
+                <div class="flex items-center justify-between gap-2">
+                    <div id="live-match-display" class="text-[44px] min-[400px]:text-[52px] sm:text-7xl font-black text-[#6ee7a0] font-mono leading-none tabular-nums min-w-0">${initialDisplay}</div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button onclick="toggleLiveMatchTimer('${eventId}')" id="live-match-start-btn" class="bg-[#6ee7a0] hover:opacity-90 text-slate-950 font-black px-5 py-3 rounded-full text-base flex items-center gap-2 transition whitespace-nowrap">${startLabel}</button>
+                        <button onclick="resetLiveMatchTimer('${eventId}')" title="Reset clock" class="w-12 h-12 shrink-0 rounded-full bg-black/60 border-2 border-[#1f4a44] text-white hover:bg-black flex items-center justify-center transition"><i class="fa-solid fa-rotate-left text-lg"></i></button>
                     </div>
                 </div>
             </div>
 
-            <!-- Save & End Match -->
-            <div class="space-y-2 pt-3 border-t border-white/10">
-                <button onclick="saveLiveMatchResult('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-futbol"></i> Save & End Match
-                </button>
-                <button onclick="document.getElementById('start-match-screen-modal').remove()" class="w-full bg-black/60 text-white/60 hover:text-white py-2 rounded-xl text-xs font-bold transition">
-                    Close
-                </button>
+            <!-- Teams -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1.5"><label class="block text-xs font-black text-white/60 tracking-wider">TEAM 1</label>${teamSelect('live-match-teamA', idxA, idxB, colorA)}</div>
+                <div class="space-y-1.5"><label class="block text-xs font-black text-white/60 tracking-wider">TEAM 2</label>${teamSelect('live-match-teamB', idxB, idxA, colorB)}</div>
             </div>
+
+            <!-- Scores -->
+            <div class="grid grid-cols-2 gap-3 items-start">
+                ${scoreCard('A', active.teamA, goalsA, colorA)}
+                ${scoreCard('B', active.teamB, goalsB, colorB)}
+            </div>
+
+            <!-- Actions -->
+            <div class="space-y-3 pt-1">
+                <button onclick="saveLiveMatchResult('${eventId}')" class="w-full bg-gradient-to-r from-[#6ee7a0] to-[#4fbfa8] hover:opacity-95 text-slate-950 font-black py-4 rounded-3xl text-lg shadow-[0_0_30px_rgba(110,231,160,0.25)] transition flex items-center justify-center gap-3">
+                    <i class="fa-solid fa-flag-checkered"></i> Save &amp; End Match
+                </button>
+                <button onclick="discardLiveMatch('${eventId}')" class="w-full text-red-400 hover:text-red-300 font-bold py-2 text-base">Delete live match</button>
+                <button onclick="closeLiveMatchScreen()" class="w-full text-white/60 hover:text-white font-bold py-2 text-base">Close (match keeps going)</button>
+            </div>
+        </div>
+        </div>
         </div>
     `;
 
@@ -246,12 +252,16 @@ function startLiveMatchInterval(eventId) {
         if (event.liveMatchActive.isRunning && event.liveMatchActive.mode === 'timer' && currentSecs <= 0) {
             event.liveMatchActive.isRunning = false;
             event.liveMatchActive.elapsedSeconds = 0;
-            syncLiveMatchState(eventId, event.liveMatchActive);
-            playMatchEndAlarm();
-            if (typeof window.showToast === 'function') {
-                window.showToast("⏰ Time's up! Match ended.", "info");
+            if (event.liveMatchActive.alarmEnabled !== false) {
+                // Alarm on: ring and save the match automatically (even if this screen was closed)
+                syncLiveMatchState(eventId, event.liveMatchActive);
+                playMatchEndAlarm();
+                if (typeof window.showToast === 'function') window.showToast("⏰ Time's up! Match ended.", "info");
+                window.saveLiveMatchResult(eventId);
+            } else {
+                // Alarm off: the clock just stops at 00:00, the admin ends the match
+                syncLiveMatchState(eventId, event.liveMatchActive).then(() => refreshLiveScreen(eventId));
             }
-            window.saveLiveMatchResult(eventId);
         }
     };
 
@@ -259,38 +269,60 @@ function startLiveMatchInterval(eventId) {
     window.liveMatchTimerInterval = setInterval(updateDisplay, 1000);
 }
 
+/** Redraws the live match screen if it is open (status pill, buttons, goal lists). */
+function refreshLiveScreen(eventId) {
+    if (document.getElementById('start-match-screen-modal')) window.openStartMatchScreen(eventId);
+}
+
+window.closeLiveMatchScreen = function() {
+    // Only the screen closes: the match, the clock and the auto-save at 00:00 keep going.
+    document.getElementById('start-match-screen-modal')?.remove();
+};
+
+window.setLiveMatchAlarm = async function(eventId, on) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!event || !event.liveMatchActive) return;
+    event.liveMatchActive.alarmEnabled = !!on;
+    await syncLiveMatchState(eventId, event.liveMatchActive);
+};
+
+window.removeLiveGoal = async function(eventId, teamKey, index) {
+    const key = teamKey === 'A' ? 'team1Goals' : 'team2Goals';
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const goal = event?.liveMatchActive?.[key]?.[index];
+    const name = typeof goal === 'string' ? goal : (goal && goal.name) || 'this goal';
+    if (!confirm(`Remove the goal by ${name}?`)) return;
+    const res = await mutateEvent(eventId, (draft) => {
+        const live = draft.liveMatchActive;
+        if (!live || !Array.isArray(live[key]) || index >= live[key].length) return false;
+        // Remove the same goal even if another phone added one meanwhile
+        if (JSON.stringify(live[key][index]) !== JSON.stringify(goal)) {
+            const at = live[key].findIndex(g => JSON.stringify(g) === JSON.stringify(goal));
+            if (at < 0) return false;
+            live[key].splice(at, 1);
+        } else live[key].splice(index, 1);
+    });
+    if (res.ok && !res.aborted) {
+        if (event) event.liveMatchActive = res.event.liveMatchActive;
+        refreshLiveScreen(eventId);
+    }
+};
+
 window.setLiveMatchMode = async function(eventId, mode) {
     window.liveMatchMode = mode;
-    const stopwatchBtn = document.getElementById('mode-stopwatch-btn');
-    const timerBtn = document.getElementById('mode-timer-btn');
-    const settingsRow = document.getElementById('timer-settings-row');
-
-    const dur = parseInt(document.getElementById('live-match-duration-select')?.value || '10', 10) * 60;
-
-    if (mode === 'stopwatch') {
-        stopwatchBtn.className = "py-2 rounded-lg text-[10px] font-black uppercase transition bg-[#00F296] text-slate-950 shadow";
-        timerBtn.className = "py-2 rounded-lg text-[10px] font-black uppercase transition text-white/60 hover:text-white";
-        settingsRow.classList.add('hidden');
-    } else {
-        timerBtn.className = "py-2 rounded-lg text-[10px] font-black uppercase transition bg-[#00F296] text-slate-950 shadow";
-        stopwatchBtn.className = "py-2 rounded-lg text-[10px] font-black uppercase transition text-white/60 hover:text-white";
-        settingsRow.classList.remove('hidden');
-    }
-
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
-    if (!event) return;
-
+    if (!event || !event.liveMatchActive) return;
+    const dur = event.liveMatchActive.durationSeconds || 600;
     event.liveMatchActive = {
         ...event.liveMatchActive,
-        mode: mode,
+        mode,
         isRunning: false,
         durationSeconds: dur,
         elapsedSeconds: mode === 'stopwatch' ? 0 : dur,
         lastUpdatedTimestamp: Date.now()
     };
-
+    refreshLiveScreen(eventId);
     await syncLiveMatchState(eventId, event.liveMatchActive);
-    startLiveMatchInterval(eventId);
 };
 
 window.updateLiveMatchDuration = async function(eventId, mins) {
@@ -302,8 +334,8 @@ window.updateLiveMatchDuration = async function(eventId, mins) {
         event.liveMatchActive.durationSeconds = dur;
         event.liveMatchActive.elapsedSeconds = dur;
         event.liveMatchActive.lastUpdatedTimestamp = Date.now();
+        refreshLiveScreen(eventId);
         await syncLiveMatchState(eventId, event.liveMatchActive);
-        startLiveMatchInterval(eventId);
     }
 };
 
@@ -318,13 +350,8 @@ window.toggleLiveMatchTimer = async function(eventId) {
     active.elapsedSeconds = currentSecs;
     active.lastUpdatedTimestamp = Date.now();
 
-    const startBtn = document.getElementById('live-match-start-btn');
-    if (startBtn) {
-        startBtn.innerHTML = active.isRunning ? '<i class="fa-solid fa-pause"></i> Pause' : '<i class="fa-solid fa-play"></i> Start';
-    }
-
+    refreshLiveScreen(eventId);
     await syncLiveMatchState(eventId, active);
-    startLiveMatchInterval(eventId);
 };
 
 window.resetLiveMatchTimer = async function(eventId) {
@@ -336,11 +363,8 @@ window.resetLiveMatchTimer = async function(eventId) {
     active.elapsedSeconds = active.mode === 'stopwatch' ? 0 : active.durationSeconds;
     active.lastUpdatedTimestamp = Date.now();
 
-    const startBtn = document.getElementById('live-match-start-btn');
-    if (startBtn) startBtn.innerHTML = '<i class="fa-solid fa-play"></i> Start';
-
+    refreshLiveScreen(eventId);
     await syncLiveMatchState(eventId, active);
-    startLiveMatchInterval(eventId);
 };
 
 // Saves the timer / teams of the live match on top of the LIVE game:
@@ -477,10 +501,8 @@ window.recordLiveGoal = async function(eventId, teamKey, scorerName) {
     });
     if (!res.ok) return;
     if (res.aborted) { window.showToast && window.showToast('This match was already saved.', 'error'); return; }
-    const live = res.event.liveMatchActive || {};
-    event.liveMatchActive = live;
-    const a = document.getElementById('score-teamA'); if (a) a.innerText = (live.team1Goals || []).length;
-    const b = document.getElementById('score-teamB'); if (b) b.innerText = (live.team2Goals || []).length;
+    event.liveMatchActive = res.event.liveMatchActive || {};
+    refreshLiveScreen(eventId);
     if (typeof window.showToast === 'function') {
         window.showToast(`⚽ Goal! ${scorerName}`);
     }
@@ -529,7 +551,11 @@ window.saveLiveMatchResult = async function(eventId) {
 };
 
 window.discardLiveMatch = async function(eventId) {
-    if (!confirm("Are you sure you want to discard this live match?")) return;
+    if (!confirm("Delete this live match? The score will not be saved.")) return;
     const res = await mutateEvent(eventId, (draft) => { draft.liveMatchActive = null; });
-    if (res.ok) window.showToast("Live match discarded.");
+    if (res.ok) {
+        if (window.liveMatchTimerInterval) clearInterval(window.liveMatchTimerInterval);
+        document.getElementById('start-match-screen-modal')?.remove();
+        window.showToast("Live match deleted.");
+    }
 };

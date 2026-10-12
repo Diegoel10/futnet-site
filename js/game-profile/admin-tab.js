@@ -1,6 +1,6 @@
 // js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and correct Firestore paths
 import { db, appId } from '../firebase-config.js';
-import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml } from './event-store.js';
 import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
 import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry } from '../money-rules.js';
@@ -108,7 +108,7 @@ export function renderAdminTab(event) {
             })()}
             ${waitingList.map(w => `
                 <div class="bg-amber-950/30 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs">
-                    <span class="font-bold text-white">${w.name || 'Player'}</span>
+                    <span class="font-bold text-white">${escapeHtml(w.name || 'Player')}${w.autoJoin ? ' <span class="ml-1 text-[9px] font-black text-[#00F296] bg-[#00F296]/15 border border-[#00F296]/40 rounded px-1.5 py-0.5">AUTO</span>' : ''}</span>
                     <button onclick="removePlayerFromEvent('${event.id}', '${w.uid}')" class="text-red-400 hover:text-red-300 font-bold text-[11px]">Remove</button>
                 </div>
             `).join('')}
@@ -450,9 +450,22 @@ window.declineGameRequest = async function(eventId, uid) {
 window.openTwoPageGameWizard = function(eventId, mode) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
-    // Community games use the very same form as "Create Game in {Community}".
-    if (event.communityId && window.communitiesCache?.[event.communityId] && window.showCommunityGameCreation) {
-        window.showCommunityGameCreation(event.communityId, { mode, eventId });
+    // Community games always use the very same form as "Create Game in {Community}" (with the
+    // payment, refund and +1 options). The community is loaded first if this page hasn't loaded it yet.
+    if (event.communityId && window.showCommunityGameCreation) {
+        const cid = String(event.communityId);
+        window.communitiesCache = window.communitiesCache || {};
+        if (!window.communitiesCache[cid]) {
+            getDoc(doc(db, 'artifacts', appId, 'communities', cid)).then(snap => {
+                window.communitiesCache[cid] = snap.exists() ? { id: cid, ...snap.data() } : { id: cid, name: event.communityName || 'Community' };
+                window.showCommunityGameCreation(cid, { mode, eventId });
+            }).catch(() => {
+                window.communitiesCache[cid] = { id: cid, name: event.communityName || 'Community' };
+                window.showCommunityGameCreation(cid, { mode, eventId });
+            });
+            return;
+        }
+        window.showCommunityGameCreation(cid, { mode, eventId });
         return;
     }
 
