@@ -135,3 +135,8 @@ export function pruneTeamsForUid(draft, uid, opts = {}) {
 export function jsArg(value) {
     return escapeHtml(String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n]+/g, ' '));
 }
+
+// Own goals: saved in the scoring team's goal list as "Own goal (Name)". The score counts them;
+// player stats (top scorers, leaderboard) skip them. Same text on the website, iPhone and Android.
+export const ownGoalLabel = (name) => `Own goal (${String(name || 'Player').trim()})`;
+export const isOwnGoal = (g) => /^own goal\b/i.test(String((g && typeof g === 'object') ? (g.name || g.scorer || '') : (g || '')).trim());

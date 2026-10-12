@@ -180,9 +180,63 @@ window.copyEvent = function(eventId) {
     }
 };
 
+// Games tab: "Upcoming" (pick a day) or "Previous" (games that already happened, newest first).
+window.gamesView = window.gamesView || 'upcoming';
+window.setGamesView = function(view) {
+    window.gamesView = view === 'previous' ? 'previous' : 'upcoming';
+    if (window.renderEvents) window.renderEvents();
+};
+
+function paintGamesViewToggle() {
+    const prev = window.gamesView === 'previous';
+    document.querySelectorAll('#games-view-toggle [data-view]').forEach(b => {
+        const on = b.dataset.view === window.gamesView;
+        b.className = 'flex-1 py-2 rounded-xl text-xs font-black transition ' +
+            (on ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950' : 'text-white/70 hover:text-white');
+    });
+    document.getElementById('date-tabs-container')?.classList.toggle('hidden', prev);
+}
+
+function renderPreviousGames(grid) {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const titleEl = document.getElementById('selected-date-title');
+    if (titleEl) titleEl.innerText = 'Previous games';
+    const past = (window.eventsList || [])
+        .filter(ev => ev.date && (String(ev.date).slice(0, 10) < today || ev.isSessionEnded === true))
+        .sort((a, b) => (String(b.date).slice(0, 10) + (b.time || '')).localeCompare(String(a.date).slice(0, 10) + (a.time || '')))
+        .slice(0, 60);
+    if (!past.length) {
+        grid.innerHTML = `<div class="col-span-full bg-[#040E13]/90 border border-emerald-500/40 rounded-[28px] p-8 text-center text-white/70 text-xs font-medium">No previous games yet.</div>`;
+        return;
+    }
+    // Group by day so each block has its date on top.
+    let lastDay = '';
+    grid.innerHTML = past.map(ev => {
+        const day = String(ev.date).slice(0, 10);
+        let head = '';
+        if (day !== lastDay) {
+            lastDay = day;
+            const [y, m, dd] = day.split('-').map(Number);
+            const label = new Date(y, m - 1, dd).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+            head = `<div class="col-span-full text-[11px] font-black uppercase tracking-wider text-[#00F296] pt-2">${label}</div>`;
+        }
+        return head + window.renderEventCardHtml(ev);
+    }).join('');
+}
+
 window.renderEvents = function() {
     const grid = document.getElementById('events-grid');
     if (!grid) return;
+    paintGamesViewToggle();
+    if (window.gamesView === 'previous') { renderPreviousGames(grid); return; }
+    if (window.selectedDateStr) {
+        const [y, m, dd] = window.selectedDateStr.split('-').map(Number);
+        const titleEl = document.getElementById('selected-date-title');
+        const isToday = new Date(y, m - 1, dd).toDateString() === new Date().toDateString();
+        if (titleEl) titleEl.innerText = isToday ? 'Games for Today'
+            : `Games for ${new Date(y, m - 1, dd).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
+    }
 
     const filtered = (window.eventsList || [])
         .filter(ev => {

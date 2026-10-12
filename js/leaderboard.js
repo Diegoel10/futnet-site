@@ -1,5 +1,5 @@
 // js/leaderboard.js
-import { escapeHtml, jsArg } from './game-profile/event-store.js';
+import { escapeHtml, jsArg, isOwnGoal } from './game-profile/event-store.js';
 export function computePlayerStats(events) {
     const playerStats = {};
 
@@ -40,12 +40,14 @@ export function computePlayerStats(events) {
             const t2Score = t2Goals.length;
 
             t1Goals.forEach(gName => {
+                if (isOwnGoal(gName)) return;   // own goals count for the team, not for anyone's stats
                 const matchedAtt = attendees.find(a => a.name === gName);
                 const stats = getPlayerRecord(gName, matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
                 stats.goals += 1;
             });
 
             t2Goals.forEach(gName => {
+                if (isOwnGoal(gName)) return;
                 const matchedAtt = attendees.find(a => a.name === gName);
                 const stats = getPlayerRecord(gName, matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
                 stats.goals += 1;

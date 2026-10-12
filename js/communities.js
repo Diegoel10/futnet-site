@@ -671,7 +671,7 @@ window.refreshCommunityGamesTab = () => { if (S.activeId && S.tab === 'games') r
 
 function communityGames(id) {
     const all = (window.eventsList || []).filter(e => e.communityId === id);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
     const up = all.filter(e => !e.isSessionEnded && (e.date || '') >= today).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
     const prev = all.filter(e => !up.includes(e)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     return { up, prev };
@@ -1006,7 +1006,7 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
     const src = mode === 'create' ? null : (window.eventsList || []).find(e => e.id === opts.eventId);
     if (mode !== 'create' && !src) return;
     window._cgMode = { mode, eventId: opts.eventId || null };
-    const today = new Date().toISOString().slice(0, 10);
+    const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
     const to24 = (t) => {
         t = String(t || '').trim(); if (!t) return '19:00';
         const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i); if (!m) return '19:00';

@@ -4,7 +4,7 @@
 import { auth } from './firebase-config.js';
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
-const OWNER_EMAIL_SHA256 = '0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b';
+const OWNER_EMAIL_SHA256 = ['0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b', 'dc33de30406203e7cdf8490b5ef4b5c7f993bdb2989bc3025bc5e4dd6b129378'];
 const esc = (t) => String(t || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fn = (name) => httpsCallable(getFunctions(auth.app, 'us-central1'), name, { timeout: 540000 });
 
@@ -18,7 +18,7 @@ window.renderOwnerTools = async function () {
     const slot = document.getElementById('owner-tools-slot');
     const mail = (auth.currentUser?.email || '').trim().toLowerCase();
     if (!slot || !mail || !window.crypto?.subtle) return;
-    if (await sha256(mail) !== OWNER_EMAIL_SHA256) return;
+    if (!OWNER_EMAIL_SHA256.includes(await sha256(mail))) return;
     slot.innerHTML = `
         <button onclick="openNameSync()" class="w-full bg-[#1A1405]/90 border border-amber-400/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
             <div class="flex items-center gap-3">

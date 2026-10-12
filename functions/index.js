@@ -1156,9 +1156,13 @@ exports.advanceSpotOffers = onSchedule({ schedule: "every 1 minutes", timeZone: 
 // ---------------------------------------------------------------------------
 
 const crypto = require("crypto");
-const OWNER_EMAIL_SHA256 = "0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b";
+// Owner accounts (stored as fingerprints so the emails are not in the code).
+const OWNER_EMAIL_SHA256 = [
+  "0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b",
+  "dc33de30406203e7cdf8490b5ef4b5c7f993bdb2989bc3025bc5e4dd6b129378",
+];
 const isOwner = (auth) => !!(auth && auth.token && auth.token.email &&
-  crypto.createHash("sha256").update(String(auth.token.email).trim().toLowerCase()).digest("hex") === OWNER_EMAIL_SHA256);
+  OWNER_EMAIL_SHA256.includes(crypto.createHash("sha256").update(String(auth.token.email).trim().toLowerCase()).digest("hex")));
 
 const cleanName = (s) => String(s || "").replace(/\s+/g, " ").trim();
 /** Name on a directory card: name, else first + last, else nickname. */

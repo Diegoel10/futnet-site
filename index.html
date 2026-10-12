@@ -336,6 +336,11 @@
                 
                 <!-- TAB 1: EVENTS & GAMES -->
                 <div id="tab-events" class="space-y-6">
+                    <!-- Upcoming / Previous switch -->
+                    <div id="games-view-toggle" class="flex bg-[#040E13]/90 border border-emerald-500/30 rounded-2xl p-1 gap-1 max-w-xs">
+                        <button type="button" onclick="setGamesView('upcoming')" data-view="upcoming" class="flex-1 py-2 rounded-xl text-xs font-black transition">Upcoming</button>
+                        <button type="button" onclick="setGamesView('previous')" data-view="previous" class="flex-1 py-2 rounded-xl text-xs font-black transition">Previous</button>
+                    </div>
                     <!-- Sleek Horizontal Date Pill Carousel Bar -->
                     <div class="bg-[#040E13]/90 border border-emerald-500/30 p-3 rounded-2xl shadow-xl backdrop-blur-md overflow-x-auto flex items-center space-x-2 no-scrollbar" id="date-tabs-container"></div>
 

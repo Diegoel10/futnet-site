@@ -1,7 +1,7 @@
 // js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and correct Firestore paths
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml } from './event-store.js';
+import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml, ownGoalLabel } from './event-store.js';
 import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
 import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry } from '../money-rules.js';
 
@@ -547,7 +547,7 @@ window.renderWizardPage1 = function() {
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">📅 Date</label>
-                        <input type="date" id="wiz-date" value="${d.date}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]">
+                        <input type="date" id="wiz-date" min="${(() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; })()}" value="${d.date}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]">
                     </div>
                     <div>
                         <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">⏰ Time</label>
@@ -848,7 +848,8 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                     <span>${teamA} Goals (${t1Goals.length})</span>
                     <select id="edit-match-add-scorer-A" class="bg-black text-white text-xs px-2.5 py-1 rounded-xl border border-white/20 font-bold">
                         <option value="">+ Add Goal Scorer</option>
-                        ${t1Players.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${t1Players.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+                        ${t2Players.length ? `<optgroup label="Own goal by ${escapeHtml(teamB)}">${t2Players.map(p => `<option value="${escapeHtml(ownGoalLabel(p.name))}">${escapeHtml(ownGoalLabel(p.name))}</option>`).join('')}</optgroup>` : ''}
                     </select>
                 </div>
                 <div class="flex justify-end">
@@ -869,7 +870,8 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                     <span>${teamB} Goals (${t2Goals.length})</span>
                     <select id="edit-match-add-scorer-B" class="bg-black text-white text-xs px-2.5 py-1 rounded-xl border border-white/20 font-bold">
                         <option value="">+ Add Goal Scorer</option>
-                        ${t2Players.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                        ${t2Players.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+                        ${t1Players.length ? `<optgroup label="Own goal by ${escapeHtml(teamA)}">${t1Players.map(p => `<option value="${escapeHtml(ownGoalLabel(p.name))}">${escapeHtml(ownGoalLabel(p.name))}</option>`).join('')}</optgroup>` : ''}
                     </select>
                 </div>
                 <div class="flex justify-end">

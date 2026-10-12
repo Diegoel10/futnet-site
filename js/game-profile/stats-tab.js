@@ -1,5 +1,5 @@
 // js/game-profile/stats-tab.js: Dark-mode themed Game Stats with goalscorers displayed on match cards, live points, and live top scorers
-import { escapeHtml, jsArg } from './event-store.js';
+import { escapeHtml, jsArg, isOwnGoal } from './event-store.js';
 export function renderStatsTab(event) {
     const subTab = window.activeStatsSubTab || 'matches';
     const teamsCount = event.teamsCount || 3;
@@ -261,13 +261,13 @@ export function renderStatsTab(event) {
                                 
                                 (event.matches || []).forEach(m => {
                                     [...(m.team1Goals || []), ...(m.team2Goals || [])].forEach(scorer => {
-                                        goalCounts[scorer] = (goalCounts[scorer] || 0) + 1;
+                                        if (!isOwnGoal(scorer)) goalCounts[scorer] = (goalCounts[scorer] || 0) + 1;
                                     });
                                 });
 
                                 if (liveActive) {
                                     [...(liveActive.team1Goals || []), ...(liveActive.team2Goals || [])].forEach(scorer => {
-                                        goalCounts[scorer] = (goalCounts[scorer] || 0) + 1;
+                                        if (!isOwnGoal(scorer)) goalCounts[scorer] = (goalCounts[scorer] || 0) + 1;
                                     });
                                 }
 

@@ -109,8 +109,22 @@ window.selectCloudPark = function(name, city, state) {
     if (dropdown) dropdown.classList.add('hidden');
 };
 
+// Today's date in the player's own time zone (not UTC), as YYYY-MM-DD.
+const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+// The date picker starts on today and can't go back in time.
+window.prepareCreateDate = function() {
+    const el = document.getElementById('ce-date');
+    if (!el) return;
+    const today = localToday();
+    el.min = today;
+    if (!el.value || el.value < today) el.value = today;
+};
+document.addEventListener('DOMContentLoaded', () => window.prepareCreateDate());
+
 window.resetCreateGameForm = function() {
     currentCreationStep = 1;
+    window.prepareCreateDate();
     window.renderCreateGameSteps();
 };
 

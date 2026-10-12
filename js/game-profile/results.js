@@ -2,7 +2,7 @@
 // When the admin taps "End Event", everyone can see who won (by points: 3 a win, 1 a draw,
 // then goal difference, then goals scored), the full standings, each team with its players'
 // photos, and the top scorers. Same rules as the app and the community leaderboard.
-import { escapeHtml } from './event-store.js';
+import { escapeHtml, isOwnGoal } from './event-store.js';
 import { openCelebrationCards } from './celebration-cards.js';
 
 const FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
@@ -54,7 +54,7 @@ export function computeSessionResults(ev) {
         if (s1 > s2) { rows[a].wins++; rows[a].points += 3; rows[b].losses++; }
         else if (s2 > s1) { rows[b].wins++; rows[b].points += 3; rows[a].losses++; }
         else { rows[a].draws++; rows[b].draws++; rows[a].points++; rows[b].points++; }
-        [...(m.team1Goals || []), ...(m.team2Goals || [])].forEach(n => { if (n) goals[n] = (goals[n] || 0) + 1; });
+        [...(m.team1Goals || []), ...(m.team2Goals || [])].forEach(n => { if (n && !isOwnGoal(n)) goals[n] = (goals[n] || 0) + 1; });
     });
 
     const standings = rows.slice().sort((x, y) =>

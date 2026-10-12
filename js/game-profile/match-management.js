@@ -1,5 +1,5 @@
 // js/game-profile/match-management.js: Live match tracker with direct team builder roster lookups and custom team color styling
-import { mutateEvent, escapeHtml } from './event-store.js';
+import { mutateEvent, escapeHtml, ownGoalLabel } from './event-store.js';
 
 // Team names/colors come from team-tool.js (single source of truth). Fallbacks only if it isn't loaded yet.
 const MM_FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
@@ -414,49 +414,38 @@ window.updateLiveMatchTeamNames = async function(eventId) {
     await syncLiveMatchState(eventId, event.liveMatchActive);
 };
 
+/** A team's players for the live match: only people actually on that team (Team Builder), never everyone. */
+function liveTeamPlayers(event, teamKey) {
+    const live = event.liveMatchActive || {};
+    let teamName = teamKey === 'A' ? live.teamA : live.teamB;
+    const assignments = event.teamAssignments || window.teamAssignments?.[event.id] || {};
+    const configuredNames = (window.teamNames && window.teamNames[event.id]) || event.teamNames || {};
+    let teamIndex = teamKey === 'A' ? live.teamAIndex : live.teamBIndex;
+    if (!Number.isInteger(teamIndex)) teamIndex = -1;
+    for (let i = 0; teamIndex === -1 && i < (event.teamsCount || 3); i++) {
+        if ((configuredNames[i] || `Team ${i + 1}`) === teamName) teamIndex = i;
+    }
+    if (teamIndex !== -1) teamName = mmTeamNames(event)[teamIndex] || teamName;
+    let players = [];
+    if (teamIndex !== -1 && Array.isArray(assignments[teamIndex])) players = assignments[teamIndex].filter(p => p && p.name);
+    if (!players.length) {
+        Object.entries(assignments).forEach(([tKey, roster]) => {
+            if ((configuredNames[tKey] || `Team ${parseInt(tKey) + 1}`) === teamName && Array.isArray(roster)) {
+                roster.forEach(p => { if (p && p.name && !players.some(x => x.name === p.name)) players.push(p); });
+            }
+        });
+    }
+    return { teamName, players };
+}
+
 window.openGoalScorerPicker = function(eventId, teamKey) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !event.liveMatchActive) return;
 
-    let teamName = teamKey === 'A' ? event.liveMatchActive.teamA : event.liveMatchActive.teamB;
-    
-    let assignedPlayers = [];
-    const assignments = event.teamAssignments || window.teamAssignments?.[eventId] || {};
-    const configuredNames = (window.teamNames && window.teamNames[eventId]) || event.teamNames || {};
-
-    let teamIndex = teamKey === 'A' ? event.liveMatchActive.teamAIndex : event.liveMatchActive.teamBIndex;
-    if (!Number.isInteger(teamIndex)) teamIndex = -1;
-    for (let i = 0; teamIndex === -1 && i < (event.teamsCount || 3); i++) {
-        const cName = configuredNames[i] || `Team ${i + 1}`;
-        if (cName === teamName) {
-            teamIndex = i;
-            break;
-        }
-    }
-
-    if (teamIndex !== -1) teamName = mmTeamNames(event)[teamIndex] || teamName;
-
-    if (teamIndex !== -1 && assignments[teamIndex] && Array.isArray(assignments[teamIndex])) {
-        assignedPlayers = assignments[teamIndex].filter(p => p && p.name);
-    }
-
-    if (assignedPlayers.length === 0) {
-        // Fallback: check by iterating through assignments keys
-        Object.entries(assignments).forEach(([tKey, roster]) => {
-            const cName = configuredNames[tKey] || `Team ${parseInt(tKey) + 1}`;
-            if (cName === teamName && Array.isArray(roster)) {
-                roster.forEach(p => {
-                    if (p && p.name && !assignedPlayers.some(ap => ap.name === p.name)) {
-                        assignedPlayers.push(p);
-                    }
-                });
-            }
-        });
-    }
-
-    if (assignedPlayers.length === 0) {
-        assignedPlayers = (event.attendees || []).map(a => ({ name: a.name || 'Player', avatar: a.avatar || a.photoURL }));
-    }
+    // Only players on this team can score for it (no one outside the two teams).
+    const { teamName, players: assignedPlayers } = liveTeamPlayers(event, teamKey);
+    // Own goal: a player from the OTHER team scores into their own net; it counts for this team.
+    const { teamName: otherName, players: otherPlayers } = liveTeamPlayers(event, teamKey === 'A' ? 'B' : 'A');
 
     let picker = document.getElementById('goal-scorer-picker-modal');
     if (!picker) {
@@ -465,21 +454,27 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
         picker.className = 'fixed inset-0 z-[220] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
         document.body.appendChild(picker);
     }
+    const row = (p, label) => `
+        <div data-goal="${escapeHtml(label)}" onclick="recordLiveGoal('${eventId}', '${teamKey}', this.dataset.goal)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-white/10">
+            <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+            <span class="text-xs font-bold text-white">${escapeHtml(p.name)}</span>
+        </div>`;
 
     picker.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h4 class="text-xs font-black uppercase text-white truncate">Goal Scorer (${teamName})</h4>
+                <h4 class="text-xs font-black uppercase text-white truncate">Goal for ${escapeHtml(teamName || 'Team')}</h4>
                 <button onclick="document.getElementById('goal-scorer-picker-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-                ${assignedPlayers.map(p => `
-                    <div onclick="recordLiveGoal('${eventId}', '${teamKey}', '${(p.name || 'Player').replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-white/10">
-                        <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="text-xs font-bold text-white">${p.name}</span>
-                    </div>
-                `).join('')}
+            <div class="space-y-2">
+                ${assignedPlayers.length ? assignedPlayers.map(p => row(p, p.name || 'Player')).join('')
+                    : '<p class="text-xs text-white/60">Nobody is on this team yet. Add players in Team Builder first.</p>'}
             </div>
+            ${otherPlayers.length ? `
+            <div class="space-y-2 pt-2 border-t border-white/10">
+                <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">Own goal by ${escapeHtml(otherName || 'the other team')}</div>
+                ${otherPlayers.map(p => row(p, ownGoalLabel(p.name || 'Player'))).join('')}
+            </div>` : ''}
             <button onclick="document.getElementById('goal-scorer-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
     `;

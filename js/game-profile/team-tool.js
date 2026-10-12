@@ -167,6 +167,29 @@ function getFlattenedPlayersList(attendees) {
     return list;
 }
 
+/**
+ * Players the captain/admin can put in the formation: everyone going (and their guests), plus the
+ * waitlist as SUBS. Subs can be moved in and out of a team; their goals count in the stats like anyone's.
+ * (Auto-make teams only uses the players who are going.)
+ */
+function availablePlayers(event) {
+    const list = getFlattenedPlayersList(event.attendees);
+    const have = new Set(list.map(p => String(p.uid)));
+    (event.waitingList || []).forEach(w => {
+        const uid = String(w?.uid || '');
+        if (!uid || have.has(uid)) return;
+        have.add(uid);
+        list.push({
+            uid, name: String(w?.name || 'Player'),
+            avatar: resolvePlayerAvatar(w, event.attendees),
+            position: String(w?.position || 'Player'),
+            isSub: true
+        });
+    });
+    return list;
+}
+const subTag = (p) => (p && p.isSub) ? '<span class="text-[8px] font-black text-amber-300 bg-amber-400/15 border border-amber-400/40 rounded px-1 py-0.5 ml-1">SUB</span>' : '';
+
 window.openTeamMakingModal = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) {
@@ -472,7 +495,7 @@ export function renderTeamToolTab(event) {
     }
     window.teamNames[event.id] = window.teamNames[event.id] || {};
 
-    const allPlayers = getFlattenedPlayersList(event.attendees);
+    const allPlayers = availablePlayers(event);
     const currentAssignedUIDs = new Set();
     Object.values(window.teamAssignments[event.id]).forEach(teamArr => {
         if (Array.isArray(teamArr)) {
@@ -557,7 +580,7 @@ export function renderTeamToolTab(event) {
                 return `
                     <div class="flex items-center gap-2 bg-black/60 px-3 py-2 rounded-2xl border border-white/10 text-xs">
                         <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="font-bold text-white">${escapeHtml(aName)}</span>
+                        <span class="font-bold text-white">${escapeHtml(aName)}</span>${subTag(a)}
                     </div>
                 `;
             }).join('');
@@ -566,6 +589,7 @@ export function renderTeamToolTab(event) {
             <div class="space-y-5 pb-10">
                 <div class="bg-[#040E13]/95 border border-amber-500/40 rounded-3xl p-5 space-y-3 shadow-xl">
                     <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">⏳ Free Agents (${freeAgents.length})</h4>
+                    ${(event.waitingList || []).length ? '<p class="text-[10px] text-white/50">Players marked SUB are on the waitlist: add them to a team to sub in. Their goals count.</p>' : ''}
                     <div class="flex flex-wrap gap-2.5">
                         ${freeAgentsPillsHtml}
                     </div>
@@ -834,7 +858,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
 
     window.teamAssignments[event.id] = event.teamAssignments || {};
     const teamRoster = (window.teamAssignments[event.id][teamIndex] || []).filter(p => p && p.uid);
-    const allPlayers = getFlattenedPlayersList(event.attendees);
+    const allPlayers = availablePlayers(event);
 
     if (slotIndex !== null && slotIndex !== 'null') {
         // Players on the pitch = the first N of the team (N = spots in the formation); the rest are on the bench.
@@ -938,7 +962,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                     return `
                         <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
                             <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                            <span class="text-xs font-bold text-white">${escapeHtml(a.name)}</span>
+                            <span class="text-xs font-bold text-white">${escapeHtml(a.name)}</span>${subTag(a)}
                         </div>
                     `;
                 }).join('')}
@@ -977,7 +1001,7 @@ window.promptRemoveOrChangeSlot = function(eventId, teamIndex, slotIndex, player
 window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
-    const allPlayers = getFlattenedPlayersList(event.attendees);
+    const allPlayers = availablePlayers(event);
     const player = allPlayers.find(a => String(a.uid) === String(uid));
     if (!player) return;
 
