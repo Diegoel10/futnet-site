@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["89HLC7E682.com.diego.newsocceranyone"],
+        "components": [
+          { "#": "event=*", "comment": "Game links: futnet.site/#event=..." },
+          { "#": "community=*", "comment": "Community / invite links: futnet.site/#community=..." },
+          { "?": { "event": "*" }, "comment": "Older game links: futnet.site/?event=..." }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["89HLC7E682.com.diego.newsocceranyone"]
+  }
+}

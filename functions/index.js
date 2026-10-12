@@ -1696,3 +1696,185 @@ exports.syncMemberCount = onDocumentWritten(`${BASE}/communities/{communityId}/m
     if (c.exists && Number((c.data() || {}).membersCount) !== n) await ref.update({ membersCount: n });
   } catch (e) { logger.warn("member count", event.params.communityId, e.message); }
 });
+
+// ---------------------------------------------------------------------------
+// 16. Game reminder to everyone going (the roster, not the waitlist), once per game.
+//     When it goes out depends on kickoff (Florida time):
+//       12:00 AM - 8:00 AM   -> 10 PM the night before   "Game in the morning! ⚽"
+//        8:01 AM - 10:00 AM  ->  6 AM                    "Game coming up soon! ⚽"
+//       10:01 AM - 5:00 PM   ->  8 AM                    "Remember today's game! ⚽"
+//        5:01 PM - 11:59 PM  -> 11 AM                    "Remember game today! ⚽"
+//     A game made after that time still gets it right away (never later than 20 minutes before kickoff).
+//     Players can turn it off with the "Games" notifications switch.
+// ---------------------------------------------------------------------------
+function reminderPlan(kickMinutes) {
+  if (kickMinutes <= 8 * 60) return { dayBefore: true, at: "22:00", title: "Game in the morning! ⚽" };
+  if (kickMinutes <= 10 * 60) return { dayBefore: false, at: "06:00", title: "Game coming up soon! ⚽" };
+  if (kickMinutes <= 17 * 60) return { dayBefore: false, at: "08:00", title: "Remember today's game! ⚽" };
+  return { dayBefore: false, at: "11:00", title: "Remember game today! ⚽" };
+}
+
+exports.gameDayReminders = onSchedule({ schedule: "every 15 minutes", timeZone: DEFAULT_TZ, timeoutSeconds: 120 }, async () => {
+  const now = Date.now();
+  const tz = DEFAULT_TZ;
+  const dayOf = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(t));   // 2026-10-15
+  const today = dayOf(now);
+  const tomorrow = dayOf(startOf({ date: today, time: "12:00" }) + 86400000);
+  const snap = await col("eventsList").where("date", ">=", today).where("date", "<=", tomorrow + "~").get();
+  let sent = 0;
+  for (const d of snap.docs) {
+    const g = d.data() || {};
+    if (g.isSessionEnded === true || g.isCancelled === true) continue;
+    const start = startOf(g);
+    if (!start || now > start - 20 * 60000) continue;                 // too close or already started
+    const gameDay = String(g.date).slice(0, 10);
+    const hm = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit", hourCycle: "h23" }).format(new Date(start)).split(":").map(Number);
+    const plan = reminderPlan(hm[0] * 60 + hm[1]);
+    const sendDay = plan.dayBefore ? dayOf(startOf({ date: gameDay, time: "12:00" }) - 86400000) : gameDay;
+    const sendAt = startOf({ date: sendDay, time: plan.at, timeZone: g.timeZone });
+    if (!sendAt || now < sendAt) continue;                            // not time yet
+    const going = uniq(arr(g.attendees).map(uidOf)).filter(isRealPlayer);
+    if (!going.length) continue;
+    try {
+      await col("gameReminders").doc(`${d.id}_${gameDay}`).create({ eventId: d.id, date: gameDay, at: now, count: going.length });
+    } catch (e) { continue; }                                         // already reminded for this game day
+    const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(new Date(start));
+    const when = plan.dayBefore ? `tomorrow at ${time}` : `today at ${time}`;
+    const place = String(g.location || "").replace(/\s*\(.*$/, "").split(",")[0].trim();   // "Firefighters Park (Margate, FL)" -> "Firefighters Park"
+    const storm = g.gameStatus && g.gameStatus.stormWatch === true
+      ? ({ on: " ✅ Game on.", likely: " 🟡 Game likely, watching the weather.", unlikely: " 🔴 Game not likely, check the game for updates." }[g.gameStatus.state] || "")
+      : "";
+    await notify(going, {
+      type: "game_reminder",
+      eventId: d.id,
+      communityId: g.communityId || "",
+      title: plan.title,
+      body: `${g.title || "Your game"} ${when}${place ? ` at ${place}` : ""}. See you there!${storm}`,
+    }, { key: `remind_${d.id}_${gameDay}` });
+    sent++;
+  }
+  if (sent) logger.info(`game reminders: ${sent} games`);
+});
+
+// ---------------------------------------------------------------------------
+// 17. Player stats for the profile (website + apps): everything a player did in finished games.
+//     playerStats({ uid, communityId? }) -> totals, W/D/L, attendance, goals by month,
+//     last 5 games, best game, and the communities they played in (for the switch).
+//     Same counting as the leaderboard and results page: 3 pts a win, own goals count for nobody.
+// ---------------------------------------------------------------------------
+let endedCache = { at: 0, games: [] };
+async function endedGames() {
+  if (Date.now() - endedCache.at < 3 * 60000) return endedCache.games;
+  const snap = await col("eventsList").where("isSessionEnded", "==", true).get();
+  endedCache = { at: Date.now(), games: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  return endedCache.games;
+}
+
+const ownGoal = (g) => /^own goal\b/i.test(String((g && typeof g === "object") ? (g.name || g.scorer || "") : (g || "")).trim());
+const teamCount = (g) => {
+  if (typeof g.teamsCount === "number") return g.teamsCount;
+  const n = parseInt((String(g.teamsCount || "").match(/(\d+)/) || [])[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : 3;
+};
+const teamPlayers = (g, i) => {
+  const ta = g.teamAssignments || {};
+  const list = Array.isArray(ta) ? ta[i] : (ta[i] !== undefined ? ta[i] : ta[String(i)]);
+  return (Array.isArray(list) ? list : []).filter((p) => p && (p.uid || p.name));
+};
+
+/** One finished game from one player's point of view (null = they weren't in it). */
+function playerGame(g, uid) {
+  const att = arr(g.attendees).find((a) => uidOf(a) === uid);
+  const n = teamCount(g);
+  const names = Array.from({ length: n }, (_, i) => (g.teamNames || {})[i] || `Team ${i + 1}`);
+  let myTeam = -1;
+  for (let i = 0; i < n && myTeam < 0; i++) if (teamPlayers(g, i).some((p) => uidOf(p) === uid)) myTeam = i;
+  if (!att && myTeam < 0) return null;
+  // My names (goals are saved by name): roster name + team-sheet name
+  const myNames = new Set([att && att.name, ...(myTeam >= 0 ? teamPlayers(g, myTeam).filter((p) => uidOf(p) === uid).map((p) => p.name) : [])]
+    .filter(Boolean).map((s) => String(s).trim().toLowerCase()));
+  const isMine = (goal) => {
+    if (!goal || ownGoal(goal)) return false;
+    if (typeof goal === "object" && (goal.uid || goal.userId)) return (goal.uid || goal.userId) === uid;
+    return myNames.has(String(typeof goal === "object" ? (goal.name || goal.scorer || "") : goal).trim().toLowerCase());
+  };
+  const pick = (idx, name, fb) => (Number.isInteger(idx) && idx >= 0 && idx < n) ? idx : (names.indexOf(name) !== -1 ? names.indexOf(name) : fb);
+  const table = names.map((nm, i) => ({ i, pts: 0, gf: 0, ga: 0 }));
+  let goals = 0, w = 0, dr = 0, l = 0;
+  for (const m of arr(g.matches)) {
+    if (!m || m.isFinished === false) continue;
+    const a = pick(m.teamAIndex, m.teamA, 0), b = pick(m.teamBIndex, m.teamB, 1);
+    if (!table[a] || !table[b] || a === b) continue;
+    const g1 = arr(m.team1Goals), g2 = arr(m.team2Goals);
+    const s1 = g1.length, s2 = g2.length;
+    table[a].gf += s1; table[a].ga += s2; table[b].gf += s2; table[b].ga += s1;
+    if (s1 > s2) table[a].pts += 3; else if (s2 > s1) table[b].pts += 3; else { table[a].pts++; table[b].pts++; }
+    goals += [...g1, ...g2].filter(isMine).length;
+    if (myTeam === a || myTeam === b) {
+      const mine = myTeam === a ? s1 : s2, theirs = myTeam === a ? s2 : s1;
+      if (mine > theirs) w++; else if (mine < theirs) l++; else dr++;
+    }
+  }
+  const order = table.slice().sort((x, y) => (y.pts - x.pts) || ((y.gf - y.ga) - (x.gf - x.ga)) || (y.gf - x.gf));
+  const place = myTeam >= 0 && (w + dr + l) > 0 ? order.findIndex((t) => t.i === myTeam) + 1 : 0;
+  return {
+    eventId: g.id, title: g.title || "Game", date: String(g.date || "").slice(0, 10), communityId: g.communityId || "",
+    goals, w, d: dr, l, place, champion: place === 1, team: myTeam >= 0 ? names[myTeam] : "",
+    attendance: (att && att.attendance) || "", signedUp: !!att,
+  };
+}
+
+function buildPlayerStats(games, uid, communityId) {
+  const all = games.map((g) => playerGame(g, uid)).filter(Boolean)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const comms = {};
+  all.forEach((x) => { if (x.communityId) comms[x.communityId] = (comms[x.communityId] || 0) + 1; });
+  const list = communityId ? all.filter((x) => x.communityId === communityId) : all;
+  const showed = list.filter((x) => x.attendance !== "noshow");
+  const sum = (k) => showed.reduce((s, x) => s + x[k], 0);
+  const matches = sum("w") + sum("d") + sum("l");
+  const goals = sum("goals");
+  // Goals and games per month, last 12 months (oldest first)
+  const now = new Date();
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const inMonth = showed.filter((x) => x.date.startsWith(key));
+    months.push({ month: key, games: inMonth.length, goals: inMonth.reduce((s, x) => s + x.goals, 0) });
+  }
+  const best = showed.reduce((b, x) => (x.goals > (b ? b.goals : 0) ? x : b), null);
+  const signed = list.filter((x) => x.signedUp);
+  return {
+    uid,
+    communityId: communityId || "",
+    totals: {
+      games: showed.length, matches, wins: sum("w"), draws: sum("d"), losses: sum("l"), goals,
+      champion: showed.filter((x) => x.champion).length,
+      winPct: matches ? Math.round((sum("w") / matches) * 100) : 0,
+      goalsPerGame: showed.length ? Math.round((goals / showed.length) * 10) / 10 : 0,
+    },
+    attendance: {
+      joined: signed.length,
+      showed: signed.filter((x) => x.attendance !== "noshow").length,
+      late: signed.filter((x) => x.attendance === "late").length,
+      noShow: signed.filter((x) => x.attendance === "noshow").length,
+      pct: signed.length ? Math.round((signed.filter((x) => x.attendance !== "noshow").length / signed.length) * 100) : 0,
+    },
+    months,
+    recent: showed.slice(0, 5).map(({ eventId, title, date, goals: gl, w, d, l, place, team }) => ({ eventId, title, date, goals: gl, w, d, l, place, team })),
+    best: best && best.goals > 0 ? { eventId: best.eventId, title: best.title, date: best.date, goals: best.goals } : null,
+    communities: Object.entries(comms).map(([id, n]) => ({ id, games: n })),
+  };
+}
+
+exports.playerStats = onCall(async (request) => {
+  if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
+  const uid = String((request.data || {}).uid || request.auth.uid);
+  const communityId = String((request.data || {}).communityId || "");
+  const stats = buildPlayerStats(await endedGames(), uid, communityId);
+  // Community names for the switch
+  const names = await Promise.all(stats.communities.map((c) => col("communities").doc(c.id).get().then((s) => (s.data() || {}).name || "Community").catch(() => "Community")));
+  stats.communities = stats.communities.map((c, i) => ({ ...c, name: names[i] })).sort((a, b) => b.games - a.games);
+  return stats;
+});

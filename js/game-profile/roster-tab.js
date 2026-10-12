@@ -213,6 +213,9 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
                 <button onclick="sendDirectMessageFromRoster(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-comments"></i> Send Message
                 </button>
+                <button onclick="document.getElementById('player-profile-popup').remove(); openPlayerStatsSheet(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-[#00F296]/40 transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-chart-simple text-[#00F296]"></i> View stats
+                </button>
                 <button onclick="sendFriendRequestFromRoster(window._popupPerson.uid)" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-2">
                     <i class="fa-solid fa-user-plus"></i> Send Friend Request
                 </button>

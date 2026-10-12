@@ -627,7 +627,7 @@ window.promptProfileSetupIfNeeded = function() {
                 <div><label class="${lab}">First name *</label><input id="ps-first" autocomplete="given-name" value="${esc(first)}" class="${inp}"></div>
                 <div><label class="${lab}">Last name</label><input id="ps-last" autocomplete="family-name" value="${esc(last)}" class="${inp}"></div>
             </div>
-            <div><label class="${lab}">Nickname (optional)</label><input id="ps-nick" placeholder="e.g. El Capi" value="${esc(p.nickname || '')}" class="${inp}"></div>
+            <div><label class="${lab}">Nickname (optional)</label><input id="ps-nick" placeholder="Optional, leave blank if none" value="${esc(p.nickname || '')}" class="${inp}"></div>
             <div><label class="${lab}">Email ${isApple ? '(optional)' : ''}</label><input id="ps-email" type="email" autocomplete="email" value="${esc(email)}" placeholder="${isApple ? 'Optional' : ''}" class="${inp}"></div>
             <div class="grid grid-cols-2 gap-3">
                 <div><label class="${lab}">Birthday *</label><input id="ps-dob" type="date" class="${inp}" style="background-color:#000 !important;color:#fff !important;"></div>

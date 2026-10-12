@@ -243,7 +243,7 @@
 
                     <div>
                         <label class="block text-[10px] font-semibold text-white/70 uppercase mb-1">Nickname (Optional)</label>
-                        <input type="text" id="reg-nickname" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" placeholder="e.g. R10, El Mago" style="background-color: #000000 !important; color: #ffffff !important;">
+                        <input type="text" id="reg-nickname" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2 text-white text-base sm:text-xs focus:outline-none focus:border-brand" placeholder="Optional, leave blank if none" style="background-color: #000000 !important; color: #ffffff !important;">
                     </div>
 
                     <div>
@@ -665,6 +665,7 @@
     </div>
 
  <!-- MAIN SCRIPT CONTROLLER -->
+    <script type="module" src="js/player-stats.js"></script>
     <script type="module">
         import { auth, db, appId } from './js/firebase-config.js';
         import './js/auth.js';

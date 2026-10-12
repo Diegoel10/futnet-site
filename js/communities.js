@@ -1718,6 +1718,7 @@ window.openMemberBox = (uid) => {
                 <button onclick="memberMessage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-comments mr-1"></i> Message</button>
             </div>`;
         })() : ''}
+        <button onclick="closeCommunityModal('member-box-modal'); openPlayerStatsSheet('${jsArg(uid)}', '${jsArg(memberName(m))}', '', '${jsArg(S.activeId)}')" class="${BTN_DARK} w-full py-3"><i class="fa-solid fa-chart-simple mr-1 text-[#00F296]"></i> View stats</button>
         <div class="flex gap-2">
             <button onclick="closeCommunityModal('member-box-modal')" class="${BTN_DARK} flex-1 py-3">Close</button>
             ${canManageMember(c, m) ? `<button onclick="openMemberManage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-sliders mr-1"></i> Manage</button>` : ''}

@@ -90,6 +90,15 @@ window.renderProfileTab = function() {
                     </div>
                 </div>
 
+                <!-- My Stats (js/player-stats.js) -->
+                <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-3 shadow-lg">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-chart-simple text-xs"></i></div>
+                        <div class="text-[9px] font-black text-[#00B4AE] uppercase tracking-wider">My Stats</div>
+                    </div>
+                    <div id="profile-stats-box"></div>
+                </div>
+
                 <!-- My Games Button -->
                 <button onclick="toggleProfileEventsSection()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
                     <div class="flex items-center gap-3">
@@ -169,6 +178,7 @@ window.renderProfileTab = function() {
 
     setTimeout(() => {
         if (window.renderOwnerTools) window.renderOwnerTools();
+        if (window.mountPlayerStats && window.currentUser) window.mountPlayerStats('profile-stats-box', window.currentUser.uid);
         const logoutBtn = document.getElementById('real-logout-btn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', window.handleLogout);
@@ -295,7 +305,7 @@ window.openEditProfileModal = function() {
 
                 <div>
                     <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Nickname (Optional)</label>
-                    <input type="text" id="edit-nickname" value="${p.nickname || ''}" placeholder="e.g. El Capi" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
+                    <input type="text" id="edit-nickname" value="${p.nickname || ''}" placeholder="Optional, leave blank if none" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">

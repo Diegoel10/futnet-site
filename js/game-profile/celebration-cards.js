@@ -565,3 +565,5 @@ export async function openCelebrationCards(results, info, opts = {}) {
         list.appendChild(box);
     });
 }
+// Shared with the player stats card (js/player-stats.js)
+export const cardKit = { W, H, GREEN, GOLD, BLOCK, BODY, MARKER, loadImage, background, rr, text, fitFont, avatar, header, footer, brush, toBlob };
