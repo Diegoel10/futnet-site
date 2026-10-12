@@ -99,6 +99,7 @@ export function renderRosterTab(event) {
                         <div>
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(rawName)}</span>
+                                ${window.skillBadge ? window.skillBadge(att.uid || '') : ''}
                                 ${organizerBadge}
                                 ${attendanceBadge}
                             </div>

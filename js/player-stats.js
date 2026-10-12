@@ -33,6 +33,75 @@ function personOf(uid, name, avatar) {
     return { uid, name: full, avatar: photo, position: src.position || '', nickname: src.nickname || '' };
 }
 
+// ---------- stars ----------
+/** 5 stars with halves (Font Awesome), e.g. 3.5 -> ★★★⯪☆ */
+export function starsHtml(v, color = '#FCD34D', size = 'text-sm') {
+    const out = [];
+    for (let i = 1; i <= 5; i++) {
+        const icon = v >= i ? 'fa-solid fa-star' : v >= i - 0.5 ? 'fa-solid fa-star-half-stroke' : 'fa-regular fa-star';
+        out.push(`<i class="${icon}"></i>`);
+    }
+    return `<span class="${size} tracking-tight whitespace-nowrap" style="color:${color}">${out.join('')}</span>`;
+}
+
+function ratingsBox(r) {
+    if (!r) return '';
+    const a = r.attendance || {}, k = r.skill || {};
+    const row = (icon, title, x, sub, color) => `
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-xl flex items-center justify-center text-sm shrink-0" style="background:${color}22;color:${color}">${icon}</div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2"><span class="text-[10px] font-black uppercase tracking-wider text-white/60">${title}</span>
+                    ${x.isNew ? '<span class="text-[9px] font-black rounded-full px-2 py-0.5 bg-white/10 text-white/70">NEW</span>' : `<span class="text-xs font-black text-white">${Number(x.score || 0).toFixed(1)}</span>`}</div>
+                <div class="text-[10px] text-white/50 truncate">${sub}</div>
+            </div>
+            ${x.isNew ? '' : starsHtml(x.stars, color)}
+        </div>`;
+    const aSub = a.isNew ? 'Shows after 3 games'
+        : [`${a.onTime || 0} on time`, a.late ? `${a.late} late` : '', a.lateCancels ? `${a.lateCancels} late cancel${a.lateCancels > 1 ? 's' : ''}` : '', a.noShows ? `${a.noShows} no-show${a.noShows > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+    const kSub = k.isNew ? 'Shows after 3 games' : `From ${k.games} games: wins, +/-, goals, titles`;
+    return `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-3">
+        ${row('<i class="fa-solid fa-clock"></i>', 'Attendance', a, aSub, '#00F296')}
+        ${row('<i class="fa-solid fa-futbol"></i>', 'Skill', k, kSub, '#FCD34D')}
+    </div>`;
+}
+
+// Small skill stars next to names (rosters): any element with data-skill-uid gets filled in.
+const ratingCache = {};      // uid -> { skill, attendance }
+let ratingQueue = new Set(), ratingTimer = null;
+function paintSkill(el) {
+    const r = ratingCache[el.dataset.skillUid];
+    if (!r) return;
+    const k = r.skill || {};
+    el.innerHTML = k.isNew ? '<span class="text-[8px] font-black text-white/40">NEW</span>'
+        : `<span class="text-[9px] font-black text-[#FCD34D] whitespace-nowrap"><i class="fa-solid fa-star"></i> ${Number(k.stars).toFixed(1)}</span>`;
+    el.title = k.isNew ? 'Skill: new player' : `Skill ${k.stars} stars`;
+}
+function requestRatings(uids) {
+    uids.forEach(u => { if (u && !ratingCache[u]) ratingQueue.add(u); });
+    if (!ratingQueue.size || ratingTimer) return;
+    ratingTimer = setTimeout(async () => {
+        const list = [...ratingQueue].slice(0, 80); ratingQueue = new Set(); ratingTimer = null;
+        try {
+            const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'playerRatings')({ uids: list });
+            Object.assign(ratingCache, (r.data && r.data.ratings) || {});
+            document.querySelectorAll('[data-skill-uid]').forEach(paintSkill);
+        } catch (e) { console.warn('ratings', e); }
+    }, 150);
+}
+function scanSkill(root) {
+    const els = root.querySelectorAll ? root.querySelectorAll('[data-skill-uid]') : [];
+    if (!els.length) return;
+    els.forEach(paintSkill);
+    requestRatings([...els].map(e => e.dataset.skillUid));
+}
+new MutationObserver(list => list.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) scanSkill(n.matches?.('[data-skill-uid]') ? n.parentElement || n : n); })))
+    .observe(document.documentElement, { childList: true, subtree: true });
+/** For lists: `<span data-skill-uid="UID"></span>` gets the skill stars. */
+export const skillBadge = (uid) => uid ? `<span data-skill-uid="${esc(uid)}" class="inline-flex"></span>` : '';
+window.skillBadge = skillBadge;
+window.starsHtml = starsHtml;
+
 // ---------- the section ----------
 function tile(value, label, color = '#fff') {
     return `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-center">
@@ -47,6 +116,7 @@ function statsHtml(s, person, communityId, boxId) {
         class="shrink-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${communityId === id ? 'bg-[#00F296] text-slate-950 border-[#00F296]' : 'bg-black/40 text-white/70 border-white/15'}">${esc(label)}</button>`;
     if (!t.games && !a.joined) {
         return `${comms.length ? `<div class="flex gap-2 overflow-x-auto pb-1">${chip('', 'All games')}${comms.map(c => chip(c.id, c.name)).join('')}</div>` : ''}
+            ${s.ratings && s.ratings.attendance && s.ratings.attendance.games ? ratingsBox(s.ratings) : ''}
             <p class="text-xs text-white/55 text-center py-4">No finished games yet. Stats show up after a game ends.</p>`;
     }
     const max = Math.max(1, ...s.months.map(m => m.goals));
@@ -62,6 +132,7 @@ function statsHtml(s, person, communityId, boxId) {
     const seg = (n, color) => n ? `<div style="width:${(n / total) * 100}%;background:${color}"></div>` : '';
     return `
         ${comms.length ? `<div class="flex gap-2 overflow-x-auto pb-1">${chip('', 'All games')}${comms.map(c => chip(c.id, c.name)).join('')}</div>` : ''}
+        ${ratingsBox(s.ratings)}
         <div class="grid grid-cols-4 gap-2">
             ${tile(t.games, 'Games')}${tile(t.goals, 'Goals', '#00F296')}${tile(t.champion, 'Titles', '#FCD34D')}${tile(t.goalsPerGame, 'Goals/game')}
         </div>
@@ -74,7 +145,7 @@ function statsHtml(s, person, communityId, boxId) {
         </div>
         <div class="bg-black/40 border border-white/10 rounded-2xl p-3 flex items-center justify-between gap-3">
             <div>
-                <div class="font-black text-white/60 uppercase tracking-wider text-[10px]">Attendance</div>
+                <div class="font-black text-white/60 uppercase tracking-wider text-[10px]">Showed up</div>
                 <div class="text-xs font-bold text-white mt-0.5">Showed up ${a.showed} of ${a.joined}${a.late ? ` · ${a.late} late` : ''}${a.noShow ? ` · ${a.noShow} no-show` : ''}</div>
             </div>
             <div class="text-2xl font-black ${a.pct >= 90 ? 'text-[#00F296]' : a.pct >= 70 ? 'text-amber-300' : 'text-red-400'}">${a.pct}%</div>
@@ -163,6 +234,27 @@ window.openPlayerStatsSheet = (uid, name, avatar, communityId = '') => {
 window.viewPlayerProfile = (uid, name) => window.openPlayerStatsSheet(uid, name);
 
 // ---------- the stats card (image) ----------
+/** 5 stars drawn on the card; `value` 0-5 in halves. x = center of the first star. */
+function drawStars(ctx, x, y, size, step, value, color) {
+    const star = (cx, cy, r) => {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+            const rad = i % 2 ? r * 0.45 : r, a = -Math.PI / 2 + (i * Math.PI) / 5;
+            ctx[i ? 'lineTo' : 'moveTo'](cx + rad * Math.cos(a), cy + rad * Math.sin(a));
+        }
+        ctx.closePath();
+    };
+    for (let i = 0; i < 5; i++) {
+        const cx = x + i * step, r = size / 2;
+        ctx.save(); star(cx, y, r); ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fill(); ctx.restore();
+        const fillPart = Math.max(0, Math.min(1, value - i));
+        if (fillPart > 0) {
+            ctx.save(); ctx.beginPath(); ctx.rect(cx - r, y - r, r * 2 * fillPart, r * 2); ctx.clip();
+            star(cx, y, r); ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 10; ctx.fill(); ctx.restore();
+        }
+    }
+}
+
 async function drawStatsCard(person, s, scopeName) {
     const K = cardKit;
     const { W, H, GREEN, GOLD, BLOCK, BODY } = K;
@@ -187,7 +279,15 @@ async function drawStatsCard(person, s, scopeName) {
     const sub = [person.nickname && `"${person.nickname}"`, person.position].filter(Boolean).join(' · ');
     if (sub) K.text(ctx, sub, cx, 704, { font: `800 30px ${BODY}`, color: 'rgba(255,255,255,0.8)', maxWidth: 560 });
     K.text(ctx, scopeName.toUpperCase(), cx, 758, { font: `800 26px ${BODY}`, color: GREEN, maxWidth: 560 });
-    if (s.best) K.text(ctx, `BEST GAME: ${s.best.goals} ⚽ · ${fmtDay(s.best.date).toUpperCase()}`, cx, 830, { font: `800 26px ${BODY}`, color: GOLD, maxWidth: 560 });
+    const r = s.ratings || {};
+    const starRow = (label, x, y, color) => {
+        K.text(ctx, label, cx - 250, y, { font: `800 24px ${BODY}`, align: 'left', color: 'rgba(255,255,255,0.75)' });
+        if (!x || x.isNew) { K.text(ctx, 'NEW', cx + 250, y, { font: `800 24px ${BODY}`, align: 'right', color: 'rgba(255,255,255,0.6)' }); return; }
+        drawStars(ctx, cx + 250 - 5 * 44 + 22, y, 40, 44, x.stars, color);
+    };
+    starRow('ATTENDANCE', r.attendance, 812, GREEN);
+    starRow('SKILL', r.skill, 864, GOLD);
+    if (s.best) K.text(ctx, `BEST GAME: ${s.best.goals} ⚽ · ${fmtDay(s.best.date).toUpperCase()}`, cx, 916, { font: `800 24px ${BODY}`, color: GOLD, maxWidth: 560 });
 
     // Right: 2 x 3 big numbers
     const t = s.totals;

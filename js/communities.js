@@ -7,7 +7,8 @@
 //   artifacts/{appId}/communities/{id}/feed/{postId}      -> status / photo / poll posts
 //   artifacts/{appId}/communities/{id}/messages/{msgId}   -> group chat messages (new)
 //   artifacts/{appId}/eventsList/{gameId}                 -> community games carry communityId (+ communityName)
-import { db, appId } from './firebase-config.js';
+import { db, appId, auth } from './firebase-config.js';
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 import {
     doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit,
     onSnapshot, serverTimestamp, increment, arrayUnion, deleteField, runTransaction, where
@@ -844,6 +845,44 @@ window.leaveCommunity = async function(id) {
 };
 
 // ------------------------------------------------------------------ INFO TAB
+// ---- Info: Top players (skill stars) and Top scorers, 5 each (server: communityTop)
+const TOP = {};   // communityId -> { at, data }
+function topListHtml(title, icon, rows, right, cid) {
+    return `<div class="bg-black/40 border border-white/10 rounded-2xl p-3">
+        <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">${icon} ${title}</div>
+        ${rows.length ? rows.map((r, i) => `
+            <button onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(cid)}')" class="w-full flex items-center gap-2.5 py-1.5 text-left">
+                <span class="w-5 text-center text-xs font-black ${i === 0 ? 'text-[#FCD34D]' : 'text-white/50'}">${i + 1}</span>
+                <img src="${esc(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(r) : (r.avatar || DEFAULT_AVATAR))}" onerror="this.src='${DEFAULT_AVATAR}'" class="w-8 h-8 rounded-full object-cover border border-white/15 shrink-0">
+                <span class="flex-1 min-w-0 text-xs font-bold text-white truncate">${esc(r.name)}</span>
+                ${right(r)}
+            </button>`).join('') : '<p class="text-[11px] text-white/45 py-2">Shows up after a few finished games.</p>'}
+    </div>`;
+}
+function topHtml(cid) {
+    const t = TOP[cid];
+    if (!t || Date.now() - t.at > 180000) loadTop(cid);
+    if (!t) return `<div id="comm-top-box" class="text-[11px] text-white/45"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading top players…</div>`;
+    const d = t.data || { players: [], scorers: [] };
+    const stars = (v) => window.starsHtml ? window.starsHtml(v, '#FCD34D', 'text-[10px]') : `⭐ ${v}`;
+    return `<div id="comm-top-box" class="grid sm:grid-cols-2 gap-3">
+        ${topListHtml('Top players', '<i class="fa-solid fa-star"></i>', d.players, r => stars(r.stars), cid)}
+        ${topListHtml('Top scorers', '<i class="fa-solid fa-futbol"></i>', d.scorers, r => `<span class="text-xs font-black text-[#00F296] shrink-0">${r.goals} ⚽</span>`, cid)}
+    </div>`;
+}
+let topLoading = {};
+async function loadTop(cid) {
+    if (topLoading[cid]) return;
+    topLoading[cid] = true;
+    try {
+        const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'communityTop')({ communityId: cid });
+        TOP[cid] = { at: Date.now(), data: r.data };
+    } catch (e) { TOP[cid] = { at: Date.now(), data: { players: [], scorers: [] } }; }
+    topLoading[cid] = false;
+    const box = document.getElementById('comm-top-box');
+    if (box && S.activeId === cid && S.tab === 'info') box.outerHTML = topHtml(cid);
+}
+
 function infoTab(c, isAdmin) {
     const section = (t, v) => v ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">${t}</div><p class="text-xs text-white/80 whitespace-pre-line leading-relaxed">${esc(v)}</p></div>` : '';
     const admins = S.members.filter(m => isAdminRole(m, c));
@@ -851,6 +890,7 @@ function infoTab(c, isAdmin) {
     const isMember = !!myRole(c.id);
     return `
         <div class="space-y-4">
+            ${topHtml(c.id)}
             ${section('About', c.description || (isMember ? '' : 'Join this community to view matches, announcements, and chat.'))}
             ${section('Member requirements', c.requirements)}
             <div class="bg-amber-500/10 border border-amber-400/30 rounded-xl p-3">
