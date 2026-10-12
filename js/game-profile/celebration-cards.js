@@ -528,8 +528,17 @@ export async function openCelebrationCards(results, info, opts = {}) {
             </div>
             ${tainted ? `<div class="text-xs bg-amber-500/10 border border-amber-400/40 rounded-xl p-3">Some photos couldn't be added to the images. Take a screenshot of each one instead.</div>` : ''}
             ${cards.length ? '' : '<p class="text-sm text-white/60">No results to share yet.</p>'}
+            ${opts.communityId && window.postToCommunityFeed && (window.myCommunityRoles || {})[opts.communityId] && files.some(Boolean) ? `
+            <button id="cc-post-feed" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm">
+                <i class="fa-solid fa-users mr-1"></i> Post all to ${(window.communitiesCache?.[opts.communityId]?.name || 'the community').replace(/[<>&"]/g, '')} feed</button>` : ''}
             <div id="celebration-cards-list" class="space-y-5"></div>
         </div>`;
+    m.querySelector('#cc-post-feed')?.addEventListener('click', async (e) => {
+        const b = e.currentTarget; b.disabled = true; b.textContent = 'Posting…';
+        const ok = await window.postToCommunityFeed(opts.communityId, `🏆 ${info.title || 'Game'} results${info.date ? ' · ' + info.date : ''}`, files.filter(Boolean));
+        b.textContent = ok ? 'Posted to the feed ✓' : 'Couldn\'t post. Try again';
+        if (!ok) b.disabled = false;
+    });
     const list = m.querySelector('#celebration-cards-list');
     cards.forEach((c, i) => {
         const box = document.createElement('div');

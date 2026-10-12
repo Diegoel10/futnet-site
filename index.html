@@ -639,8 +639,10 @@
                     <span class="text-[10px] mt-1">Games</span>
                 </button>
                 <button onclick="switchTab('friends')" id="mob-nav-friends" class="relative flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
-                    <span id="mob-friends-dot" class="hidden absolute top-0.5 right-1 bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none border-2 border-[#040E13]">0</span>
-                    <i class="fa-solid fa-user-group text-lg"></i>
+                    <span class="relative inline-block">
+                        <i class="fa-solid fa-user-group text-lg"></i>
+                        <span id="mob-friends-dot" class="hidden absolute -top-2 -right-3 bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none border-2 border-[#040E13]">0</span>
+                    </span>
                     <span class="text-[10px] mt-1">Friends</span>
                 </button>
                 <button onclick="switchTab('hub')" id="mob-nav-hub" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
@@ -648,8 +650,10 @@
                     <span class="text-[10px] mt-1">Hub</span>
                 </button>
                 <button onclick="switchTab('chat')" id="mob-nav-chat" class="relative flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
-                    <span id="mob-chats-dot" class="hidden absolute top-0.5 right-1 bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none border-2 border-[#040E13]">0</span>
-                    <i class="fa-solid fa-comments text-lg"></i>
+                    <span class="relative inline-block">
+                        <i class="fa-solid fa-comments text-lg"></i>
+                        <span id="mob-chats-dot" class="hidden absolute -top-2 -right-3 bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none border-2 border-[#040E13]">0</span>
+                    </span>
                     <span class="text-[10px] mt-1">Chats</span>
                 </button>
                 <button onclick="switchTab('profile')" id="mob-nav-profile" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">

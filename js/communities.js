@@ -129,13 +129,25 @@ const fmtAgo = (ms) => {
 const root = () => document.getElementById('tab-hub');
 
 // ------------------------------------------------------------------ data loading
+// Live list of communities: member counts, names and photos update on every screen as they change.
+let communitiesUnsub = null;
+function watchCommunities() {
+    if (communitiesUnsub) return Promise.resolve();
+    return new Promise((resolve) => {
+        let first = true;
+        communitiesUnsub = onSnapshot(collection(db, 'artifacts', appId, 'communities'), (snap) => {
+            const map = {};
+            snap.docs.forEach(d => { map[d.id] = { ...d.data(), id: d.id }; });
+            window.communitiesCache = map;
+            if (first) { first = false; resolve(); return; }
+            // Redraw the Hub list if it's on screen (an open community redraws from its own listener).
+            if (!S.activeId && !document.getElementById('tab-hub')?.classList.contains('hidden')) window.renderCommunitiesHub();
+        }, (e) => { console.error('communities load', e); if (first) { first = false; resolve(); } });
+    });
+}
+
 async function loadCommunities() {
-    try {
-        const snap = await getDocs(collection(db, 'artifacts', appId, 'communities'));
-        const map = {};
-        snap.docs.forEach(d => { map[d.id] = { ...d.data(), id: d.id }; });
-        window.communitiesCache = map;
-    } catch (e) { console.error('communities load', e); }
+    await watchCommunities();
     await loadMyRoles();
     rebuildChatThreads();
     if (window.renderEvents && !document.getElementById('tab-events')?.classList.contains('hidden')) window.renderEvents();
@@ -736,6 +748,7 @@ function renderCommunityPage() {
             Blocked from: <b>${esc(scopeLabels(S.mySusp))}</b>${S.mySusp.reason ? `<br>Reason: ${esc(S.mySusp.reason)}` : ''}
         </div>` : ''}
         <div class="${CARD} p-4 sm:p-5">${body}</div>`;
+    if (S.tab === 'feed') window.attachFeedMentions();
 
     if (focusId) {
         const n = document.getElementById(focusId);
@@ -991,7 +1004,7 @@ function gamesTab(c, isMember) {
         return `<p class="text-xs text-white/60 text-center py-6">Games are visible to members only. Join this community to see them.</p>`;
     }
     return `<div class="space-y-5">
-        ${isMember && !suspFrom('games') ? `<button onclick="showCommunityGameCreation('${jsArg(c.id)}')" class="${BTN_PRIMARY} w-full py-3"><i class="fa-solid fa-plus mr-1"></i> Create Game in ${esc(c.name)}</button>` : ''}
+        ${isMember && !suspFrom('games') && (c.adminOnlyGames === false || myRole(c.id) === 'admin') ? `<button onclick="showCommunityGameCreation('${jsArg(c.id)}')" class="${BTN_PRIMARY} w-full py-3"><i class="fa-solid fa-plus mr-1"></i> Create Game in ${esc(c.name)}</button>` : ''}
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Upcoming (${up.length})</div>
             <div class="grid grid-cols-1 gap-4">${up.map(card).join('') || '<p class="text-xs text-white/50 italic">No upcoming games yet.</p>'}</div></div>
         ${prev.length ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-white/50 mb-2">Previous (${prev.length})</div>
@@ -1002,6 +1015,10 @@ function gamesTab(c, isMember) {
 window.showCommunityGameCreation = function(communityId, opts = {}) {
     const c = window.communitiesCache[communityId];
     if (!c) return;
+    // "Only admins can create games" is on unless the admin turned it off.
+    if ((opts.mode || 'create') !== 'edit' && c.adminOnlyGames !== false && myRole(communityId) !== 'admin') {
+        toast('Only admins can create games in this community.', 'error'); return;
+    }
     const mode = opts.mode === 'edit' || opts.mode === 'copy' ? opts.mode : 'create';
     const src = mode === 'create' ? null : (window.eventsList || []).find(e => e.id === opts.eventId);
     if (mode !== 'create' && !src) return;
@@ -1181,6 +1198,22 @@ function feedTab(c, isMember, isAdmin) {
     </div>`;
 }
 
+// "@Diego Ponce" in a post or comment, highlighted when that person is in the community.
+function mentionText(text) {
+    let html = esc(text || '');
+    const names = S.members.map(m => memberName(m)).filter(n => n && n !== 'Player').sort((a, b) => b.length - a.length);
+    names.forEach(n => {
+        const e = esc(n);
+        html = html.split('@' + e).join(`<span class="text-[#00F296] font-bold">@${e}</span>`);
+    });
+    return html;
+}
+/** uids of the members mentioned as "@Full Name" in a text. */
+function mentionsIn(text) {
+    const t = String(text || '');
+    return S.members.filter(m => memberName(m) !== 'Player' && t.includes('@' + memberName(m)) && m.uid !== me().uid).map(m => String(m.uid));
+}
+
 function postCard(p, c, isAdmin) {
     const uid = me().uid;
     const liked = (p.likedBy || []).includes(uid);
@@ -1195,7 +1228,7 @@ function postCard(p, c, isAdmin) {
             <div class="flex-1 min-w-0"><div class="text-xs font-black text-white truncate">${esc(p.authorName || 'Player')}</div><div class="text-[10px] text-white/40">${fmtAgo(tsMs(p.createdAt))}</div></div>
             ${canDelete ? `<button onclick="deleteCommunityPost('${jsArg(p.id)}')" class="text-white/40 hover:text-red-400 text-xs" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>` : ''}
         </div>
-        ${p.text ? `<p class="text-xs text-white/90 whitespace-pre-line break-words">${esc(p.text)}</p>` : ''}
+        ${p.text ? `<p class="text-xs text-white/90 whitespace-pre-line break-words">${mentionText(p.text)}</p>` : ''}
         ${poll?.question ? `<div class="space-y-1.5"><div class="text-xs font-bold text-white">${esc(poll.question)}</div>
             ${(poll.options || []).map((o, i) => {
                 const n = Object.values(votes).filter(x => x === i).length;
@@ -1209,13 +1242,26 @@ function postCard(p, c, isAdmin) {
             <button onclick="likeCommunityPost('${jsArg(p.id)}')" class="${liked ? 'text-[#00F296]' : 'text-white/60'} font-bold"><i class="fa-${liked ? 'solid' : 'regular'} fa-heart mr-1"></i>${p.likes || 0}</button>
             <span class="text-white/60"><i class="fa-regular fa-comment mr-1"></i>${(p.comments || []).length}</span>
         </div>
-        ${(p.comments || []).map(cm => `<div class="text-[11px] bg-black/30 rounded-lg px-2.5 py-1.5"><span class="font-black text-white">${esc(cm.authorName || 'Player')}</span> <span class="text-white/80">${esc(cm.text)}</span></div>`).join('')}
+        ${(p.comments || []).map(cm => `<div class="text-[11px] bg-black/30 rounded-lg px-2.5 py-1.5"><span class="font-black text-white">${esc(cm.authorName || 'Player')}</span> <span class="text-white/80">${mentionText(cm.text)}</span></div>`).join('')}
         ${!suspFrom('feed') ? `<div class="flex gap-2"><input id="cmt-${esc(p.id)}" class="${INPUT}" placeholder="Write a comment..." onkeydown="if(event.key==='Enter')addCommunityComment('${jsArg(p.id)}')"><button onclick="addCommunityComment('${jsArg(p.id)}')" class="${BTN_PRIMARY}">Send</button></div>` : ''}
     </div>`;
 }
 
 // Photo or video on a post. New posts keep it in Storage (`media`); older posts saved the photo itself (`mediaUrl`).
 function feedMediaHtml(p) {
+    // Several photos: 1 big, 2 side by side, 3+ in a grid with "+N" on the last one.
+    const list = (Array.isArray(p.mediaList) ? p.mediaList : []).filter(x => x && x.url && x.type !== 'video');
+    if (list.length > 1) {
+        const shown = list.slice(0, 4);
+        const extra = list.length - shown.length;
+        const urls = JSON.stringify(list.map(x => x.url)).replace(/"/g, '&quot;');
+        return `<div class="grid ${shown.length === 2 ? 'grid-cols-2' : 'grid-cols-2'} gap-1 rounded-xl overflow-hidden">
+            ${shown.map((x, i) => `<div class="relative ${shown.length === 3 && i === 0 ? 'col-span-2' : ''}">
+                <img src="${esc(x.url)}" loading="lazy" onclick="openFeedGallery(${urls}, ${i})" class="w-full ${shown.length === 3 && i === 0 ? 'h-56' : 'h-40'} object-cover cursor-pointer">
+                ${i === shown.length - 1 && extra > 0 ? `<div onclick="openFeedGallery(${urls}, ${i})" class="absolute inset-0 bg-black/60 flex items-center justify-center text-2xl font-black text-white cursor-pointer">+${extra}</div>` : ''}
+            </div>`).join('')}
+        </div>`;
+    }
     const m = p.media && p.media.url ? p.media : null;
     if (m && m.type === 'video') {
         return `<video src="${esc(m.url)}" ${m.thumbUrl ? `poster="${esc(m.thumbUrl)}"` : ''} controls playsinline preload="metadata"
@@ -1226,8 +1272,76 @@ function feedMediaHtml(p) {
     return `<img src="${esc(url)}" loading="lazy" onclick="waOpenMedia('image', '${jsArg(url)}')" class="w-full rounded-xl max-h-[28rem] object-cover cursor-pointer">`;
 }
 
+// Swipe-through viewer for a post's photos.
+window.openFeedGallery = function(urls, start) {
+    let i = start || 0;
+    document.getElementById('feed-gallery')?.remove();
+    const el = document.createElement('div');
+    el.id = 'feed-gallery';
+    el.className = 'fixed inset-0 z-[10000] bg-black/95 flex items-center justify-center';
+    const draw = () => {
+        el.innerHTML = `
+            <img src="${esc(urls[i])}" class="max-w-[96vw] max-h-[86vh] object-contain">
+            <button data-x class="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/15 text-white" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+            ${urls.length > 1 ? `<div class="absolute bottom-5 text-white/80 text-xs font-bold">${i + 1} / ${urls.length}</div>
+            <button data-p class="absolute left-3 w-11 h-11 rounded-full bg-white/15 text-white" aria-label="Previous"><i class="fa-solid fa-chevron-left"></i></button>
+            <button data-n class="absolute right-3 w-11 h-11 rounded-full bg-white/15 text-white" aria-label="Next"><i class="fa-solid fa-chevron-right"></i></button>` : ''}`;
+    };
+    el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-p]')) { i = (i - 1 + urls.length) % urls.length; draw(); return; }
+        if (e.target.closest('[data-n]')) { i = (i + 1) % urls.length; draw(); return; }
+        if (e.target === el || e.target.closest('[data-x]')) el.remove();
+    });
+    let sx = null;
+    el.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
+    el.addEventListener('touchend', (e) => {
+        if (sx == null || urls.length < 2) return;
+        const dx = e.changedTouches[0].clientX - sx; sx = null;
+        if (Math.abs(dx) > 40) { i = (i + (dx < 0 ? 1 : -1) + urls.length) % urls.length; draw(); }
+    });
+    draw();
+    document.body.appendChild(el);
+};
+
+// @ suggestions under a text box: type "@" and pick a member; "@Full Name " goes into the text.
+function attachMentions(input) {
+    if (!input || input.dataset.mentions) return;
+    input.dataset.mentions = '1';
+    let box = null;
+    const close = () => { box?.remove(); box = null; };
+    input.addEventListener('input', () => {
+        const pos = input.selectionStart || 0;
+        const before = input.value.slice(0, pos);
+        const m = before.match(/(^|\s)@([^@\n]{0,30})$/);
+        if (!m) { close(); return; }
+        const q = foldText(m[2]);
+        const list = S.members.filter(x => x.uid !== me().uid && memberName(x) !== 'Player' && foldText(memberName(x)).includes(q)).slice(0, 6);
+        if (!list.length) { close(); return; }
+        if (!box) {
+            box = document.createElement('div');
+            box.className = 'absolute z-[400] left-0 right-0 bg-[#0B1A20] border border-[#00F296]/40 rounded-xl shadow-2xl overflow-hidden';
+            input.parentElement.style.position = 'relative';
+            input.insertAdjacentElement('afterend', box);
+        }
+        box.innerHTML = list.map(x => `<button type="button" data-uid="${esc(x.uid)}" class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/10">
+            ${avatarImg(x, 'w-7 h-7 rounded-full object-cover')}<span class="text-xs font-bold text-white">${esc(memberName(x))}</span></button>`).join('');
+        box.querySelectorAll('[data-uid]').forEach(b => b.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const who = memberByUid(b.dataset.uid); if (!who) return;
+            const start = before.length - m[2].length - 1;
+            input.value = input.value.slice(0, start) + '@' + memberName(who) + ' ' + input.value.slice(pos);
+            const caret = start + memberName(who).length + 2;
+            input.focus(); input.setSelectionRange(caret, caret);
+            close();
+        }));
+    });
+    input.addEventListener('blur', () => setTimeout(close, 150));
+}
+window.attachFeedMentions = () => document.querySelectorAll('#post-text, [id^="cmt-"]').forEach(attachMentions);
+
 window._postPhoto = null;
 window._postFile = null;
+window._postFiles = [];
 
 // Full-screen "New post" composer (Facebook style): text, Gallery and Poll only.
 window.openPostComposer = function() {
@@ -1254,6 +1368,7 @@ window.openPostComposer = function() {
                 <video id="post-video-el" class="hidden w-full rounded-xl max-h-80 bg-black" controls playsinline muted></video>
                 <button onclick="removePostPhoto()" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/70 text-white" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button>
             </div>
+            <div id="post-photos-grid" class="hidden grid grid-cols-3 gap-2"></div>
             <div id="post-poll-box" class="hidden space-y-2 bg-black/30 border border-white/10 rounded-xl p-3">
                 <div class="flex items-center justify-between"><span class="text-xs font-black text-white">Poll</span><button onclick="togglePostPoll()" class="text-white/50 text-xs">Remove</button></div>
                 <input id="poll-q" class="${INPUT}" placeholder="Ask a question...">
@@ -1263,8 +1378,8 @@ window.openPostComposer = function() {
         <div class="shrink-0 border-t border-white/10 px-4 pt-3 pb-4 space-y-3">
             <div class="flex gap-3 max-w-2xl mx-auto w-full">
                 <label class="flex-1 cursor-pointer bg-black/40 border border-white/15 rounded-2xl py-3 flex flex-col items-center gap-1 text-white text-xs font-bold hover:bg-black/60">
-                    <i class="fa-regular fa-image text-xl"></i>Photo / Video
-                    <input type="file" accept="image/*,video/*" class="hidden" onchange="pickPostPhoto(this)">
+                    <i class="fa-regular fa-image text-xl"></i>Photos / Video
+                    <input type="file" accept="image/*,video/*" multiple class="hidden" onchange="pickPostPhoto(this)">
                 </label>
                 <button onclick="togglePostPoll()" class="flex-1 bg-black/40 border border-white/15 rounded-2xl py-3 flex flex-col items-center gap-1 text-white text-xs font-bold hover:bg-black/60">
                     <i class="fa-solid fa-chart-simple text-xl"></i>Poll
@@ -1276,6 +1391,7 @@ window.openPostComposer = function() {
             </div>
         </div>`;
     document.body.appendChild(o);
+    attachMentions(document.getElementById('post-text'));
     setTimeout(() => document.getElementById('post-text')?.focus(), 50);
 };
 
@@ -1283,6 +1399,7 @@ window.closePostComposer = function() {
     document.getElementById('post-composer')?.remove();
     if (window._postPreviewUrl) { URL.revokeObjectURL(window._postPreviewUrl); window._postPreviewUrl = null; }
     window._postPhoto = null; window._postFile = null;
+    (window._postFiles || []).forEach(x => URL.revokeObjectURL(x.url)); window._postFiles = [];
 };
 
 window.togglePostPoll = function() { document.getElementById('post-poll-box')?.classList.toggle('hidden'); };
@@ -1294,9 +1411,35 @@ window.removePostPhoto = function() {
     document.getElementById('post-photo-preview')?.classList.add('hidden');
 };
 
-// Photo or video for a new post: kept as a file and uploaded when you tap Post.
+// Several photos (up to 10) for one post, shown as small tiles you can remove.
+function drawPostPhotos() {
+    const grid = document.getElementById('post-photos-grid'); if (!grid) return;
+    const list = window._postFiles || [];
+    grid.classList.toggle('hidden', list.length === 0);
+    grid.innerHTML = list.map((x, i) => `<div class="relative"><img src="${x.url}" class="w-full h-24 object-cover rounded-lg">
+        <button onclick="removePostPhotoAt(${i})" class="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-white text-[10px]" aria-label="Remove"><i class="fa-solid fa-xmark"></i></button></div>`).join('');
+}
+window.removePostPhotoAt = (i) => {
+    const x = window._postFiles.splice(i, 1)[0]; if (x) URL.revokeObjectURL(x.url);
+    drawPostPhotos();
+};
+
+// Photos or a video for a new post: kept as files and uploaded when you tap Post.
 window.pickPostPhoto = async (input) => {
-    const f = input.files && input.files[0]; input.value = ''; if (!f) return;
+    const picked = Array.from(input.files || []); input.value = '';
+    if (!picked.length) return;
+    const photos = picked.filter(f => String(f.type).startsWith('image/'));
+    if (picked.length > 1 || (window._postFiles || []).length) {
+        // Several photos (videos go one per post)
+        if (photos.length < picked.length) toast('Videos go one per post. Only the photos were added.', 'error');
+        window.removePostPhoto();
+        const room = 10 - (window._postFiles || []).length;
+        if (photos.length > room) toast('Up to 10 photos per post.', 'error');
+        photos.slice(0, Math.max(0, room)).forEach(f => window._postFiles.push({ file: f, url: URL.createObjectURL(f) }));
+        drawPostPhotos();
+        return;
+    }
+    const f = picked[0];
     const isVideo = String(f.type).startsWith('video/');
     if (!isVideo && !String(f.type).startsWith('image/')) { toast('Only photos and videos can be posted', 'error'); return; }
     if (isVideo && f.size > 60 * 1024 * 1024) { toast('That video is too big (max 60 MB). Try a shorter clip.', 'error'); return; }
@@ -1317,12 +1460,15 @@ window.publishCommunityPost = async function() {
     const question = pollOpen ? document.getElementById('poll-q').value.trim() : '';
     const options = pollOpen ? [1, 2, 3, 4].map(i => document.getElementById(`poll-o${i}`).value.trim()).filter(Boolean) : [];
     if (pollOpen && (!question || options.length < 2)) { toast('A poll needs a question and at least 2 options', 'error'); return; }
-    if (!text && !question && !window._postPhoto && !window._postFile) return;
+    const files = (window._postFiles || []).map(x => x.file);
+    if (!text && !question && !window._postPhoto && !window._postFile && !files.length) return;
     const postId = 'post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const post = {
         id: postId, authorId: me().uid, authorName: myName(), authorAvatar: myAvatar(),
         text, likes: 0, likedBy: [], comments: [], createdAt: serverTimestamp()
     };
+    const mentions = mentionsIn(text);
+    if (mentions.length) post.mentions = mentions;
     if (question) post.poll = { question, options, votes: {} };
     if (window._postPhoto) post.mediaUrl = window._postPhoto;
     S.busy = true;
@@ -1336,6 +1482,17 @@ window.publishCommunityPost = async function() {
             post.media = media;
             if (media.type === 'image') post.mediaUrl = media.url;   // older app versions show photos from here
         }
+        if (files.length) {
+            const list = [];
+            for (let k = 0; k < files.length; k++) {
+                const label = files.length > 1 ? `Uploading photo ${k + 1} of ${files.length}…` : 'Uploading photo…';
+                showUploadProgress(label, 0);
+                list.push(await uploadMedia(files[k], `feed/${id}`, (pr) => showUploadProgress(label, pr)));
+            }
+            post.mediaList = list;
+            post.media = list[0];             // older app versions show the first photo
+            post.mediaUrl = list[0].url;
+        }
         await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'feed', postId), post);
         window.closePostComposer();
     }
@@ -1346,6 +1503,28 @@ window.publishCommunityPost = async function() {
         if (btn) btn.disabled = false;
     }
     finally { S.busy = false; hideUploadProgress(); }
+};
+
+// Celebration cards (results images) posted straight to the community feed, as one post with all the photos.
+window.postToCommunityFeed = async function(communityId, text, files) {
+    if (!me() || !communityId || !files || !files.length) return false;
+    const postId = 'post_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    try {
+        const list = [];
+        for (let k = 0; k < files.length; k++) {
+            const label = `Posting image ${k + 1} of ${files.length}…`;
+            showUploadProgress(label, 0);
+            list.push(await uploadMedia(files[k], `feed/${communityId}`, (pr) => showUploadProgress(label, pr)));
+        }
+        await setDoc(doc(db, 'artifacts', appId, 'communities', communityId, 'feed', postId), {
+            id: postId, authorId: me().uid, authorName: myName(), authorAvatar: myAvatar(),
+            text: text || '', likes: 0, likedBy: [], comments: [], createdAt: serverTimestamp(),
+            mediaList: list, media: list[0], mediaUrl: list[0].url, kind: 'celebration'
+        });
+        toast('Posted to the community feed 🎉');
+        return true;
+    } catch (e) { console.error(e); toast('Could not post to the feed', 'error'); return false; }
+    finally { hideUploadProgress(); }
 };
 
 window.likeCommunityPost = async function(postId) {
@@ -1368,7 +1547,7 @@ window.addCommunityComment = async function(postId) {
     const text = inp?.value.trim(); if (!text) return;
     try {
         await updateDoc(doc(db, 'artifacts', appId, 'communities', id, 'feed', postId), {
-            comments: arrayUnion({ authorId: me().uid, authorName: myName(), text, createdAt: Date.now() })
+            comments: arrayUnion({ authorId: me().uid, authorName: myName(), text, createdAt: Date.now(), ...(mentionsIn(text).length ? { mentions: mentionsIn(text) } : {}) })
         });
         inp.value = '';
     } catch (e) { console.error(e); toast('Could not add comment', 'error'); }
@@ -1403,6 +1582,7 @@ function adminTab(c) {
             <div class="space-y-2">
                 ${settingToggle(id, 'requireApproval', 'Require approval to join', c.requireApproval !== false)}
                 ${settingToggle(id, 'adminOnlyFeed', 'Only admins can post in the feed', c.adminOnlyFeed === true)}
+                ${settingToggle(id, 'adminOnlyGames', 'Only admins can create games', c.adminOnlyGames !== false)}
                 ${settingToggle(id, 'matchesVisibleToNonMembers', 'Games visible to non-members', c.matchesVisibleToNonMembers !== false)}
                 ${settingToggle(id, 'creditEnabled', 'Credit system', creditOn(c))}
             </div>
@@ -1520,11 +1700,37 @@ window.openMemberBox = (uid) => {
             ${m.suspendReason ? `<br>Reason: ${esc(m.suspendReason)}` : ''}
             ${m.suspendedByName ? `<br><span class="text-white/50">By ${esc(m.suspendedByName)}</span>` : ''}
         </div>` : ''}
+        ${String(uid) !== String(me().uid) ? (() => {
+            const idOf = (f) => String(typeof f === 'string' ? f : (f && f.uid) || '');
+            const isFriend = (window.friendsList || []).some(f => idOf(f) === String(uid));
+            const sent = (window.sentRequestsList || []).some(f => idOf(f) === String(uid));
+            const theyAsked = (window.receivedRequestsList || []).some(f => idOf(f) === String(uid));
+            const friendBtn = isFriend
+                ? `<div class="${BTN_DARK} flex-1 py-3 text-center opacity-80"><i class="fa-solid fa-user-check mr-1 text-[#00F296]"></i> Friends</div>`
+                : sent ? `<div class="${BTN_DARK} flex-1 py-3 text-center opacity-70"><i class="fa-solid fa-clock mr-1"></i> Request sent</div>`
+                : `<button onclick="memberAddFriend('${jsArg(uid)}', ${theyAsked})" class="${BTN_DARK} flex-1 py-3"><i class="fa-solid fa-user-plus mr-1"></i> ${theyAsked ? 'Accept friend' : 'Add friend'}</button>`;
+            return `<div class="flex gap-2">
+                ${friendBtn}
+                <button onclick="memberMessage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-comments mr-1"></i> Message</button>
+            </div>`;
+        })() : ''}
         <div class="flex gap-2">
             <button onclick="closeCommunityModal('member-box-modal')" class="${BTN_DARK} flex-1 py-3">Close</button>
             ${canManageMember(c, m) ? `<button onclick="openMemberManage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-sliders mr-1"></i> Manage</button>` : ''}
         </div>`);
     document.getElementById('member-box-modal').firstElementChild.insertAdjacentHTML('afterbegin', closeBtn('member-box-modal'));
+};
+
+// Member box: Message (opens the private chat) and Add friend.
+window.memberMessage = (uid) => {
+    const m = memberByUid(uid) || {};
+    window.closeCommunityModal('member-box-modal');
+    if (window.openDirectChat) window.openDirectChat(uid, memberName(m), m.avatar || '');
+};
+window.memberAddFriend = async (uid, accept) => {
+    if (accept && window.acceptFriendRequest) await window.acceptFriendRequest(uid);
+    else if (window.sendFriendRequest) await window.sendFriendRequest(uid);
+    setTimeout(() => { if (document.getElementById('member-box-modal')) window.openMemberBox(uid); }, 600);
 };
 
 window.openMemberManage = (uid) => {

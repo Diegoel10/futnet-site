@@ -638,6 +638,8 @@ exports.notifyEveryone = onCall(async (request) => {
 function describePost(p) {
   if (p.poll && p.poll.question) return `📊 Poll: ${clip(p.poll.question, 100)}`;
   if (p.media && p.media.type === "video") return p.text ? `🎥 ${clip(p.text, 100)}` : "🎥 Shared a video";
+  const n = arr(p.mediaList).length;
+  if (n > 1) return p.text ? `📸 ${clip(p.text, 100)}` : `📸 Shared ${n} photos`;
   if (p.mediaUrl || (p.media && p.media.url)) return p.text ? `📸 ${clip(p.text, 100)}` : "📸 Shared a photo";
   return clip(p.text, 120) || "New post";
 }
@@ -650,13 +652,24 @@ exports.onFeedPostCreated = onDocumentCreated(`${BASE}/communities/{communityId}
   const who = p.authorName || (await nameOf(author));
   const cName = String(community.name || "your").replace(/\s+community$/i, "");
 
+  // @mentions: those people get "Diego mentioned you" instead of the general post notification.
+  const mentioned = uniq(arr(p.mentions).map(String)).filter((u) => u !== author && all.includes(u));
+  if (mentioned.length) {
+    await notify(mentioned, {
+      type: "community_post",
+      senderUid: author,
+      communityId,
+      title: `${who} mentioned you in ${cName} Community`,
+      body: describePost(p),
+    }, { key: `post_${postId}` });
+  }
   await notify(all, {
     type: "community_post",
     senderUid: author,
     communityId,
     title: `${who} posted on ${cName} Community`,
     body: describePost(p),
-  }, { exclude: [author], key: `post_${postId}` });
+  }, { exclude: [author, ...mentioned], key: `post_${postId}` });
 });
 
 exports.onFeedPostUpdated = onDocumentUpdated(`${BASE}/communities/{communityId}/feed/{postId}`, async (event) => {
@@ -677,7 +690,18 @@ exports.onFeedPostUpdated = onDocumentUpdated(`${BASE}/communities/{communityId}
     const who = c.authorName || c.name || (await nameOf(by));
     // The post's author, plus everyone who commented before (so replies reach the conversation).
     const earlier = comments.slice(0, i).map((x) => x.authorId || x.uid);
-    const toAuthor = author && author !== by;
+    // @mentions in the comment: "Diego mentioned you in a comment" (and nothing else for them).
+    const mentioned = uniq(arr(c.mentions).map(String)).filter((u) => u && u !== by);
+    if (mentioned.length) {
+      await notify(mentioned, {
+        type: "community_post_comment",
+        senderUid: by,
+        communityId,
+        title: `${who} mentioned you in a comment 💬`,
+        body: `${clip(c.text, 120)} · ${cName}`,
+      }, { key: `postc_${postId}_${i}` });
+    }
+    const toAuthor = author && author !== by && !mentioned.includes(author);
 
     if (toAuthor) {
       await notify([author], {
@@ -694,7 +718,7 @@ exports.onFeedPostUpdated = onDocumentUpdated(`${BASE}/communities/{communityId}
       communityId,
       title: `${who} also commented 💬`,
       body: `${clip(c.text, 120)} · ${cName}`,
-    }, { exclude: [by, author], key: `postc_${postId}_${i}` });
+    }, { exclude: [by, author, ...mentioned], key: `postc_${postId}_${i}` });
   }
 });
 
@@ -1643,4 +1667,21 @@ exports.refreshGameWeather = onSchedule({ schedule: "every 3 hours", timeZone: D
     } catch (e) { logger.warn("weather failed", d.id, e.message); }
   }
   logger.info(`weather: ${snap.size} games checked, ${updated} updated`);
+});
+
+// ---------------------------------------------------------------------------
+// 14. Member count: whenever someone joins or leaves a community, its membersCount is set to the
+//     real number of members (the apps and website add/subtract 1 themselves, which can drift).
+//     Every screen listens to the community, so the number updates live everywhere.
+// ---------------------------------------------------------------------------
+exports.syncMemberCount = onDocumentWritten(`${BASE}/communities/{communityId}/members/{uid}`, async (event) => {
+  const joinedOrLeft = !event.data.before.exists || !event.data.after.exists;
+  if (!joinedOrLeft) return;
+  const ref = col("communities").doc(event.params.communityId);
+  try {
+    const agg = await ref.collection("members").count().get();
+    const n = agg.data().count;
+    const c = await ref.get();
+    if (c.exists && Number((c.data() || {}).membersCount) !== n) await ref.update({ membersCount: n });
+  } catch (e) { logger.warn("member count", event.params.communityId, e.message); }
 });
