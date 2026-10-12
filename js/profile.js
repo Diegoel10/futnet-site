@@ -3,6 +3,7 @@ import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import './sign-in-details.js';
+import './owner-tools.js';
 
 window.renderProfileTab = function() {
     const container = document.getElementById('tab-profile');
@@ -139,6 +140,8 @@ window.renderProfileTab = function() {
                     <i class="fa-solid fa-chevron-right text-[#00B4AE]/70 text-xs"></i>
                 </button>
 
+                <div id="owner-tools-slot"></div>
+
                 <!-- Log Out Button -->
                 <button id="real-logout-btn" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-orange-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
                     <div class="flex items-center gap-3">
@@ -165,6 +168,7 @@ window.renderProfileTab = function() {
     `;
 
     setTimeout(() => {
+        if (window.renderOwnerTools) window.renderOwnerTools();
         const logoutBtn = document.getElementById('real-logout-btn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', window.handleLogout);

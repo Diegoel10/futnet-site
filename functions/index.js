@@ -1146,3 +1146,214 @@ exports.advanceSpotOffers = onSchedule({ schedule: "every 1 minutes", timeZone: 
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// Names & photos stay in sync everywhere.
+// Each player's public card is directory/{uid}. When their name or photo there changes, every
+// saved copy is updated: game rosters (going, waitlist, join requests, teams), community member
+// records, credit lists, friends lists and chat threads. When someone edits their private profile
+// (users/{uid}/profile/data), their public card is updated first, which then updates the copies.
+// ---------------------------------------------------------------------------
+
+const crypto = require("crypto");
+const OWNER_EMAIL_SHA256 = "0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b";
+const isOwner = (auth) => !!(auth && auth.token && auth.token.email &&
+  crypto.createHash("sha256").update(String(auth.token.email).trim().toLowerCase()).digest("hex") === OWNER_EMAIL_SHA256);
+
+const cleanName = (s) => String(s || "").replace(/\s+/g, " ").trim();
+/** Name on a directory card: name, else first + last, else nickname. */
+const cardName = (d) => cleanName((d && d.name) || `${(d && d.firstName) || ""} ${(d && d.lastName) || ""}`) || cleanName(d && d.nickname);
+/** Name from a private profile: first + last (that is what the person typed). */
+const profileName = (p) => cleanName(`${(p && p.firstName) || ""} ${(p && p.lastName) || ""}`) || cleanName(p && p.name);
+/** Only short web links are copied into rosters (big uploaded photos are looked up from the card). */
+const shareableAvatar = (a) => (typeof a === "string" && a.startsWith("http") && a.length <= 500 ? a : "");
+const realName = (n) => !!n && !/^(player|someone|member)$/i.test(n);
+
+/** Puts the right name (and photo) on everyone's entries inside a list. ids: Map uid -> {name, avatar}. */
+function fixEntries(list, ids) {
+  let changed = false;
+  for (const e of arr(list)) {
+    if (!e || typeof e !== "object") continue;
+    const who = ids.get(uidOf(e));
+    if (!who) continue;
+    if (e.name !== who.name) { e.name = who.name; changed = true; }
+    if (who.avatar && "avatar" in e && e.avatar !== who.avatar) { e.avatar = who.avatar; changed = true; }
+  }
+  return changed;
+}
+const copyList = (v) => arr(v).map((x) => (x && typeof x === "object" ? { ...x } : x));
+
+/**
+ * Updates every saved copy of these people's names/photos in ONE pass over the data.
+ * ids: Map uid -> {name, avatar}. Returns how many documents changed.
+ */
+async function propagateIdentities(ids) {
+  for (const [uid, who] of [...ids]) if (!uid || !realName(who.name)) ids.delete(uid);
+  if (!ids.size) return 0;
+  let changes = 0;
+
+  // 1. Game rosters, waitlists, not-going lists, join requests, teams and the organizer name
+  const games = await col("eventsList").get();
+  for (const g of games.docs) {
+    const d = g.data() || {};
+    const patch = {};
+    for (const key of ["attendees", "waitingList", "declinedList", "joinRequests"]) {
+      const list = copyList(d[key]);
+      if (fixEntries(list, ids)) patch[key] = list;
+    }
+    if (d.teamAssignments && typeof d.teamAssignments === "object") {
+      const ta = {};
+      let tChanged = false;
+      for (const [k, v] of Object.entries(d.teamAssignments)) {
+        if (!Array.isArray(v)) { ta[k] = v; continue; }
+        const list = copyList(v);
+        if (fixEntries(list, ids)) tChanged = true;
+        ta[k] = list;
+      }
+      if (tChanged) patch.teamAssignments = ta;
+    }
+    const org = ids.get(d.organizerId || "");
+    if (org && d.organizer !== org.name) { patch.organizer = org.name; patch.hostName = org.name; }
+    if (Object.keys(patch).length) { await g.ref.update(patch); changes++; }
+  }
+
+  // 2. Community member records and credit lists
+  const communities = await col("communities").get();
+  for (const c of communities.docs) {
+    for (const sub of ["members", "credits"]) {
+      const snaps = ids.size <= 5
+        ? (await Promise.all([...ids.keys()].map((u) => c.ref.collection(sub).doc(u).get()))).filter((x) => x.exists)
+        : (await c.ref.collection(sub).get()).docs;
+      for (const s of snaps) {
+        const who = ids.get(s.id);
+        if (!who) continue;
+        const m = s.data() || {};
+        const patch = {};
+        if (m.name !== who.name) patch.name = who.name;
+        if (sub === "members" && who.avatar && m.avatar !== who.avatar) patch.avatar = who.avatar;
+        if (Object.keys(patch).length) { await s.ref.update(patch); changes++; }
+      }
+    }
+  }
+
+  // 3. Friends lists that saved {uid, name, avatar}
+  const rels = await db.collectionGroup("relationships").get();
+  for (const r of rels.docs) {
+    if (!r.ref.path.startsWith(`${BASE}/users/`)) continue;
+    const d = r.data() || {};
+    const patch = {};
+    for (const key of ["friends", "sentRequests", "receivedRequests"]) {
+      const list = copyList(d[key]);
+      if (fixEntries(list, ids)) patch[key] = list;
+    }
+    if (Object.keys(patch).length) { await r.ref.update(patch); changes++; }
+  }
+
+  // 4. Chat threads (a thread's "id" is the other person's uid)
+  const dir = await col("directory").get();
+  for (const p of dir.docs) {
+    const chats = arr((p.data() || {}).chats);
+    let changed = false;
+    const next = chats.map((t) => {
+      const who = t && t.id !== p.id ? ids.get(t.id) : null;
+      if (!who || (t.name === who.name && (!who.avatar || t.avatar === who.avatar))) return t;
+      changed = true;
+      return { ...t, name: who.name, ...(who.avatar ? { avatar: who.avatar } : {}) };
+    });
+    if (changed) { await p.ref.update({ chats: next }); changes++; }
+  }
+  return changes;
+}
+const propagateIdentity = (uid, name, avatar) => propagateIdentities(new Map([[uid, { name, avatar }]]));
+
+// Profile edited → public card gets the same name/photo (the card change then updates every copy).
+exports.onProfileIdentity = onDocumentWritten(`${BASE}/users/{uid}/profile/{docId}`, async (event) => {
+  if (event.params.docId !== "data" || !event.data.after.exists) return;
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const after = event.data.after.data() || {};
+  const name = profileName(after);
+  if (!realName(name)) return;
+  const nameChanged = profileName(before) !== name;
+  const avatarChanged = (before.avatar || "") !== (after.avatar || "");
+  if (!nameChanged && !avatarChanged) return;
+
+  const ref = col("directory").doc(event.params.uid);
+  const card = (await ref.get()).data() || {};
+  const patch = {};
+  if (nameChanged && cardName(card) !== name) {
+    patch.name = name;
+    patch.firstName = cleanName(after.firstName);
+    patch.lastName = cleanName(after.lastName);
+  }
+  if (avatarChanged && after.avatar && card.avatar !== after.avatar) patch.avatar = after.avatar;
+  if ("nickname" in after && (card.nickname || "") !== (after.nickname || "")) patch.nickname = after.nickname || "";
+  if (Object.keys(patch).length) await ref.set(patch, { merge: true });
+});
+
+// Public card changed name or photo → update every saved copy.
+exports.onIdentityChanged = onDocumentWritten(`${BASE}/directory/{uid}`, async (event) => {
+  if (!event.data.after.exists) return;
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const after = event.data.after.data() || {};
+  const name = cardName(after);
+  const avatar = shareableAvatar(after.avatar);
+  if (cardName(before) === name && shareableAvatar(before.avatar) === avatar) return;   // chats, tokens... not a name change
+  if (!realName(name)) return;
+  const n = await propagateIdentity(event.params.uid, name, avatar);
+  if (n) logger.info(`Name/photo synced for ${event.params.uid}: ${n} places updated`);
+});
+
+// Owner only: check everyone once. Cards that disagree with the person's own profile are fixed (which
+// updates every copy), and a report lists names used by more than one account and cards without an account.
+exports.syncAllNames = onCall({ timeoutSeconds: 540, memory: "512MiB" }, async (request) => {
+  if (!isOwner(request.auth)) throw new HttpsError("permission-denied", "Only the FutNet owner can run this.");
+  const fix = !(request.data && request.data.dryRun);
+  const dir = await col("directory").get();
+  const fixed = [];
+  const everyone = new Map();
+  const byName = new Map();
+  const ids = [];
+  for (const c of dir.docs) {
+    ids.push(c.id);
+    const card = c.data() || {};
+    const prof = (await col("users").doc(c.id).collection("profile").doc("data").get()).data() || {};
+    const want = profileName(prof);
+    let name = cardName(card);
+    if (realName(want) && want !== name) {
+      fixed.push({ uid: c.id, from: name || "(empty)", to: want });
+      if (fix) await c.ref.set({ name: want, firstName: cleanName(prof.firstName), lastName: cleanName(prof.lastName) }, { merge: true });
+      name = want;
+    }
+    if (realName(name)) everyone.set(c.id, { name, avatar: shareableAvatar(card.avatar) });
+    const key = name.toLowerCase();
+    if (key) byName.set(key, [...(byName.get(key) || []), { uid: c.id, name }]);
+  }
+
+  // Every saved copy (rosters, members, friends, chats) gets the right name, in one pass.
+  const updated = fix ? await propagateIdentities(everyone) : 0;
+
+  // Cards with no login account behind them (left over from deleted or test accounts).
+  const orphans = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await admin.auth().getUsers(ids.slice(i, i + 100).map((uid) => ({ uid })));
+    for (const nf of res.notFound) {
+      const card = dir.docs.find((d) => d.id === nf.uid);
+      orphans.push({ uid: nf.uid, name: cardName(card ? card.data() : {}) || "(no name)" });
+    }
+  }
+  const duplicates = [...byName.values()].filter((l) => l.length > 1);
+  logger.info(`syncAllNames: ${dir.size} cards, ${fixed.length} fixed, ${duplicates.length} shared names, ${orphans.length} without account`);
+  return { cards: dir.size, fixed, updated, duplicates, orphans, dryRun: !fix };
+});
+
+// Owner only: remove public cards that have no login account behind them (they show up in searches).
+exports.removeOrphanCards = onCall(async (request) => {
+  if (!isOwner(request.auth)) throw new HttpsError("permission-denied", "Only the FutNet owner can run this.");
+  const uids = arr(request.data && request.data.uids).map(String).slice(0, 200);
+  let removed = 0;
+  for (let i = 0; i < uids.length; i += 100) {
+    const res = await admin.auth().getUsers(uids.slice(i, i + 100).map((uid) => ({ uid })));
+    for (const nf of res.notFound) { await col("directory").doc(nf.uid).delete(); removed++; }
+  }
+  return { removed };
+});
