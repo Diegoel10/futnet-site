@@ -5,6 +5,7 @@ import { mutateEvent, pruneTeamsForUid, safeAvatar, escapeHtml } from './event-s
 import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, costCents, costSummary, policyText, hydrateBalances, refundEveryoneForGame, dollars, plusOneExtraCents, myBalanceCents, myLeaveRefund, paymentMethodsHtml } from '../credits.js';
 import { mayTakeSpot, startMsOf, freeSpotsOf, offerEligible, claimMinutesOf, waitingUids } from '../money-rules.js';
 import { renderAdminTab } from './admin-tab.js';
+import { gameStatusCardHtml } from '../game-status.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
 import { renderCommentsTab } from './comments-tab.js';
@@ -170,6 +171,8 @@ window.renderInfoTab = function(event) {
             <div>
                 ${rsvpButtonHtml}
             </div>
+
+            ${gameStatusCardHtml(event)}
 
             <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
                 <div class="flex items-center gap-3">

@@ -1731,10 +1731,13 @@ function renderCommunityChatMessages() {
     const uid = me().uid;
     const list = S.chatMessages.map(m => ({
         id: m.id, uid: m.senderUid || m.senderId || '', name: m.sender || m.senderName || 'Player',
-        avatar: m.avatar, text: m.text, ms: msOf(m), media: m.media
+        avatar: m.avatar, text: m.text, ms: msOf(m), media: m.media,
+        deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions
     }));
     const atBottom = window.isChatNearBottom ? window.isChatNearBottom() : true;
-    container.innerHTML = renderWhatsApp(list, { myUid: uid, group: true, ticks: false, avatarOf: (u, n, a) => avatarOf({ uid: u, name: n, avatar: a }) })
+    const cid = S.activeChatCommunity;
+    container.innerHTML = renderWhatsApp(list, { myUid: uid, group: true, ticks: false, avatarOf: (u, n, a) => avatarOf({ uid: u, name: n, avatar: a }),
+        scope: { kind: 'community', id: cid, canModerate: myRole(cid) === 'admin' } })
         + `<div id="community-typing-bubble">${typingBubbleHtml(S.chatTyping || [])}</div>`;
     if (atBottom || window._forceChatBottom) container.scrollTop = container.scrollHeight;
     window._forceChatBottom = false;

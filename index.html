@@ -311,12 +311,12 @@
                     <button onclick="switchTab('events')" id="nav-btn-events" class="px-4 py-2 rounded-xl text-xs font-bold transition bg-brand text-slate-950 shadow flex items-center gap-2"><i class="fa-solid fa-calendar-days"></i> Games</button>
                     <button onclick="switchTab('friends')" id="nav-btn-friends" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2 relative">
                         <i class="fa-solid fa-user-group"></i> Friends 
-                        <span id="friends-badge" class="hidden bg-brand text-slate-950 font-black text-[9px] px-1.5 py-0.2 rounded-full">0</span>
+                        <span id="friends-badge" class="hidden bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none">0</span>
                     </button>
                     <button onclick="switchTab('hub')" id="nav-btn-hub" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2"><i class="fa-solid fa-shield"></i> Hub</button>
                     <button onclick="switchTab('chat')" id="nav-btn-chat" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2 relative">
                         <i class="fa-solid fa-comments"></i> Chats 
-                        <span id="chats-badge" class="hidden bg-brand text-slate-950 font-black text-[9px] px-1.5 py-0.2 rounded-full">0</span>
+                        <span id="chats-badge" class="hidden bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none">0</span>
                     </button>
                     <button onclick="switchTab('profile')" id="nav-btn-profile" class="px-4 py-2 rounded-xl text-xs font-bold transition text-white/70 hover:text-white flex items-center gap-2">
                         <img id="nav-avatar-icon" src="" class="w-5 h-5 rounded-full object-cover border border-emerald-500/50"> Profile
@@ -638,7 +638,8 @@
                     <i class="fa-solid fa-calendar-days text-lg"></i>
                     <span class="text-[10px] mt-1">Games</span>
                 </button>
-                <button onclick="switchTab('friends')" id="mob-nav-friends" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
+                <button onclick="switchTab('friends')" id="mob-nav-friends" class="relative flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
+                    <span id="mob-friends-dot" class="hidden absolute top-0.5 right-1 bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none border-2 border-[#040E13]">0</span>
                     <i class="fa-solid fa-user-group text-lg"></i>
                     <span class="text-[10px] mt-1">Friends</span>
                 </button>
@@ -646,7 +647,8 @@
                     <i class="fa-solid fa-shield text-lg"></i>
                     <span class="text-[10px] mt-1">Hub</span>
                 </button>
-                <button onclick="switchTab('chat')" id="mob-nav-chat" class="flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
+                <button onclick="switchTab('chat')" id="mob-nav-chat" class="relative flex flex-col items-center p-2 text-white/50 font-semibold hover:text-white">
+                    <span id="mob-chats-dot" class="hidden absolute top-0.5 right-1 bg-red-500 text-white font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full items-center justify-center leading-none border-2 border-[#040E13]">0</span>
                     <i class="fa-solid fa-comments text-lg"></i>
                     <span class="text-[10px] mt-1">Chats</span>
                 </button>

@@ -4,6 +4,17 @@ import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, serverTim
 
 let friendsUnsubscribe = null;
 
+/** Red count on a tab: kind 'friends' or 'chats' (desktop top bar + phone bottom bar). */
+export function setNavBadge(kind, count) {
+    [document.getElementById(`${kind}-badge`), document.getElementById(`mob-${kind}-dot`)].forEach(el => {
+        if (!el) return;
+        el.textContent = count > 99 ? '99+' : String(count);
+        el.classList.toggle('hidden', !(count > 0));
+        el.classList.toggle('inline-flex', count > 0);
+    });
+}
+window.setNavBadge = setNavBadge;
+
 window.initFriendsLiveListener = function() {
     if (!window.currentUser) return;
     if (friendsUnsubscribe) friendsUnsubscribe();
@@ -22,16 +33,8 @@ window.initFriendsLiveListener = function() {
             window.receivedRequestsList = [];
         }
 
-        const badge = document.getElementById('friends-badge');
-        if (badge) {
-            const pendingCount = window.receivedRequestsList.length;
-            if (pendingCount > 0) {
-                badge.innerText = pendingCount;
-                badge.classList.remove('hidden');
-            } else {
-                badge.classList.add('hidden');
-            }
-        }
+        // Red dot on Friends (top bar and phone bottom bar) = friend requests waiting.
+        setNavBadge('friends', window.receivedRequestsList.length);
 
         if (window.renderFriends) window.renderFriends();
     }, (error) => {
@@ -48,7 +51,7 @@ window.renderFriends = async function() {
     if (!window.cachedDirectoryList) {
         try {
             const snap = await getDocs(collection(db, 'artifacts', appId, 'directory'));
-            window.cachedDirectoryList = snap.docs.map(d => d.data());
+            window.cachedDirectoryList = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         } catch (e) {
             window.cachedDirectoryList = [];
         }
@@ -377,8 +380,13 @@ window.openDirectChat = function(uid, name, avatar) {
     }
 };
 
-setTimeout(() => {
-    if (window.currentUser && window.initFriendsLiveListener) {
-        window.initFriendsLiveListener();
-    }
-}, 1000);
+// Starts (or restarts, after signing in as someone else) as soon as someone is signed in,
+// so friend requests show up live and the red dot is right without opening the Friends tab.
+let friendsListenerUid = null;
+setInterval(() => {
+    const uid = window.currentUser?.uid || null;
+    if (uid === friendsListenerUid) return;
+    friendsListenerUid = uid;
+    if (uid) window.initFriendsLiveListener();
+    else { if (friendsUnsubscribe) friendsUnsubscribe(); friendsUnsubscribe = null; setNavBadge('friends', 0); }
+}, 700);

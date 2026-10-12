@@ -7,6 +7,7 @@
 import { db, appId, app } from './firebase-config.js';
 import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 import { doc, setDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -52,6 +53,28 @@ export function nameColor(key) {
     .wa-typing i:nth-child(2) { animation-delay: .15s; } .wa-typing i:nth-child(3) { animation-delay: .3s; }
     @keyframes waDot { 0%, 60%, 100% { transform: translateY(0); opacity: .5 } 30% { transform: translateY(-4px); opacity: 1 } }
     .wa-typing-label { font-size: 11px; color: #8696A0; margin-left: 6px; font-style: italic; }
+    .wa-col { display: flex; flex-direction: column; align-items: flex-start; max-width: min(78%, 520px); min-width: 0; }
+    .wa-row.me .wa-col { align-items: flex-end; }
+    .wa-col > .wa-bubble { max-width: 100%; }
+    .wa-deleted { font-style: italic; color: rgba(233,237,239,0.55); }
+    .wa-edited { font-style: italic; margin-right: 2px; }
+    .wa-reacts { margin-top: -5px; margin-left: 8px; margin-right: 8px; position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 2px;
+        background: #202C33; border: 1.5px solid #0B141A; border-radius: 9999px; padding: 1px 7px; font-size: 13px; color: #8696A0; cursor: pointer; }
+    .wa-reacts.mine { background: #103529; }
+    .wa-more { position: absolute; top: 2px; right: 4px; width: 22px; height: 22px; border-radius: 9999px; border: 0; color: rgba(233,237,239,0.8);
+        background: inherit; font-size: 12px; opacity: 0; cursor: pointer; transition: opacity .15s; }
+    .wa-bubble:hover .wa-more, .wa-more:focus-visible { opacity: 1; }
+    @media (hover: none) { .wa-more { display: none; } }
+    .wa-menu-wrap { position: fixed; inset: 0; z-index: 10001; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
+    @media (min-width: 640px) { .wa-menu-wrap { align-items: center; } }
+    .wa-menu { width: 100%; max-width: 360px; background: #233138; border-radius: 16px; padding: 10px; color: #E9EDEF; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+    .wa-menu .emojis { display: flex; justify-content: space-between; padding: 4px 2px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .wa-menu .emojis button { font-size: 24px; width: 40px; height: 40px; border-radius: 9999px; }
+    .wa-menu .emojis button.on { background: rgba(37,211,102,.25); }
+    .wa-menu .item { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px 10px; border-radius: 10px; font-size: 15px; }
+    .wa-menu .item:hover { background: rgba(255,255,255,.06); }
+    .wa-menu .item.danger { color: #F15C6D; }
+    .wa-menu textarea { width: 100%; min-height: 90px; background: #2A3942; color: #E9EDEF; border-radius: 10px; padding: 10px; font-size: 16px; border: 0; outline: none; }
     `;
     document.head.appendChild(st);
 })();
@@ -80,9 +103,106 @@ export function msOf(m) {
     return 0;
 }
 
+// ---- edit / delete / react (the server checks who is allowed: see messageAction in functions)
+export const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '⚽', '🔥'];
+export const DELETED_TEXT = 'This message was deleted';
+const msgRegistry = {};   // "kind|id|key" -> { text, mine, canModerate, myReaction }
+
+/** Runs an edit / delete / react on any message. kind: 'dm' | 'community' | 'game'. */
+export async function messageAction(kind, id, msgId, action, value) {
+    const fn = httpsCallable(getFunctions(app, 'us-central1'), 'messageAction');
+    return (await fn({ kind, id, msgId, action, value: value ?? '' })).data;
+}
+
+function reactionsHtml(reactions, myUid, key) {
+    const r = reactions && typeof reactions === 'object' ? reactions : {};
+    const all = Object.values(r).filter(Boolean);
+    if (!all.length) return '';
+    const counts = {};
+    all.forEach(e => { counts[e] = (counts[e] || 0) + 1; });
+    const emojis = Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, 3).join('');
+    return `<button type="button" class="wa-reacts ${r[myUid] ? 'mine' : ''}" onclick="waMsgMenu('${esc(key)}')" aria-label="Reactions">${emojis}${all.length > 1 ? `<span style="font-size:11px;margin-left:3px">${all.length}</span>` : ''}</button>`;
+}
+
+const closeMenu = () => document.getElementById('wa-msg-menu')?.remove();
+function openSheet(inner) {
+    closeMenu();
+    const w = document.createElement('div');
+    w.id = 'wa-msg-menu'; w.className = 'wa-menu-wrap';
+    w.innerHTML = `<div class="wa-menu" role="dialog">${inner}</div>`;
+    w.addEventListener('click', (e) => { if (e.target === w) closeMenu(); });
+    document.body.appendChild(w);
+    return w;
+}
+async function runAction(key, action, value) {
+    const [kind, id, msgId] = key.split('|');
+    closeMenu();
+    try { await messageAction(kind, id, msgId, action, value); }
+    catch (err) {
+        console.error('messageAction', err);
+        if (window.showToast) window.showToast(err && err.message && !/internal/i.test(err.message) ? err.message : "Couldn't do that. Try again.", 'error');
+    }
+}
+
+/** The menu for one message: reactions, Copy, Edit (yours), Delete (yours, or admins). */
+window.waMsgMenu = function(key) {
+    const m = msgRegistry[key];
+    if (!m) return;
+    const w = openSheet(`
+        <div class="emojis">${REACTIONS.map(e => `<button type="button" data-e="${e}" class="${m.myReaction === e ? 'on' : ''}">${e}</button>`).join('')}</div>
+        ${m.text ? '<button type="button" class="item" data-a="copy"><i class="fa-regular fa-copy w-5"></i> Copy</button>' : ''}
+        ${m.mine && m.text ? '<button type="button" class="item" data-a="edit"><i class="fa-solid fa-pen w-5"></i> Edit</button>' : ''}
+        ${m.mine || m.canModerate ? '<button type="button" class="item danger" data-a="delete"><i class="fa-regular fa-trash-can w-5"></i> Delete</button>' : ''}`);
+    w.querySelectorAll('[data-e]').forEach(b => b.onclick = () => runAction(key, 'react', b.dataset.e));
+    w.querySelector('[data-a="copy"]')?.addEventListener('click', () => {
+        try { navigator.clipboard.writeText(m.text); if (window.showToast) window.showToast('Copied'); } catch (e) { /* ignore */ }
+        closeMenu();
+    });
+    w.querySelector('[data-a="delete"]')?.addEventListener('click', () => {
+        const who = m.mine ? 'this message' : "this person's message";
+        if (confirm(`Delete ${who} for everyone?`)) runAction(key, 'delete');
+    });
+    w.querySelector('[data-a="edit"]')?.addEventListener('click', () => {
+        const e = openSheet(`
+            <div style="font-weight:700;margin:2px 4px 8px">Edit message</div>
+            <textarea id="wa-edit-text" maxlength="1000"></textarea>
+            <div style="display:flex;gap:8px;margin-top:10px">
+                <button type="button" class="item" style="justify-content:center;background:rgba(255,255,255,.06)" data-a="cancel">Cancel</button>
+                <button type="button" class="item" style="justify-content:center;background:#00A884;color:#0B141A;font-weight:700" data-a="save">Save</button>
+            </div>`);
+        const ta = e.querySelector('#wa-edit-text');
+        ta.value = m.text; ta.focus();
+        e.querySelector('[data-a="cancel"]').onclick = closeMenu;
+        e.querySelector('[data-a="save"]').onclick = () => {
+            const t = ta.value.trim();
+            if (!t) return;
+            if (t === m.text) { closeMenu(); return; }
+            runAction(key, 'edit', t);
+        };
+    });
+};
+
+// Long-press (phones) and right-click (computers) on a bubble open the same menu.
+(function bindPress() {
+    let timer = null;
+    const keyOf = (t) => t && t.closest && t.closest('.wa-bubble[data-k]')?.dataset.k;
+    document.addEventListener('contextmenu', (e) => {
+        const k = keyOf(e.target);
+        if (k && !e.target.closest('a,video')) { e.preventDefault(); window.waMsgMenu(k); }
+    });
+    document.addEventListener('touchstart', (e) => {
+        const k = keyOf(e.target);
+        if (!k) return;
+        timer = setTimeout(() => { timer = null; window.waMsgMenu(k); }, 480);
+    }, { passive: true });
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    document.addEventListener('touchend', cancel); document.addEventListener('touchmove', cancel, { passive: true });
+})();
+
 /**
- * messages: [{ id, uid, name, avatar, text, ms, time, isRead, media? }]
- * opts: { myUid, group (show names + photos of others), ticks (show ✓✓ on mine), avatarOf(uid, name, avatar) }
+ * messages: [{ id, uid, name, avatar, text, ms, time, isRead, media?, key?, deleted?, edited?, reactions? }]
+ * opts: { myUid, group (show names + photos of others), ticks (show ✓✓ on mine), avatarOf(uid, name, avatar),
+ *         scope: { kind: 'dm' | 'community' | 'game', id, canModerate } to allow edit / delete / react }
  */
 export function renderWhatsApp(messages, opts = {}) {
     const myUid = String(opts.myUid || '');
@@ -106,13 +226,30 @@ export function renderWhatsApp(messages, opts = {}) {
         const photo = !mine && opts.group
             ? (startsRun ? `<img class="wa-av" src="${esc(avatarOf(m.uid, m.name, m.avatar))}" onerror="this.src='${DEFAULT_AVATAR}'" style="align-self:flex-start">` : '<span class="wa-av-space"></span>')
             : '';
-        const media = m.media && m.media.url ? mediaHtml(m.media) : '';
+        const deleted = m.deleted === true;
+        const media = !deleted && m.media && m.media.url ? mediaHtml(m.media) : '';
         const caption = media && (m.text === MEDIA_LABEL.image || m.text === MEDIA_LABEL.video) ? '' : m.text;
+        // Messages that can be edited / deleted / reacted to get a key and a menu button.
+        const sc = opts.scope;
+        const msgKey = m.key || m.id;
+        const key = sc && sc.kind && sc.id && msgKey && !deleted && !String(msgKey).startsWith('app_') ? `${sc.kind}|${sc.id}|${msgKey}` : '';
+        if (key) {
+            const reacts = m.reactions && typeof m.reactions === 'object' ? m.reactions : {};
+            msgRegistry[key] = { text: caption || '', mine, canModerate: !!sc.canModerate, myReaction: reacts[myUid] || '' };
+        }
+        const body = deleted
+            ? `<span class="wa-text wa-deleted"><i class="fa-solid fa-ban" style="margin-right:5px"></i>${DELETED_TEXT}</span>`
+            : `${media}<span class="wa-text">${esc(caption)}</span>`;
+        const edited = m.edited && !deleted ? '<span class="wa-edited">Edited</span>' : '';
         html += `
             <div class="wa-row ${mine ? 'me' : ''} ${startsRun ? 'wa-gap-l' : 'wa-gap-s'}">
                 ${photo}
-                <div class="wa-bubble ${mine ? 'me' : 'them'} ${startsRun ? 'tail' : ''}">
-                    ${name}${media}<span class="wa-text">${esc(caption)}</span><span class="wa-meta">${esc(time)}${ticks}</span>
+                <div class="wa-col">
+                    <div class="wa-bubble ${mine ? 'me' : 'them'} ${startsRun ? 'tail' : ''}" ${key ? `data-k="${esc(key)}"` : ''}>
+                        ${name}${body}<span class="wa-meta">${edited}${esc(time)}${ticks}</span>
+                        ${key ? `<button type="button" class="wa-more" aria-label="Message options" onclick="waMsgMenu('${esc(key)}')"><i class="fa-solid fa-chevron-down"></i></button>` : ''}
+                    </div>
+                    ${!deleted ? reactionsHtml(m.reactions, myUid, key) : ''}
                 </div>
             </div>`;
         prev = { uid: m.uid, ms };
@@ -346,4 +483,4 @@ window.waOpenMedia = function(type, url) {
     document.body.appendChild(el);
 };
 
-Object.assign(window.waChat, { uploadMedia, mediaHtml, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL });
+Object.assign(window.waChat, { messageAction, uploadMedia, mediaHtml, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL });

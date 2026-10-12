@@ -9,10 +9,18 @@ export function renderCommentsTab(event) {
     const myUid = window.currentUser?.uid;
     watchCommentsTyping(eventId);
 
-    const list = comments.map((c, i) => ({
-        id: 'c' + i, uid: c.uid || c.userId || c.authorId || '', name: c.name || c.userName || 'Player',
-        avatar: c.avatar || c.userAvatar, text: c.text || '', ms: msOf(c), time: c.timestamp, media: c.media
-    }));
+    const list = comments.map((c, i) => {
+        const uid = c.uid || c.userId || c.authorId || '';
+        return {
+            id: 'c' + i, uid, name: c.name || c.userName || 'Player',
+            avatar: c.avatar || c.userAvatar, text: c.text || '', ms: msOf(c), time: c.timestamp, media: c.media,
+            // how the server finds this comment: its id, or "<uid>:<createdAt>" for older ones
+            key: c.id || (uid && c.createdAt ? `${uid}:${c.createdAt}` : ''),
+            deleted: c.deleted === true, edited: c.edited === true, reactions: c.reactions
+        };
+    });
+    const canModerate = !!window.currentUser && (activeEvent.organizerId === window.currentUser.uid
+        || (activeEvent.communityId && (window.myCommunityRoles || {})[activeEvent.communityId] === 'admin'));
     const avatarOf = (uid, name, avatar) => window.resolvePlayerAvatar ? window.resolvePlayerAvatar({ uid, name, avatar }) : (avatar || '');
 
     // The page redraws when anything on the game changes: keep the half-typed message and the cursor.
@@ -34,7 +42,7 @@ export function renderCommentsTab(event) {
                  class="wa-wall min-h-[300px] max-h-[55vh] overflow-y-auto py-2">
                 ${list.length === 0
                     ? '<div class="text-center text-xs text-slate-400 py-16">No messages yet. Start the conversation! 👋</div>'
-                    : renderWhatsApp(list, { myUid, group: true, ticks: false, avatarOf })}
+                    : renderWhatsApp(list, { myUid, group: true, ticks: false, avatarOf, scope: { kind: 'game', id: eventId, canModerate } })}
                 <div id="game-typing-bubble">${typingBubbleHtml(_commentsTyping.names)}</div>
             </div>
             <div class="bg-[#202C33] px-2 py-2 flex gap-2 items-center">
@@ -123,6 +131,7 @@ async function postComment(targetEventId, text, media) {
     const senderName = profile.name || `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user.displayName || 'Player';
 
     const newComment = {
+        id: 'cmt_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
         uid: String(user.uid),
         name: String(senderName),
         text: String(text).slice(0, 1000),

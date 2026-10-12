@@ -226,10 +226,13 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
 window.sendDirectMessageFromRoster = function(uid, name, avatar) {
     const modal = document.getElementById('player-profile-popup');
     if (modal) modal.remove();
-    if (typeof window.openChatThread === 'function') {
-        window.openChatThread({ uid, name, avatar });
+    // Close the game, go to Messages and open (or start) the chat with this player.
+    window.activeModalEventId = null;
+    if (typeof window.openDirectChat === 'function') {
+        window.openDirectChat(uid, name, avatar);
     } else {
         window.switchTab('chat');
+        if (typeof window.startChatWithPlayer === 'function') window.startChatWithPlayer(uid, name, avatar);
     }
 };
 

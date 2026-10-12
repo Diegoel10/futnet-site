@@ -3,6 +3,15 @@ import { db, appId } from './firebase-config.js';
 import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot, query as fsQuery, orderBy, limit, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
 
+const STOCK = 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';   // old placeholder: never shown or saved
+// A player's real profile photo: live player list first (always current), then what the chat saved.
+function photoOf(uid, name, saved) {
+    const live = (window.cachedDirectoryList || []).find(d => d.uid === uid) || (window.directoryList || []).find(d => d.uid === uid);
+    if (live && (live.avatar || live.photoURL)) return live.avatar || live.photoURL;
+    if (window.resolvePlayerAvatar) return window.resolvePlayerAvatar({ uid, name, avatar: saved && saved !== STOCK ? saved : '' });
+    return saved && saved !== STOCK ? saved : 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+}
+window.chatPhotoOf = photoOf;
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 window.activeChatThreadId = null;
@@ -78,9 +87,10 @@ const fmtListTime = (ms) => {
     if ((now - d) / 86400000 < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
     return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' });
 };
-const mediaIcon = (m) => m && m.media && m.media.url
+const mediaIcon = (m) => m && !m.deleted && m.media && m.media.url
     ? (m.media.type === 'video' ? '<i class="fa-solid fa-video mr-1"></i>' : '<i class="fa-solid fa-camera mr-1"></i>') : '';
 const previewText = (m) => {
+    if (m && m.deleted === true) return '🚫 This message was deleted';
     const t = String(m?.text || '');
     if (m && m.media && (t === '📷 Photo' || t === '🎥 Video')) return m.media.type === 'video' ? 'Video' : 'Photo';
     return t;
@@ -98,7 +108,7 @@ function buildChatRows() {
         rows.push({
             id: th.id, isGroup: false,
             name: (live && (live.name || `${live.firstName || ''} ${live.lastName || ''}`.trim())) || th.name || 'Player',
-            avatar: (live && live.avatar) || th.avatar || '',
+            avatar: photoOf(th.id, th.name, th.avatar),
             last, lastMine: last.senderUid === myUid, ms: msOf(last),
             unread: msgs.filter(m => m.senderUid !== myUid && m.isRead !== true).length
         });
@@ -176,6 +186,12 @@ function styleChatsPanel() {
     if (list) list.style.background = '#111B21';
 }
 
+/** Red dot on Chats = how many conversations have unread messages (private + community). */
+function updateChatsBadge() {
+    const n = buildChatRows().filter(r => r.unread > 0).length;
+    if (window.setNavBadge) window.setNavBadge('chats', n);
+}
+
 window.renderChatsList = async function() {
     const query = (document.getElementById('chats-search-input')?.value || '').toLowerCase().trim();
     const container = document.getElementById('chats-threads-container');
@@ -191,6 +207,7 @@ window.renderChatsList = async function() {
     }
     watchCommunityChats();
     styleChatsPanel();
+    updateChatsBadge();
 
     let rows = buildChatRows();
     if (window.chatsTab === 'unread') rows = rows.filter(r => r.unread);
@@ -253,7 +270,7 @@ window.openChatThread = function(id) {
             th = {
                 id: targetUser.uid,
                 name: liveName || displayName,
-                avatar: liveAvatar || targetUser.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+                avatar: liveAvatar || targetUser.avatar || '',
                 messages: []
             };
             window.chatsThreads = window.chatsThreads || [];
@@ -280,7 +297,7 @@ window.openChatThread = function(id) {
     const nameEl = document.getElementById('active-chat-name');
     const avatarEl = document.getElementById('active-chat-avatar');
     if (nameEl) nameEl.innerText = th.name;
-    if (avatarEl) avatarEl.src = th.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
+    if (avatarEl) avatarEl.src = photoOf(th.id, th.name, th.avatar);
 
     // Mark unread messages as read when opening thread and update sender copy
     window.markThreadAsReadLocally(th);
@@ -394,7 +411,7 @@ window.startChatWithPlayer = function(uid, name, avatar) {
         th = {
             id: uid,
             name: name,
-            avatar: avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+            avatar: avatar || '',
             messages: []
         };
         window.chatsThreads = window.chatsThreads || [];
@@ -426,13 +443,14 @@ window.renderActiveChatMessages = function() {
     const myName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || '';
     const list = th.messages.map(m => {
         const mine = (m.senderUid && m.senderUid === myUid) || (!m.senderUid && myName && m.sender && m.sender.toLowerCase() === myName.toLowerCase());
-        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms: msOf(m), time: m.time, isRead: m.isRead === true, media: m.media };
+        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms: msOf(m), time: m.time, isRead: m.isRead === true, media: m.media,
+            deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions };
     });
     const atBottom = isNearBottom();
     container.classList.add('wa-wall');
     container.classList.remove('space-y-3', 'p-4');
     container.classList.add('py-2');
-    container.innerHTML = renderWhatsApp(list, { myUid, group: false, ticks: true })
+    container.innerHTML = renderWhatsApp(list, { myUid, group: false, ticks: true, scope: { kind: 'dm', id: th.id } })
         + `<div id="dm-typing-bubble">${typingBubbleHtml(window._dmPartnerTyping ? [window._dmPartnerTyping] : [])}</div>`;
     if (atBottom || window._forceChatBottom) scrollChatToBottom();
     window._forceChatBottom = false;
@@ -507,7 +525,7 @@ async function sendToActiveChat(text, media) {
         th = {
             id: window.activeChatThreadId,
             name: displayName,
-            avatar: targetUser?.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+            avatar: targetUser?.avatar || '',
             messages: []
         };
         window.chatsThreads.push(th);
@@ -545,7 +563,7 @@ async function sendToActiveChat(text, media) {
     // re-saved its own copy of the whole list, which could erase a message that had just arrived.
     const myUid = window.currentUser.uid;
     const partnerName = th.name || 'Player';
-    const partnerAvatar = /^https?:\/\//i.test(th.avatar || '') && String(th.avatar).length < 400 ? th.avatar : '';
+    const partnerAvatar = /^https?:\/\//i.test(th.avatar || '') && String(th.avatar).length < 400 && th.avatar !== STOCK ? th.avatar : '';
     const addTo = (threads, threadId, name, avatar) => {
         let t = threads.find(x => x.id === threadId);
         if (!t) { t = { id: threadId, name, avatar, messages: [] }; threads.push(t); }
@@ -573,12 +591,13 @@ async function sendToActiveChat(text, media) {
     }
 };
 
-// Auto-initialize chat listener once user profile / auth is verified
-document.addEventListener('DOMContentLoaded', () => {
-    const checkUserInterval = setInterval(() => {
-        if (window.currentUser) {
-            clearInterval(checkUserInterval);
-            window.initChatListener();
-        }
-    }, 500);
-});
+// Starts the live chat listener as soon as someone is signed in (and restarts it for a different account),
+// so new messages and the red dot on Chats show up live on every page, not only on the Chats tab.
+let chatListenerUid = null;
+setInterval(() => {
+    const uid = window.currentUser?.uid || null;
+    if (uid === chatListenerUid) return;
+    chatListenerUid = uid;
+    if (uid) window.initChatListener();
+    else { if (chatUnsubscribe) chatUnsubscribe(); chatUnsubscribe = null; window.chatsThreads = []; updateChatsBadge(); }
+}, 700);

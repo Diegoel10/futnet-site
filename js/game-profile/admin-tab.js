@@ -2,6 +2,7 @@
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml, ownGoalLabel } from './event-store.js';
+import { adminStatusHtml } from '../game-status.js';
 import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
 import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry } from '../money-rules.js';
 
@@ -241,6 +242,7 @@ export function renderAdminTab(event) {
                         <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl text-xs border border-red-500/40">Cancel Game</button>
                     </div>
                 </div>
+                ${adminStatusHtml(event)}
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2">
                     <h5 class="text-xs font-black uppercase text-[#00F296]">Need players?</h5>
                     <p class="text-[11px] text-white/60">Send a push notification about this game to everyone on FutNet (once an hour).</p>

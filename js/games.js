@@ -2,6 +2,7 @@
 import { db, appId } from './firebase-config.js';
 import { doc, getDoc, collection, getDocs, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml, jsArg } from './game-profile/event-store.js';
+import { gameBadgesHtml } from './game-status.js';
 
 window.selectedDateStr = (() => {
     const d = new Date();
@@ -349,6 +350,7 @@ window.renderEventCardHtml = function(ev) {
                     </div>
 
                     ${ev.title ? `<h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${escapeHtml(ev.title)}</h3>` : ''}
+                    ${gameBadgesHtml(ev)}
 
                     <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                         <div class="flex items-center space-x-2">

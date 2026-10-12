@@ -344,6 +344,16 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
   const after = event.data.after.exists ? event.data.after.data() : null;
   const organizer = (after || before || {}).organizerId || "";
 
+  // New game, or its day / time / place changed: get the kickoff forecast right away (then every 3 hours).
+  if (after && (!before || ["date", "time", "location"].some((f) => (before[f] || "") !== (after[f] || "")))) {
+    try {
+      const moved = before && (before.location || "") !== (after.location || "");
+      const f = await forecastFor(moved ? { ...after, geo: null } : after);
+      if (f) await event.data.after.ref.update({ weather: f.weather, geo: f.geo });
+      else if (before && after.weather) await event.data.after.ref.update({ weather: FV.delete() });   // too far ahead for a forecast
+    } catch (e) { logger.warn("weather on save failed", eventId, e.message); }
+  }
+
   // New game: tell the community it belongs to
   if (!before && after) {
     if (after.communityId) {
@@ -454,6 +464,24 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
       title: "Session over 🏁",
       body: `Final results for ${title} are in. See who won!`,
     }, { key: `results_${eventId}` });
+  }
+
+  // g) Admin changed the game status (Game on / Storm watch / Delayed) -> tell everyone on it
+  const st = (g) => (g && g.gameStatus && g.gameStatus.state) || "on";
+  const stNote = (g) => String((g && g.gameStatus && g.gameStatus.note) || "").trim();
+  if (st(before) !== st(after) || (st(after) !== "on" && stNote(before) !== stNote(after))) {
+    const s2 = st(after);
+    const head = s2 === "watch" ? `Storm watch for ${title} ⛈️` : s2 === "delayed" ? `${title} is delayed ⏰` : `${title} is on ✅`;
+    const note = stNote(after);
+    await notify(uniq([...participants(after), organizer]), {
+      type: "game_status",
+      senderUid: (after.gameStatus && after.gameStatus.by) || organizer,
+      eventId,
+      title: head,
+      body: note || (s2 === "watch" ? "Bad weather is possible. Keep an eye on the game page for updates."
+        : s2 === "delayed" ? "The start is delayed. Check the game page for the new time."
+          : "The game is going ahead as planned. See you there!"),
+    }, { exclude: [(after.gameStatus && after.gameStatus.by) || ""], key: `status_${eventId}_${s2}_${tenMinuteBucket()}` });
   }
 });
 
@@ -1360,4 +1388,259 @@ exports.removeOrphanCards = onCall(async (request) => {
     for (const nf of res.notFound) { await col("directory").doc(nf.uid).delete(); removed++; }
   }
   return { removed };
+});
+
+// ---------------------------------------------------------------------------
+// 12. Edit, delete and react to messages (private chats, community chat, game comments).
+//     One place for the rules, used by the website and both apps:
+//       react: anyone in the conversation (same emoji again = remove it)
+//       edit: only who sent it
+//       delete: who sent it, or an admin (community admin / game organizer)
+//     The message keeps its place: deleted ones become "This message was deleted".
+// ---------------------------------------------------------------------------
+const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "⚽", "🔥"];
+
+function applyMessageAction(m, caller, action, value, canModerate) {
+  if (!m || m.deleted === true) throw new HttpsError("failed-precondition", "This message was deleted.");
+  const sender = String(m.senderUid || m.senderId || m.uid || m.userId || "");
+  if (action === "react") {
+    const r = { ...(m.reactions && typeof m.reactions === "object" ? m.reactions : {}) };
+    if (!value || r[caller] === value) delete r[caller];
+    else {
+      if (!REACTIONS.includes(value)) throw new HttpsError("invalid-argument", "That reaction isn't available.");
+      r[caller] = value;
+    }
+    m.reactions = r;
+  } else if (action === "edit") {
+    if (sender !== caller) throw new HttpsError("permission-denied", "You can only edit your own messages.");
+    const text = String(value || "").trim().slice(0, 1000);
+    if (!text) throw new HttpsError("invalid-argument", "The message can't be empty.");
+    m.text = text;
+    m.edited = true;
+    m.editedAt = Date.now();
+  } else if (action === "delete") {
+    if (sender !== caller && !canModerate) throw new HttpsError("permission-denied", "You can only delete your own messages.");
+    m.deleted = true;
+    m.deletedBy = caller;
+    m.text = "";
+    delete m.media;
+    delete m.reactions;
+  } else {
+    throw new HttpsError("invalid-argument", "Unknown action.");
+  }
+  return m;
+}
+
+exports.messageAction = onCall(async (request) => {
+  const caller = request.auth && request.auth.uid;
+  if (!caller) throw new HttpsError("unauthenticated", "Please sign in.");
+  const d = request.data || {};
+  const kind = String(d.kind || "");
+  const where = String(d.id || "");
+  const msgId = String(d.msgId || "");
+  const action = String(d.action || "");
+  const value = d.value == null ? "" : String(d.value);
+  if (!where || !msgId) throw new HttpsError("invalid-argument", "Missing message.");
+
+  if (kind === "dm") {
+    // Both copies (mine and theirs) change together.
+    const myRef = col("directory").doc(caller);
+    const theirRef = col("directory").doc(where);
+    await db.runTransaction(async (tx) => {
+      const [mine, theirs] = await Promise.all([tx.get(myRef), tx.get(theirRef)]);
+      const myChats = arr(mine.exists ? mine.data().chats : []);
+      const theirChats = arr(theirs.exists ? theirs.data().chats : []);
+      const myThread = myChats.find((t) => t && t.id === where);
+      const msg = myThread && arr(myThread.messages).find((m) => m && m.id === msgId);
+      if (!msg) throw new HttpsError("not-found", "Message not found.");
+      const updated = applyMessageAction({ ...msg }, caller, action, value, false);
+      const put = (chats, threadId) => {
+        let hit = false;
+        chats.forEach((t) => {
+          if (!t || t.id !== threadId) return;
+          t.messages = arr(t.messages).map((m) => {
+            if (m && m.id === msgId) { hit = true; return { ...updated, isRead: m.isRead === true }; }
+            return m;
+          });
+        });
+        return hit;
+      };
+      put(myChats, where);
+      tx.set(myRef, { chats: myChats }, { merge: true });
+      if (theirs.exists && put(theirChats, caller)) tx.set(theirRef, { chats: theirChats }, { merge: true });
+    });
+    return { ok: true };
+  }
+
+  if (kind === "community") {
+    const cRef = col("communities").doc(where);
+    const [cSnap, memSnap] = await Promise.all([cRef.get(), cRef.collection("members").doc(caller).get()]);
+    if (!cSnap.exists) throw new HttpsError("not-found", "Community not found.");
+    const c = cSnap.data() || {};
+    const mem = memSnap.exists ? memSnap.data() : null;
+    if (!mem && c.adminId !== caller) throw new HttpsError("permission-denied", "Join the community first.");
+    const until = mem && mem.adminUntil && mem.adminUntil.toMillis ? mem.adminUntil.toMillis() : 0;
+    const isAdmin = c.adminId === caller || (mem && mem.role === "admin" && (!until || until > Date.now()));
+    const mRef = cRef.collection("messages").doc(msgId);
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(mRef);
+      if (!s.exists) throw new HttpsError("not-found", "Message not found.");
+      const m = applyMessageAction({ ...s.data() }, caller, action, value, isAdmin);
+      const patch = { reactions: m.reactions || FV.delete() };
+      if (action === "edit") Object.assign(patch, { text: m.text, edited: true, editedAt: m.editedAt });
+      if (action === "delete") Object.assign(patch, { text: "", deleted: true, deletedBy: caller, media: FV.delete(), reactions: FV.delete() });
+      tx.update(mRef, patch);
+    });
+    return { ok: true };
+  }
+
+  if (kind === "game") {
+    // Game comments: an id, or "<uid>:<createdAt>" for older comments without one.
+    let ref = col("eventsList").doc(where);
+    let snap = await ref.get();
+    if (!snap.exists) {
+      const q = await col("eventsList").where("id", "==", where).limit(1).get();
+      if (q.empty) throw new HttpsError("not-found", "Game not found.");
+      ref = q.docs[0].ref;
+    }
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const g = s.data() || {};
+      const comments = arr(g.comments);
+      const idx = comments.findIndex((c) => c && (c.id === msgId || `${commentAuthor(c)}:${c.createdAt || ""}` === msgId));
+      if (idx < 0) throw new HttpsError("not-found", "Comment not found.");
+      let isAdmin = g.organizerId === caller;
+      if (!isAdmin && g.communityId) {
+        const [cs, ms] = await Promise.all([tx.get(col("communities").doc(g.communityId)),
+          tx.get(col("communities").doc(g.communityId).collection("members").doc(caller))]);
+        const until = ms.exists && ms.data().adminUntil && ms.data().adminUntil.toMillis ? ms.data().adminUntil.toMillis() : 0;
+        isAdmin = (cs.exists && cs.data().adminId === caller) || (ms.exists && ms.data().role === "admin" && (!until || until > Date.now()));
+      }
+      const original = comments[idx];
+      const changed = applyMessageAction({ ...original, senderUid: commentAuthor(original) }, caller, action, value, isAdmin);
+      if (!("senderUid" in original)) delete changed.senderUid;
+      comments[idx] = changed;
+      tx.update(ref, { comments });
+    });
+    return { ok: true };
+  }
+
+  throw new HttpsError("invalid-argument", "Unknown conversation.");
+});
+
+
+// ---------------------------------------------------------------------------
+// 13. Weather for upcoming games (free Open-Meteo forecast, no key needed).
+//     Every 3 hours: games in the next 7 days get `weather` = what to expect at kickoff
+//     ({ emoji, label, tempF, rainPct, code, storm }). The website and apps show it on the game.
+//     If storms show up for a game in the next 24 hours, the organizer gets one heads-up
+//     to set the game status (Admin tab: Game on / Storm watch / Delayed).
+// ---------------------------------------------------------------------------
+const US_STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware",
+  FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana",
+  ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska",
+  NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas",
+  UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming", DC: "District of Columbia", PR: "Puerto Rico" };
+
+/** "Lakeside Park (Coconut Creek, FL)" -> { city: "Coconut Creek", state: "FL" } */
+function cityOf(game) {
+  const m = String(game.location || "").match(/\(([^(),]+),\s*([^()]+)\)\s*$/);
+  if (m) return { city: m[1].trim(), state: m[2].trim() };
+  if (game.city) return { city: String(game.city), state: String(game.state || "") };
+  return null;
+}
+
+const geoCache = new Map();
+async function geocode(city, state) {
+  const k = `${city}|${state}`.toLowerCase();
+  if (geoCache.has(k)) return geoCache.get(k);
+  let out = null;
+  try {
+    const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&language=en&format=json`);
+    const j = await r.json();
+    const list = arr(j.results);
+    const want = (US_STATES[String(state).toUpperCase()] || state || "").toLowerCase();
+    const hit = list.find((x) => want && String(x.admin1 || "").toLowerCase() === want) || list.find((x) => x.country_code === "US") || list[0];
+    if (hit) out = { lat: hit.latitude, lng: hit.longitude };
+  } catch (e) { logger.warn("geocode failed", city, state, e.message); }
+  geoCache.set(k, out);
+  return out;
+}
+
+/** WMO weather code -> emoji + words */
+function weatherLabel(code, rainPct) {
+  if (code >= 95) return { emoji: "⛈️", label: "Thunderstorms", storm: true };
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return { emoji: "🌧️", label: rainPct >= 60 ? "Rain likely" : "Showers possible", storm: false };
+  if (code >= 51 && code <= 57) return { emoji: "🌦️", label: "Drizzle", storm: false };
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return { emoji: "🌨️", label: "Snow", storm: false };
+  if (code === 45 || code === 48) return { emoji: "🌫️", label: "Fog", storm: false };
+  if (code === 3) return { emoji: "☁️", label: "Cloudy", storm: false };
+  if (code === 1 || code === 2) return { emoji: "⛅", label: "Partly cloudy", storm: false };
+  return { emoji: "☀️", label: "Clear", storm: false };
+}
+
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+async function forecastFor(game) {
+  const date = String(game.date || "").slice(0, 10);
+  const place = cityOf(game);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !place) return null;
+  const geo = (game.geo && typeof game.geo.lat === "number") ? game.geo : await geocode(place.city, place.state);
+  if (!geo) return null;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lng}` +
+    `&hourly=temperature_2m,precipitation_probability,weather_code&temperature_unit=fahrenheit&timezone=auto&start_date=${date}&end_date=${date}`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const j = await r.json();
+  const times = arr(j.hourly && j.hourly.time);
+  if (!times.length) return null;
+  const hh = String(game.time || "18:00").match(/^(\d{1,2})/);
+  const hour = Math.min(23, Math.max(0, hh ? parseInt(hh[1], 10) : 18));
+  // kickoff hour, and the worst of the next 2 hours (a game lasts a while)
+  const i0 = Math.max(0, times.findIndex((t) => t.endsWith(`T${String(hour).padStart(2, "0")}:00`)));
+  const span = [i0, i0 + 1, i0 + 2].filter((i) => i < times.length);
+  const codes = span.map((i) => Number(j.hourly.weather_code[i]) || 0);
+  const rain = Math.max(...span.map((i) => Number(j.hourly.precipitation_probability[i]) || 0));
+  const worst = codes.reduce((a, b) => (b >= 95 ? b : (a >= 95 ? a : Math.max(a, b))), codes[0]);
+  const look = weatherLabel(worst, rain);
+  return {
+    weather: { ...look, code: worst, rainPct: Math.round(rain), tempF: Math.round(Number(j.hourly.temperature_2m[i0]) || 0), at: Date.now() },
+    geo: { lat: geo.lat, lng: geo.lng },
+  };
+}
+
+exports.refreshGameWeather = onSchedule({ schedule: "every 3 hours", timeZone: DEFAULT_TZ, timeoutSeconds: 300 }, async () => {
+  const now = new Date();
+  const until = new Date(now.getTime() + 7 * 86400000);
+  const snap = await col("eventsList").where("date", ">=", ymd(new Date(now.getTime() - 86400000))).where("date", "<=", ymd(until) + "~").get();
+  let updated = 0;
+  for (const d of snap.docs) {
+    const g = d.data() || {};
+    if (g.isSessionEnded === true || g.isCancelled === true) continue;
+    try {
+      const f = await forecastFor(g);
+      if (!f) continue;
+      const old = g.weather || {};
+      const same = old.emoji === f.weather.emoji && old.label === f.weather.label &&
+        Math.abs((old.tempF || 0) - f.weather.tempF) < 3 && Math.abs((old.rainPct || 0) - f.weather.rainPct) < 10;
+      const patch = {};
+      if (!same) patch.weather = f.weather;
+      if (!g.geo) patch.geo = f.geo;
+      if (Object.keys(patch).length) { await d.ref.update(patch); updated++; }
+      // Storms within 24 hours: one heads-up to the organizer (only while the game is still "on").
+      const kick = new Date(`${String(g.date).slice(0, 10)}T${String(g.time || "18:00").slice(0, 5)}:00`);
+      const hoursAway = (kick.getTime() - Date.now()) / 3600000;   // rough (server time zone); fine for a heads-up
+      const state = (g.gameStatus && g.gameStatus.state) || "on";
+      if (f.weather.storm && state === "on" && hoursAway > -2 && hoursAway < 30 && g.organizerId) {
+        await notify([g.organizerId], {
+          type: "game_weather",
+          eventId: d.id,
+          title: `Storms forecast for ${g.title || "your game"} ⛈️`,
+          body: `${f.weather.label} around kickoff (${f.weather.rainPct}% rain). Set the game status in the Admin tab so players know.`,
+        }, { key: `stormwarn_${d.id}_${String(g.date).slice(0, 10)}` });
+      }
+    } catch (e) { logger.warn("weather failed", d.id, e.message); }
+  }
+  logger.info(`weather: ${snap.size} games checked, ${updated} updated`);
 });
