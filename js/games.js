@@ -75,6 +75,7 @@ window.initEventsLiveListener = function() {
 
         if (window.renderDateTabs) window.renderDateTabs();
         if (window.renderEvents) window.renderEvents();
+        if (window.refreshCommunityGamesTab) window.refreshCommunityGamesTab();
 
         if (window.activeModalEventId && window.renderEventDetailModalContent) {
             window.renderEventDetailModalContent();

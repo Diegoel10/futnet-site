@@ -527,6 +527,37 @@ exports.onCommunityMemberAdded = onDocumentCreated(`${BASE}/communities/{communi
 });
 
 // ---------------------------------------------------------------------------
+// Sign-in hint: after a wrong email + password, tell the login screen if this email signed up with
+// Google or Apple (and never set a password), so it can say "Continue with Google" instead of
+// "wrong password". It only ever answers "google", "apple" or nothing: it never says whether an
+// email + password account exists.
+// ---------------------------------------------------------------------------
+
+const hintCalls = new Map();   // per server instance: ip -> recent call times (simple abuse limit)
+exports.signInHint = onCall(async (request) => {
+  const ip = String((request.rawRequest && (request.rawRequest.headers["x-forwarded-for"] || request.rawRequest.ip)) || "?").split(",")[0].trim();
+  const now = Date.now();
+  const recent = (hintCalls.get(ip) || []).filter((t) => now - t < 10 * 60 * 1000);
+  if (recent.length >= 20) return { provider: "" };
+  recent.push(now);
+  hintCalls.set(ip, recent);
+  if (hintCalls.size > 5000) hintCalls.clear();
+
+  const email = String((request.data && request.data.email) || "").trim().toLowerCase();
+  if (!email || email.length > 200 || !email.includes("@")) return { provider: "" };
+  try {
+    const user = await admin.auth().getUserByEmail(email);
+    const ids = (user.providerData || []).map((p) => p.providerId);
+    if (ids.includes("password")) return { provider: "" };
+    if (ids.includes("google.com")) return { provider: "google" };
+    if (ids.includes("apple.com")) return { provider: "apple" };
+    return { provider: "" };
+  } catch (e) {
+    return { provider: "" };   // no account, or anything else: say nothing
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 6. Admin "Notify everyone" about a game (called from the website or the app)
 // ---------------------------------------------------------------------------
 

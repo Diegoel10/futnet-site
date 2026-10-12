@@ -16,9 +16,21 @@ import {
     OAuthProvider,
     getAuth,
     signOut,
-    onAuthStateChanged
+    onAuthStateChanged,
+    linkWithCredential,
+    EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+
+// Asks the server if this email signed up with Google or Apple (answers "google", "apple" or "").
+async function signInHintFor(email) {
+    try {
+        const fn = httpsCallable(getFunctions(auth.app, 'us-central1'), 'signInHint');
+        const r = await fn({ email });
+        return (r && r.data && r.data.provider) || '';
+    } catch (e) { return ''; }
+}
 
 // Loading screen helpers: show "Loading profile..." instead of flashing the login page
 window.showAuthLoading = function(message) {
@@ -126,8 +138,27 @@ window.handleEmailAuth = async function(event) {
         if (typeof window.showToast === 'function') window.showToast("Signed in successfully!");
     } catch (err) {
         console.error("Login error:", err);
+        const code0 = err && err.code;
+        if (errorBox && (code0 === 'auth/invalid-credential' || code0 === 'auth/wrong-password' || code0 === 'auth/user-not-found' || code0 === 'auth/invalid-login-credentials')) {
+            // Signed up with Google or Apple? Say so, with the right button, instead of "wrong password".
+            const hint = await signInHintFor(email);
+            if (hint) {
+                const label = hint === 'apple' ? 'Apple' : 'Google';
+                errorBox.innerHTML = `You signed up with ${label} for <b>${escText(email)}</b>. Sign in with ${label} again.` +
+                    `<button type="button" onclick="handleSocialAuth('${hint}')" class="mt-2 w-full bg-white text-black font-black rounded-xl py-2.5">Continue with ${label}</button>` +
+                    `<div class="mt-2 text-[11px] opacity-80">Prefer a password? Tap Forgot password to set one. After that both work.</div>`;
+                errorBox.classList.remove('hidden');
+                return;
+            }
+        }
         if (errorBox) {
-            errorBox.textContent = err.message || "Wrong email or password";
+            const c = err && err.code;
+            errorBox.textContent =
+                (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-login-credentials')
+                    ? "Wrong email or password. If you signed up with Google or Apple, use that button instead, or tap Forgot password to set a password."
+                : c === 'auth/too-many-requests' ? "Too many tries. Please wait a few minutes, or tap Forgot password."
+                : c === 'auth/invalid-email' ? "That email does not look right. Please check it."
+                : (err.message || "Wrong email or password");
             errorBox.classList.remove('hidden');
         }
     }
@@ -286,7 +317,16 @@ window.handleSocialAuth = async function(providerName) {
         }
         if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') return;
         if (err.code === 'auth/account-exists-with-different-credential') {
-            if (typeof window.showToast === 'function') window.showToast("This email already has an account with a different sign-in method. Use that method instead.", "error");
+            // They already have a FutNet account with this email (made with email + password).
+            // Ask for that password once and connect Google/Apple to the SAME account, so they keep
+            // their profile, games, credit and friends.
+            const pending = (providerName === 'apple' ? OAuthProvider.credentialFromError(err)
+                : providerName === 'facebook' ? FacebookAuthProvider.credentialFromError(err)
+                : providerName === 'x' ? TwitterAuthProvider.credentialFromError(err)
+                : GoogleAuthProvider.credentialFromError(err));
+            const email = err.customData?.email || '';
+            if (pending && email) { showLinkAccountModal(email, pending, providerName); return; }
+            if (typeof window.showToast === 'function') window.showToast("This email already has a FutNet account. Sign in with your email and password.", "error");
             return;
         }
         if (err.code === 'auth/unauthorized-domain') {
@@ -296,6 +336,65 @@ window.handleSocialAuth = async function(providerName) {
         if (typeof window.showToast === 'function') window.showToast(err.message || "Social sign-in failed", "error");
     }
 };
+
+// ---------------------------------------------------------------- Connect Google/Apple to an existing account
+const PROVIDER_LABEL = { google: 'Google', apple: 'Apple', facebook: 'Facebook', x: 'X' };
+const escText = (t) => String(t || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function showLinkAccountModal(email, pendingCred, providerName) {
+    document.getElementById('link-account-modal')?.remove();
+    const label = PROVIDER_LABEL[providerName] || 'this sign-in';
+    const wrap = document.createElement('div');
+    wrap.id = 'link-account-modal';
+    wrap.className = 'fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4';
+    wrap.innerHTML = `
+        <form class="w-full max-w-sm bg-[#040E13] border border-[#00F296]/50 rounded-2xl p-5 space-y-3 text-white font-sans">
+            <div class="text-lg font-black">You already have a FutNet account</div>
+            <p class="text-sm text-white/80"><b>${escText(email)}</b> was signed up with a password. Enter it once to connect ${label}. After that you can use either one, and you keep your profile, games and credit.</p>
+            <input id="link-account-pass" type="password" autocomplete="current-password" placeholder="Your FutNet password"
+                class="w-full bg-black/50 border border-teal-500/50 rounded-xl px-3 py-2.5 text-white text-base">
+            <div id="link-account-msg" class="hidden text-xs rounded-lg px-3 py-2"></div>
+            <button type="submit" class="w-full bg-[#00F296] text-black font-black rounded-xl py-3">Connect ${label}</button>
+            <div class="flex items-center justify-between text-xs">
+                <button type="button" id="link-account-forgot" class="underline text-[#8DCDD2] font-bold">Forgot password?</button>
+                <button type="button" id="link-account-cancel" class="underline text-white/70">Cancel</button>
+            </div>
+        </form>`;
+    document.body.appendChild(wrap);
+    const msg = (text, ok) => {
+        const m = wrap.querySelector('#link-account-msg');
+        m.textContent = text;
+        m.className = 'text-xs rounded-lg px-3 py-2 ' + (ok ? 'bg-emerald-950/60 text-[#00F296]' : 'bg-red-950/60 text-red-300');
+    };
+    const pass = wrap.querySelector('#link-account-pass');
+    setTimeout(() => pass.focus(), 50);
+    wrap.querySelector('#link-account-cancel').onclick = () => wrap.remove();
+    wrap.querySelector('#link-account-forgot').onclick = async () => {
+        try { await sendPasswordResetEmail(auth, email); } catch (e) { /* same answer either way */ }
+        msg('A reset link is on its way to ' + email + '. Set a password, then come back and tap ' + label + ' again.', true);
+    };
+    wrap.querySelector('form').onsubmit = async (e) => {
+        e.preventDefault();
+        if (!pass.value) { msg('Type your password first.', false); return; }
+        const btn = wrap.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = 'Connecting...';
+        try {
+            const cred = await signInWithEmailAndPassword(auth, email, pass.value);
+            try { await linkWithCredential(cred.user, pendingCred); }
+            catch (le) { if (le.code !== 'auth/provider-already-linked') console.warn('Link failed:', le.code); }
+            wrap.remove();
+            window.showAuthLoading('Loading profile...');
+            if (typeof window.showToast === 'function') window.showToast(label + ' is now connected to your account!');
+        } catch (err2) {
+            btn.disabled = false; btn.textContent = 'Connect ' + label;
+            const c = err2 && err2.code;
+            msg((c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/invalid-login-credentials')
+                ? 'That password is not right. Try again or tap Forgot password.'
+                : c === 'auth/too-many-requests' ? 'Too many tries. Wait a few minutes or tap Forgot password.'
+                : (err2.message || 'Could not connect. Try again.'), false);
+        }
+    };
+}
 
 // Creates the profile + directory entry the first time a social user signs in (works for popup AND redirect)
 const profilePromises = new Map();
@@ -391,6 +490,11 @@ window.ensureUserProfile = function(user) {
 // Only needed for the redirect fallback: report errors (profile creation happens in onAuthStateChanged)
 getRedirectResult(auth).catch((error) => {
     console.error("Redirect result error:", error.code, error.message);
+    if (error.code === 'auth/account-exists-with-different-credential') {
+        const pending = GoogleAuthProvider.credentialFromError(error) || OAuthProvider.credentialFromError(error);
+        const email = error.customData?.email || '';
+        if (pending && email) { showLinkAccountModal(email, pending, String(pending.providerId || '').startsWith('apple') ? 'apple' : 'google'); return; }
+    }
     if (typeof window.showToast === 'function') {
         window.showToast("Sign-in incomplete or cancelled.", "error");
     }
@@ -495,6 +599,10 @@ window.promptProfileSetupIfNeeded = function() {
     const inp = 'w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-base focus:outline-none focus:border-[#00F296]';
     const lab = 'block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1';
     const initial = esc((first || 'F').charAt(0).toUpperCase());
+    // Optional password, so they can also sign in with email + password later (not for hidden Apple emails).
+    const authEmail = String(user.email || '');
+    const canAddPassword = !!authEmail && !/privaterelay\.appleid\.com$/i.test(authEmail) &&
+        !(user.providerData || []).some(x => x.providerId === 'password');
 
     const m = document.createElement('div');
     m.id = 'profile-setup-modal';
@@ -535,6 +643,9 @@ window.promptProfileSetupIfNeeded = function() {
                     <option value="Defender">Defender (CB / LB / RB)</option>
                     <option value="Goalkeeper">Goalkeeper (GK)</option>
                 </select></div>
+            ${canAddPassword ? `<div><label class="${lab}">Password (optional)</label>
+                <input id="ps-pass" type="password" autocomplete="new-password" placeholder="At least 6 characters" class="${inp}">
+                <p class="text-[10px] text-white/50 mt-1">Lets you also sign in with ${esc(authEmail)} and a password. Leave empty to only use ${isApple ? 'Apple' : 'Google'}.</p></div>` : ''}
             <div id="ps-error" class="hidden text-xs text-red-400 font-bold bg-red-950/50 border border-red-500/50 p-2 rounded-xl text-center"></div>
             <button id="ps-save" onclick="saveProfileSetup()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm uppercase tracking-wider">Save &amp; continue</button>
         </div>`;
@@ -565,8 +676,18 @@ window.saveProfileSetup = async function() {
     if (!dob) return err('Please pick your birthday.');
     if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right. Fix it or leave it empty.');
     const avatar = window._profileSetupAvatar || (window.userProfile && window.userProfile.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const pass = document.getElementById('ps-pass')?.value || '';
+    if (pass && pass.length < 6) return err('Password needs at least 6 characters (or leave it empty).');
     const btn = document.getElementById('ps-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
     const full = `${firstName} ${lastName}`.trim();
+    if (pass && user.email) {
+        try { await linkWithCredential(user, EmailAuthProvider.credential(user.email, pass)); }
+        catch (pe) {
+            if (pe.code === 'auth/weak-password') { if (btn) { btn.disabled = false; btn.textContent = 'Save & continue'; } return err('That password is too weak. Try a longer one.'); }
+            if (pe.code !== 'auth/provider-already-linked') console.warn('Password not added:', pe.code);
+            if (pe.code === 'auth/requires-recent-login' && window.showToast) window.showToast('Password not added. You can set one later with Forgot password.', 'error');
+        }
+    }
     try {
         const fields = { uid: user.uid, firstName, lastName, nickname, email, dob, gender, position, avatar, name: full, profileComplete: true };
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), fields, { merge: true });

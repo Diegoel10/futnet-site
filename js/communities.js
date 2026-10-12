@@ -665,6 +665,10 @@ window.closeCommunity = function() {
 
 window.setCommunityTab = (t) => { S.tab = t; renderCommunityPage(); };
 
+// Games changed (someone joined, left, a new game...): redraw the community's Games tab so the
+// "Going" counts are live. Only that tab, so typing in the feed or chat is never interrupted.
+window.refreshCommunityGamesTab = () => { if (S.activeId && S.tab === 'games') renderCommunityPage(); };
+
 function communityGames(id) {
     const all = (window.eventsList || []).filter(e => e.communityId === id);
     const today = new Date().toISOString().slice(0, 10);

@@ -2,6 +2,7 @@
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import './sign-in-details.js';
 
 window.renderProfileTab = function() {
     const container = document.getElementById('tab-profile');
@@ -123,6 +124,17 @@ window.renderProfileTab = function() {
                             <i class="fa-solid fa-pen-to-square text-xs"></i>
                         </div>
                         <span class="text-xs font-bold text-white">Edit Profile Details</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-[#00B4AE]/70 text-xs"></i>
+                </button>
+
+                <!-- Sign-in details: Google / Apple / Email & password -->
+                <button onclick="openSignInDetails()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
+                    <div class="flex items-center gap-3">
+                        <div class="w-7 h-7 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
+                            <i class="fa-solid fa-key text-xs"></i>
+                        </div>
+                        <span class="text-xs font-bold text-white">Sign-in details</span>
                     </div>
                     <i class="fa-solid fa-chevron-right text-[#00B4AE]/70 text-xs"></i>
                 </button>
