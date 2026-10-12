@@ -236,6 +236,13 @@ window.renderEventCardHtml = function(ev) {
         if (currentGoing === 0 && attendeesArr.length === 0) currentGoing = 1;
 
         const isFull = currentGoing >= maxCapacity;
+        // Past games show "Game ended" instead of the head count.
+        const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+        const myUid = window.currentUser ? String(window.currentUser.uid) : '';
+        const myState = !myUid ? 'out'
+            : attendeesArr.some(a => String(a.uid) === myUid && (a.status || 'confirmed') === 'confirmed') ? 'in'
+            : (Array.isArray(ev.waitingList) ? ev.waitingList : []).some(w => String(w.uid) === myUid) ? 'waiting' : 'out';
+        const isOver = ev.isSessionEnded === true || (!!ev.date && String(ev.date).slice(0, 10) < todayStr);
 
         let rawPrice = 0.0;
         if (ev.price !== undefined && ev.price !== null) {
@@ -319,9 +326,22 @@ window.renderEventCardHtml = function(ev) {
                             </div>
                         </div>
 
+                        <div class="flex items-center gap-1.5 shrink-0">
+                        ${!isOver && myState === 'in' ? `
+                        <div class="flex items-center space-x-1 px-2.5 py-1 rounded-xl text-[10px] font-black border bg-[#00F296]/20 border-[#00F296] text-[#00F296]"><i class="fa-solid fa-check"></i><span>You're in</span></div>` : ''}
+                        ${!isOver && myState === 'waiting' ? `
+                        <div class="flex items-center space-x-1 px-2.5 py-1 rounded-xl text-[10px] font-black border bg-amber-400/20 border-amber-400 text-amber-300"><i class="fa-solid fa-hourglass-half"></i><span>Waitlist</span></div>` : ''}
+                        ${!isOver && myState === 'out' && window.currentUser ? `
+                        <button onclick="event.stopPropagation(); openEventDetails('${ev.id}'); setTimeout(() => openJoinGameModal('${ev.id}'), 250);" class="px-3 py-1 rounded-xl text-[10px] font-black ${isFull ? 'bg-amber-400 text-slate-950' : 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950'}">${isFull ? 'Join waitlist' : 'Join'}</button>` : ''}
+                        ${isOver ? `
+                        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold border bg-white/10 border-white/30 text-white/80">
+                            <i class="fa-solid fa-flag-checkered"></i>
+                            <span>Game ended</span>
+                        </div>` : `
                         <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold border ${isFull ? 'bg-red-500/30 border-red-500 text-red-200' : 'bg-[#00F296]/30 border-[#00F296] text-white'}">
                             <i class="fa-solid ${isFull ? 'fa-user-xmark' : 'fa-user-check'}"></i>
                             <span>${isFull ? 'Full' : `${currentGoing} /${maxCapacity} Going`}</span>
+                        </div>`}
                         </div>
                     </div>
                 </div>

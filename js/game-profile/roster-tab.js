@@ -86,6 +86,9 @@ export function renderRosterTab(event) {
         
         const statusLabel = window.activeRosterSubTab === 0 ? (isPaid ? 'Paid' : escapeHtml(att.paid || 'Unpaid')) : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
         const organizerBadge = isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : '';
+        const attendanceBadge = window.activeRosterSubTab === 0 && att.attendance === 'late' ? '<span class="text-[8px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded font-black border border-amber-400/40">Late</span>'
+            : window.activeRosterSubTab === 0 && att.attendance === 'noshow' ? '<span class="text-[8px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-black border border-red-500/40">No-show</span>'
+            : window.activeRosterSubTab === 2 && att.removedByAdmin ? '<span class="text-[8px] bg-white/10 text-white/60 px-2 py-0.5 rounded font-black border border-white/20">Removed</span>' : '';
         const plusOnesBadge = att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
 
         return `
@@ -97,6 +100,7 @@ export function renderRosterTab(event) {
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(rawName)}</span>
                                 ${organizerBadge}
+                                ${attendanceBadge}
                             </div>
                             ${plusOnesBadge}
                         </div>

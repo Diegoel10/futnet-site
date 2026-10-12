@@ -8,6 +8,7 @@ export function computePlayerStats(events) {
         if (!playerStats[key]) {
             playerStats[key] = {
                 name: name || 'Player',
+                uid: uid || '',
                 avatar: avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
                 position: position || 'Player',
                 played: 0,
@@ -167,7 +168,7 @@ export function renderLeaderboard(category = 'goals') {
             <tr class="hover:bg-slate-50 transition border-b border-slate-100">
                 <td class="p-4 font-black text-slate-900">${rankBadge}</td>
                 <td class="p-4 flex items-center gap-3">
-                    <img src="${escapeHtml(p.avatar)}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
+                    <img src="${escapeHtml(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar)}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
                     <div>
                         <div class="font-bold text-slate-900">${escapeHtml(p.name)}</div>
                         <div class="text-[10px] text-slate-400">${escapeHtml(p.position)}</div>

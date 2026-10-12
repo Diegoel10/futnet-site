@@ -475,7 +475,7 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${assignedPlayers.map(p => `
                     <div onclick="recordLiveGoal('${eventId}', '${teamKey}', '${(p.name || 'Player').replace(/'/g, "\\'")}')" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-white/10">
-                        <img src="${p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="text-xs font-bold text-white">${p.name}</span>
                     </div>
                 `).join('')}

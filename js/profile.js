@@ -65,7 +65,7 @@ window.renderProfileTab = function() {
                         </div>
                         <div>
                             <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Nickname</div>
-                            <div class="text-xs font-bold text-white truncate">${nickname || 'None'}</div>
+                            <div class="text-xs font-bold text-white truncate">${nickname || '—'}</div>
                         </div>
                     </div>
 
@@ -249,6 +249,7 @@ window.renderProfileEventsList = function() {
                 </div>
                 <p class="text-[10px] text-white/60 flex items-center gap-1"><i class="fa-solid fa-calendar text-[#00F296]"></i> ${ev.date || 'TBD'} • ${ev.time || ''}</p>
             </div>
+            ${window.profileEventsTabState === 'previous' ? '<span class="text-[9px] px-2 py-0.5 rounded-full font-bold bg-white/10 text-white/70 shrink-0 mr-2"><i class="fa-solid fa-flag-checkered"></i> Game ended</span>' : ''}
             <button class="bg-black/80 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg text-xs border border-white/10 shrink-0">View</button>
         </div>
     `).join('');

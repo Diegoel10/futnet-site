@@ -21,19 +21,16 @@ export function renderAdminTab(event) {
     const matches = Array.isArray(event.matches) ? event.matches : [];
     const currentTab = window.activeGameProfileTab || 'manage-event';
 
+    // Photo for a name (goal scorers are saved by name): find the player, then use their live profile photo.
     const resolvePlayerAvatar = (name) => {
         if (!name) return 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
-        const foundAtt = attendees.find(a => (a.name || '').toLowerCase() === name.toLowerCase());
-        if (foundAtt && (foundAtt.avatar || foundAtt.photoURL)) {
-            return foundAtt.avatar || foundAtt.photoURL;
-        }
-        if (window.directoryList) {
-            const foundDir = window.directoryList.find(u => (u.name || '').toLowerCase() === name.toLowerCase());
-            if (foundDir && (foundDir.avatar || foundDir.photoURL)) {
-                return foundDir.avatar || foundDir.photoURL;
-            }
-        }
-        return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
+        const low = name.toLowerCase();
+        const foundAtt = attendees.find(a => (a.name || '').toLowerCase() === low);
+        const foundDir = !foundAtt && Array.isArray(window.directoryList)
+            ? window.directoryList.find(u => (u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim()).toLowerCase() === low) : null;
+        const who = foundAtt || foundDir || { name };
+        if (window.resolvePlayerAvatar) return window.resolvePlayerAvatar({ ...who, name: who.name || name });
+        return who.avatar || who.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
     };
 
     const attendeesHtml = attendees.length === 0 
@@ -109,7 +106,10 @@ export function renderAdminTab(event) {
             ${waitingList.map(w => `
                 <div class="bg-amber-950/30 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs">
                     <span class="font-bold text-white">${escapeHtml(w.name || 'Player')}${w.autoJoin ? ' <span class="ml-1 text-[9px] font-black text-[#00F296] bg-[#00F296]/15 border border-[#00F296]/40 rounded px-1.5 py-0.5">AUTO</span>' : ''}</span>
-                    <button onclick="removePlayerFromEvent('${event.id}', '${w.uid}')" class="text-red-400 hover:text-red-300 font-bold text-[11px]">Remove</button>
+                    <span class="flex items-center gap-3 shrink-0">
+                        <button onclick="adminMoveToRoster('${event.id}', '${w.uid}')" class="text-[#00F296] hover:opacity-80 font-bold text-[11px]"><i class="fa-solid fa-arrow-up"></i> Move to roster</button>
+                        <button onclick="removePlayerFromEvent('${event.id}', '${w.uid}')" class="text-red-400 hover:text-red-300 font-bold text-[11px]">Remove</button>
+                    </span>
                 </div>
             `).join('')}
         </div>
@@ -1147,6 +1147,13 @@ window.openPlayerManagementModal = function(eventId, uid, playerName) {
                     <label class="block text-[10px] font-black uppercase tracking-wider text-white/50 mb-1.5">Credit paid: <span class="text-[#00F296]">${dollars(player.creditPaidCents)}</span></label>
                     <button id="modal-player-refund-btn" class="w-full bg-black/40 border border-[#00F296]/40 text-[#00F296] py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2"><i class="fa-solid fa-rotate-left"></i> Refund credit</button>
                 </div>` : ''}
+                <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-white/50 mb-1.5">Attendance</label>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        ${[['', 'On time', 'fa-check'], ['late', 'Late', 'fa-clock'], ['noshow', 'No-show', 'fa-user-slash']].map(([k, label, icon]) => `
+                            <button data-attendance="${k}" class="modal-attendance-btn py-2.5 rounded-xl text-[11px] font-black transition flex items-center justify-center gap-1 ${(player.attendance || '') === k ? (k === 'noshow' ? 'bg-red-500 text-white' : k === 'late' ? 'bg-amber-400 text-slate-950' : 'bg-[#00F296] text-slate-950') : 'bg-black/40 text-white border border-white/10'}"><i class="fa-solid ${icon}"></i>${label}</button>`).join('')}
+                    </div>
+                </div>
                 <div class="pt-2 border-t border-white/10">
                     <button id="modal-player-remove-btn" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 py-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2">
                         <i class="fa-solid fa-user-minus"></i> Remove from Roster
@@ -1165,8 +1172,43 @@ window.openPlayerManagementModal = function(eventId, uid, playerName) {
         window.removePlayerFromEvent(eventId, uid);
         modal.remove();
     };
+    modal.querySelectorAll('.modal-attendance-btn').forEach(b => b.onclick = () => {
+        window.setPlayerAttendance(eventId, uid, b.dataset.attendance || '');
+        modal.remove();
+    });
     const refundBtn = document.getElementById('modal-player-refund-btn');
     if (refundBtn) refundBtn.onclick = () => { modal.remove(); window.adminRefundPlayer(eventId, uid, playerName); };
+};
+
+/** Admin marks a player as on time / late / no-show (shown on the roster). */
+window.setPlayerAttendance = async function(eventId, uid, attendance) {
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.attendees = (draft.attendees || []).map(a => {
+            if (String(a.uid) !== String(uid)) return a;
+            const next = { ...a };
+            if (attendance) next.attendance = attendance; else delete next.attendance;
+            return next;
+        });
+    });
+    if (res.ok) window.showToast(attendance === 'noshow' ? 'Marked as no-show.' : attendance === 'late' ? 'Marked as late.' : 'Marked as on time.');
+};
+
+/** Admin moves someone from the waitlist onto the roster (even when the game is full). Payment is up to the admin. */
+window.adminMoveToRoster = async function(eventId, uid) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    const w = ev && (ev.waitingList || []).find(x => String(x.uid) === String(uid));
+    if (!w) return;
+    const full = freeSpotsOf(ev) < 1 + (Array.isArray(w.guests) ? w.guests.length : 0);
+    if (!confirm(`Move ${w.name || 'this player'} to the roster?${full ? ' The game is full, so this goes over the limit.' : ''}${creditGame(ev) ? ' No credit is taken: mark them Paid if they paid you.' : ''}`)) return;
+    const res = await mutateEvent(eventId, (draft) => {
+        const entry = (draft.waitingList || []).find(x => String(x.uid) === String(uid));
+        if (!entry) return;
+        draft.waitingList = (draft.waitingList || []).filter(x => String(x.uid) !== String(uid));
+        draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== String(uid));
+        const { autoJoin, waitingSince, ...rest } = entry;
+        draft.attendees.push({ ...rest, status: 'confirmed', addedByAdmin: true, paid: rest.paid && rest.paid !== 'Unpaid' ? rest.paid : 'Unpaid' });
+    });
+    if (res.ok) window.showToast(`${w.name || 'Player'} moved to the roster.`);
 };
 
 /** Admin gives (part of) a player's credit payment back. The player stays on the roster. */

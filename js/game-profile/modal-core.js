@@ -1393,7 +1393,7 @@ window.promptTeamGoal = function(eventId, mIndex, teamNum) {
             <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
                 ${teamPlayers.map(player => `
                     <div data-name="${escapeHtml(player.name || player)}" onclick="selectGoalScorer('${event.id}',${mIndex}, ${teamNum}, this.dataset.name)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black border border-white/10 hover:border-emerald-500/50 rounded-2xl cursor-pointer transition shadow-sm">
-                        <img src="${escapeHtml(safeAvatar(player.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-8 h-8 rounded-full object-cover border border-white/20 shadow-sm">
+                        <img src="${escapeHtml((window.resolvePlayerAvatar && typeof player === 'object' ? window.resolvePlayerAvatar(player) : safeAvatar(player.avatar)) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-8 h-8 rounded-full object-cover border border-white/20 shadow-sm">
                         <span class="text-xs font-bold text-white">${escapeHtml(player.name || player)}</span>
                     </div>
                 `).join('')}
@@ -1720,9 +1720,13 @@ window.removePlayerFromEvent = async function(eventId, uid, tab) {
         const paid = ctx ? ((draft.attendees || []).find(a => String(a.uid) === String(uid))?.creditPaidCents || 0) : 0;
         if (ctx) ctx.refund = 0;
         if (paid > 0) { ctx.refund = paid; ctx.note = 'Removed from the game by the organizer'; refunded = paid; }
+        const who = (draft.attendees || []).find(a => String(a.uid) === String(uid)) || (draft.waitingList || []).find(w => String(w.uid) === String(uid));
         draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== String(uid));
         draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(uid));
         pruneTeamsForUid(draft, uid);
+        // Removed by the organizer = Not Going (they show in that list, and can join again).
+        draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== String(uid));
+        if (who) draft.declinedList.push({ uid: String(uid), name: who.name || 'Player', removedByAdmin: true });
     }, hadCredit ? refundHooks(_ev, uid) : undefined);
     if (res.ok) window.showToast(refunded > 0 ? `Player removed. ${dollars(refunded)} was returned to their credit.` : "Player removed from roster.");
 };

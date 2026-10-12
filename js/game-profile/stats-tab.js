@@ -6,19 +6,16 @@ export function renderStatsTab(event) {
     const liveActive = event.liveMatchActive;
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
 
+    // Photo for a name (goal scorers are saved by name): find the player, then use their live profile photo.
     const resolvePlayerAvatar = (name) => {
         if (!name) return 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
-        const foundAtt = attendees.find(a => (a.name || '').toLowerCase() === name.toLowerCase());
-        if (foundAtt && (foundAtt.avatar || foundAtt.photoURL)) {
-            return foundAtt.avatar || foundAtt.photoURL;
-        }
-        if (window.directoryList) {
-            const foundDir = window.directoryList.find(u => (u.name || '').toLowerCase() === name.toLowerCase());
-            if (foundDir && (foundDir.avatar || foundDir.photoURL)) {
-                return foundDir.avatar || foundDir.photoURL;
-            }
-        }
-        return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
+        const low = name.toLowerCase();
+        const foundAtt = attendees.find(a => (a.name || '').toLowerCase() === low);
+        const foundDir = !foundAtt && Array.isArray(window.directoryList)
+            ? window.directoryList.find(u => (u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim()).toLowerCase() === low) : null;
+        const who = foundAtt || foundDir || { name };
+        if (window.resolvePlayerAvatar) return window.resolvePlayerAvatar({ ...who, name: who.name || name });
+        return who.avatar || who.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`;
     };
 
     // Same team names as Team Builder and Final results.
@@ -229,7 +226,7 @@ export function renderStatsTab(event) {
                                                     <div class="flex flex-wrap gap-1.5 pt-2 pb-1">
                                                         ${teamPlayers.length === 0 ? '<span class="text-[10px] text-white/40 italic">No players assigned</span>' : teamPlayers.map(p => `
                                                             <div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full">
-                                                                <img src="${escapeHtml(p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-5 h-5 rounded-full object-cover">
+                                                                <img src="${escapeHtml(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : (p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'))}" class="w-5 h-5 rounded-full object-cover">
                                                                 <span class="text-[10px] font-bold text-white">${escapeHtml(String(p.name || '').split(' ')[0])}</span>
                                                             </div>
                                                         `).join('')}
