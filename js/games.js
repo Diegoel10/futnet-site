@@ -229,8 +229,6 @@ function renderPreviousGames(grid) {
 window.renderEvents = function() {
     const grid = document.getElementById('events-grid');
     if (!grid) return;
-    paintGamesViewToggle();
-    if (window.gamesView === 'previous') { renderPreviousGames(grid); return; }
     if (window.selectedDateStr) {
         const [y, m, dd] = window.selectedDateStr.split('-').map(Number);
         const titleEl = document.getElementById('selected-date-title');

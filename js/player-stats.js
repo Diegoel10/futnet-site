@@ -86,20 +86,34 @@ function requestRatings(uids) {
             const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'playerRatings')({ uids: list });
             Object.assign(ratingCache, (r.data && r.data.ratings) || {});
             document.querySelectorAll('[data-skill-uid]').forEach(paintSkill);
+            document.querySelectorAll('[data-rating-uid]').forEach(paintRating);
         } catch (e) { console.warn('ratings', e); }
     }, 150);
 }
+function paintRating(el) {
+    const r = ratingCache[el.dataset.ratingUid];
+    if (!r) return;
+    const kind = el.dataset.ratingKind === 'attendance' ? 'attendance' : 'skill';
+    const x = r[kind] || {};
+    el.innerHTML = x.isNew ? '<span class="text-[10px] font-black rounded-full px-2 py-0.5 bg-white/10 text-white/70">NEW</span>'
+        : starsHtml(x.stars, kind === 'attendance' ? '#00F296' : '#FCD34D', 'text-xs');
+}
 function scanSkill(root) {
-    const els = root.querySelectorAll ? root.querySelectorAll('[data-skill-uid]') : [];
-    if (!els.length) return;
-    els.forEach(paintSkill);
-    requestRatings([...els].map(e => e.dataset.skillUid));
+    if (!root.querySelectorAll) return;
+    const els = root.querySelectorAll('[data-skill-uid]');
+    const full = root.querySelectorAll('[data-rating-uid]');
+    if (!els.length && !full.length) return;
+    els.forEach(paintSkill); full.forEach(paintRating);
+    requestRatings([...els].map(e => e.dataset.skillUid).concat([...full].map(e => e.dataset.ratingUid)));
 }
 new MutationObserver(list => list.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) scanSkill(n.matches?.('[data-skill-uid]') ? n.parentElement || n : n); })))
     .observe(document.documentElement, { childList: true, subtree: true });
 /** For lists: `<span data-skill-uid="UID"></span>` gets the skill stars. */
 export const skillBadge = (uid) => uid ? `<span data-skill-uid="${esc(uid)}" class="inline-flex"></span>` : '';
 window.skillBadge = skillBadge;
+/** Full stars for one player (member card): kind = 'attendance' | 'skill'. */
+export const ratingStars = (uid, kind) => uid ? `<span data-rating-uid="${esc(uid)}" data-rating-kind="${kind}" class="inline-flex"><span class="text-[10px] text-white/40">…</span></span>` : '';
+window.ratingStars = ratingStars;
 window.starsHtml = starsHtml;
 
 // ---------- the section ----------

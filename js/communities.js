@@ -1736,6 +1736,8 @@ window.openMemberBox = (uid) => {
             ${row('Nickname', esc(d.nickname || ''))}
             ${row('Position', esc(d.position || ''))}
             ${row('Joined', esc(joined))}
+            ${window.ratingStars ? row('Attendance', window.ratingStars(uid, 'attendance')) : ''}
+            ${window.ratingStars ? row('Skill', window.ratingStars(uid, 'skill')) : ''}
             ${bal !== null ? row('Credit balance', esc(((bal || 0) / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' }))) : ''}
         </div>
         ${sc ? `<div class="bg-red-500/10 border border-red-500/40 rounded-xl p-3 text-xs leading-relaxed text-white/90">

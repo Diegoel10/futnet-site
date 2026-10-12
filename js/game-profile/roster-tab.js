@@ -187,44 +187,70 @@ window.switchRosterSubTab = function(subIndex) {
     }
 };
 
+// Tap a player on the roster: the same card as in Communities (photo, position, attendance + skill stars,
+// Add friend / Message, View stats; Manage for the organizer/admins; Close for everyone).
 window.openPlayerProfileModal = function(uid, name, avatar) {
-    if (!uid || uid === window.currentUser?.uid) return;
-
+    if (!uid || String(uid).startsWith('manual_')) return;
+    const me = window.currentUser?.uid;
     const photo = avatar && avatar.trim() !== '' ? avatar : window.resolvePlayerAvatar({ uid, name });
     window._popupPerson = { uid, name, avatar: photo };
+    const eventId = window.activeModalEventId;
+    const ev = (window.eventsList || []).find(e => String(e.id) === String(eventId)) || {};
+    const canManage = !!me && (ev.organizerId === me || (ev.communityId && (window.myCommunityRoles || {})[ev.communityId] === 'admin'));
+    const d = (window.cachedDirectoryList || window.directoryList || []).find(u => String(u.uid) === String(uid)) || {};
+    const isOrganizer = uid === ev.organizerId;
+    const idOf = (f) => String(typeof f === 'string' ? f : (f && f.uid) || '');
+    const isFriend = (window.friendsList || []).some(f => idOf(f) === String(uid));
+    const sent = (window.sentRequestsList || []).some(f => idOf(f) === String(uid));
+    const theyAsked = (window.receivedRequestsList || []).some(f => idOf(f) === String(uid));
+    const row = (k, v) => v ? `<div class="flex justify-between items-center gap-3 text-xs"><span class="text-white/50">${k}</span><span class="font-bold text-white text-right">${v}</span></div>` : '';
+    const DARK = 'bg-black/60 hover:bg-black text-white font-bold rounded-xl text-xs border border-white/15 transition flex items-center justify-center gap-2';
+    const GREEN = 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black rounded-xl text-xs transition flex items-center justify-center gap-2';
+    const friendBtn = isFriend ? `<div class="${DARK} flex-1 py-3 opacity-80"><i class="fa-solid fa-user-check text-[#00F296]"></i> Friends</div>`
+        : sent ? `<div class="${DARK} flex-1 py-3 opacity-70"><i class="fa-solid fa-clock"></i> Request sent</div>`
+        : `<button onclick="rosterCardFriend('${jsArg(uid)}', ${theyAsked})" class="${DARK} flex-1 py-3"><i class="fa-solid fa-user-plus"></i> ${theyAsked ? 'Accept friend' : 'Add friend'}</button>`;
 
     let modal = document.getElementById('player-profile-popup');
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'player-profile-popup';
         modal.className = 'fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm';
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
         document.body.appendChild(modal);
     }
-
     modal.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white text-center animate-in fade-in zoom-in duration-200">
-            <div class="flex justify-end">
-                <button onclick="document.getElementById('player-profile-popup').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
+        <div class="bg-[#040E13] border border-emerald-500/30 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+            <div class="text-center space-y-2">
+                <img id="player-popup-img" class="w-24 h-24 rounded-full object-cover border-2 border-[#00F296] mx-auto" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                <div id="player-popup-name" class="text-lg font-black"></div>
+                <span class="inline-block text-[9px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 ${isOrganizer ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white/80'}">${isOrganizer ? 'Organizer' : 'Player'}</span>
             </div>
-            <div class="flex flex-col items-center space-y-2">
-                <img id="player-popup-img" class="w-20 h-20 rounded-full object-cover border-4 border-[#00F296] shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                <h3 id="player-popup-name" class="text-base font-black text-white"></h3>
+            <div class="space-y-2.5 bg-black/40 border border-white/10 rounded-xl p-3">
+                ${row('Nickname', escapeHtml(d.nickname || ''))}
+                ${row('Position', escapeHtml(d.position || ''))}
+                ${window.ratingStars ? row('Attendance', window.ratingStars(uid, 'attendance')) : ''}
+                ${window.ratingStars ? row('Skill', window.ratingStars(uid, 'skill')) : ''}
             </div>
-            <div class="space-y-2 pt-2">
-                <button onclick="sendDirectMessageFromRoster(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-comments"></i> Send Message
-                </button>
-                <button onclick="document.getElementById('player-profile-popup').remove(); openPlayerStatsSheet(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-[#00F296]/40 transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-chart-simple text-[#00F296]"></i> View stats
-                </button>
-                <button onclick="sendFriendRequestFromRoster(window._popupPerson.uid)" class="w-full bg-black/60 hover:bg-black text-white font-bold py-3 rounded-xl text-xs border border-white/20 transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-user-plus"></i> Send Friend Request
-                </button>
+            ${uid !== me ? `<div class="flex gap-2">
+                ${friendBtn}
+                <button onclick="sendDirectMessageFromRoster(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="${GREEN} flex-1 py-3"><i class="fa-solid fa-comments"></i> Message</button>
+            </div>` : ''}
+            <button onclick="document.getElementById('player-profile-popup').remove(); openPlayerStatsSheet(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar, '${jsArg(ev.communityId || '')}')" class="${DARK} w-full py-3">
+                <i class="fa-solid fa-chart-simple text-[#00F296]"></i> View stats</button>
+            <div class="flex gap-2">
+                <button onclick="document.getElementById('player-profile-popup').remove()" class="${DARK} flex-1 py-3">Close</button>
+                ${canManage && eventId ? `<button onclick="document.getElementById('player-profile-popup').remove(); openPlayerManagementModal('${jsArg(eventId)}', '${jsArg(uid)}', window._popupPerson.name)" class="${GREEN} flex-1 py-3"><i class="fa-solid fa-sliders"></i> Manage</button>` : ''}
             </div>
-        </div>
-    `;
+        </div>`;
     document.getElementById('player-popup-img').src = photo;
     document.getElementById('player-popup-name').textContent = name;
+};
+
+window.rosterCardFriend = async function(uid, accept) {
+    if (accept && window.acceptFriendRequest) await window.acceptFriendRequest(uid);
+    else if (window.sendFriendRequest) await window.sendFriendRequest(uid);
+    const p = window._popupPerson;
+    setTimeout(() => { if (document.getElementById('player-profile-popup') && p) window.openPlayerProfileModal(p.uid, p.name, p.avatar); }, 600);
 };
 
 window.sendDirectMessageFromRoster = function(uid, name, avatar) {
