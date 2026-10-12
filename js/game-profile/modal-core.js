@@ -167,12 +167,11 @@ window.renderInfoTab = function(event) {
 
     return `
         <div class="space-y-4 font-sans text-white">
+            ${gameStatusCardHtml(event)}
             <!-- Join / Leave first, so it's the first thing people see -->
             <div>
                 ${rsvpButtonHtml}
             </div>
-
-            ${gameStatusCardHtml(event)}
 
             <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
                 <div class="flex items-center gap-3">

@@ -104,12 +104,15 @@ function buildChatRows() {
         const msgs = th.messages || [];
         if (!msgs.length) return;
         const last = msgs[msgs.length - 1];
+        // Older messages from the phones had no date: use the newest message in the chat that has one.
+        let ms = msOf(last);
+        for (let i = msgs.length - 1; !ms && i >= 0; i--) ms = msOf(msgs[i]);
         const live = (window.cachedDirectoryList || []).find(d => d.uid === th.id);
         rows.push({
             id: th.id, isGroup: false,
             name: (live && (live.name || `${live.firstName || ''} ${live.lastName || ''}`.trim())) || th.name || 'Player',
             avatar: photoOf(th.id, th.name, th.avatar),
-            last, lastMine: last.senderUid === myUid, ms: msOf(last),
+            last, lastMine: last.senderUid === myUid, ms, order: rows.length,
             unread: msgs.filter(m => m.senderUid !== myUid && m.isRead !== true).length
         });
     });
@@ -124,12 +127,12 @@ function buildChatRows() {
             unread: list.filter(m => m.senderUid !== myUid && msOf(m) > readAt).length
         });
     });
-    return rows.sort((a, b) => b.ms - a.ms);
+    return rows.sort((a, b) => (b.ms - a.ms) || ((a.order ?? 0) - (b.order ?? 0)));
 }
 
 function chatRowHtml(r) {
     const selected = window.activeChatThreadId === r.id;
-    const time = fmtListTime(r.ms);
+    const time = fmtListTime(r.ms) || (r.last && !r.isGroup ? String(r.last.time || "") : "");
     let preview = '';
     if (r.last) {
         const ticks = r.lastMine && !r.isGroup
@@ -538,6 +541,7 @@ async function sendToActiveChat(text, media) {
 
     const newMessage = {
         id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+        createdAt: Date.now(),
         senderUid: window.currentUser.uid,
         sender: senderName,
         text: text,

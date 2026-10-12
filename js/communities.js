@@ -679,6 +679,7 @@ window.setCommunityTab = (t) => { S.tab = t; renderCommunityPage(); };
 
 // Games changed (someone joined, left, a new game...): redraw the community's Games tab so the
 // "Going" counts are live. Only that tab, so typing in the feed or chat is never interrupted.
+window.setCommunityGamesView = (v) => { S.gamesView = v === 'prev' ? 'prev' : 'up'; renderCommunityPage(); };
 window.refreshCommunityGamesTab = () => { if (S.activeId && S.tab === 'games') renderCommunityPage(); };
 
 function communityGames(id) {
@@ -1005,10 +1006,13 @@ function gamesTab(c, isMember) {
     }
     return `<div class="space-y-5">
         ${isMember && !suspFrom('games') && (c.adminOnlyGames === false || myRole(c.id) === 'admin') ? `<button onclick="showCommunityGameCreation('${jsArg(c.id)}')" class="${BTN_PRIMARY} w-full py-3"><i class="fa-solid fa-plus mr-1"></i> Create Game in ${esc(c.name)}</button>` : ''}
-        <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Upcoming (${up.length})</div>
-            <div class="grid grid-cols-1 gap-4">${up.map(card).join('') || '<p class="text-xs text-white/50 italic">No upcoming games yet.</p>'}</div></div>
-        ${prev.length ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-white/50 mb-2">Previous (${prev.length})</div>
-            <div class="grid grid-cols-1 gap-4 opacity-90">${prev.slice(0, 20).map(card).join('')}</div></div>` : ''}
+        <div class="flex bg-black/40 border border-white/10 rounded-2xl p-1 gap-1">
+            ${[['up', `Upcoming (${up.length})`], ['prev', `Previous (${prev.length})`]].map(([k, l]) => `
+                <button onclick="setCommunityGamesView('${k}')" class="flex-1 py-2 rounded-xl text-xs font-black transition ${(S.gamesView || 'up') === k ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950' : 'text-white/70 hover:text-white'}">${l}</button>`).join('')}
+        </div>
+        ${(S.gamesView || 'up') === 'up'
+            ? `<div class="grid grid-cols-1 gap-4">${up.map(card).join('') || '<p class="text-xs text-white/50 italic text-center py-4">No upcoming games yet.</p>'}</div>`
+            : `<div class="grid grid-cols-1 gap-4">${prev.slice(0, 40).map(card).join('') || '<p class="text-xs text-white/50 italic text-center py-4">No previous games yet.</p>'}</div>`}
     </div>`;
 }
 

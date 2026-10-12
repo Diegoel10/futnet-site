@@ -333,8 +333,10 @@ async function notifyGameCancelled(game, eventId) {
     type: "game_cancelled",
     senderUid: game.organizerId,
     eventId,
-    title: "Game cancelled ❌",
-    body: `${game.title || "Your game"} on ${game.date || ""} ${game.time || ""} was cancelled by the organizer.`.replace(/\s+/g, " "),
+    title: (game.gameStatus && game.gameStatus.cancelReason === "storm") ? "Game cancelled due to storm ⛈️" : "Game cancelled ❌",
+    body: ((game.gameStatus && game.gameStatus.cancelReason === "storm")
+      ? `${game.title || "Your game"} on ${game.date || ""} ${game.time || ""} was cancelled because of the weather. Stay safe!`
+      : `${game.title || "Your game"} on ${game.date || ""} ${game.time || ""} was cancelled by the organizer.`).replace(/\s+/g, " "),
   }, { exclude: [game.organizerId], key: `cancel_${eventId}` });
 }
 
@@ -466,22 +468,31 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
     }, { key: `results_${eventId}` });
   }
 
-  // g) Admin changed the game status (Game on / Storm watch / Delayed) -> tell everyone on it
-  const st = (g) => (g && g.gameStatus && g.gameStatus.state) || "on";
-  const stNote = (g) => String((g && g.gameStatus && g.gameStatus.note) || "").trim();
-  if (st(before) !== st(after) || (st(after) !== "on" && stNote(before) !== stNote(after))) {
-    const s2 = st(after);
-    const head = s2 === "watch" ? `Storm watch for ${title} ⛈️` : s2 === "delayed" ? `${title} is delayed ⏰` : `${title} is on ✅`;
-    const note = stNote(after);
+  // g) Storm watch: turned on/off, or the status changed (Game on / likely / not likely) -> tell everyone on it
+  const gs = (g) => (g && g.gameStatus) || {};
+  const watchOn = (g) => gs(g).stormWatch === true;
+  const stState = (g) => gs(g).state || "on";
+  const stNote = (g) => String(gs(g).note || "").trim();
+  const changedWatch = watchOn(before) !== watchOn(after);
+  const changedState = watchOn(after) && (stState(before) !== stState(after) || stNote(before) !== stNote(after));
+  if (changedWatch || changedState) {
+    const label = { on: "Game on ✅", likely: "Game likely 🟡", unlikely: "Game not likely 🔴" }[stState(after)] || "Game on ✅";
+    const by = gs(after).by || organizer;
+    let head; let body;
+    if (changedWatch && !watchOn(after)) {
+      head = `Storm watch over for ${title} ☀️`;
+      body = "The game is going ahead as planned.";
+    } else {
+      head = changedWatch ? `Storm watch for ${title} ⛈️` : `${title}: ${label}`;
+      body = stNote(after) || (changedWatch ? `Bad weather is possible. Status: ${label}. We'll keep you posted.` : `Storm watch update: ${label}.`);
+    }
     await notify(uniq([...participants(after), organizer]), {
       type: "game_status",
-      senderUid: (after.gameStatus && after.gameStatus.by) || organizer,
+      senderUid: by,
       eventId,
       title: head,
-      body: note || (s2 === "watch" ? "Bad weather is possible. Keep an eye on the game page for updates."
-        : s2 === "delayed" ? "The start is delayed. Check the game page for the new time."
-          : "The game is going ahead as planned. See you there!"),
-    }, { exclude: [(after.gameStatus && after.gameStatus.by) || ""], key: `status_${eventId}_${s2}_${tenMinuteBucket()}` });
+      body,
+    }, { exclude: [by], key: `status_${eventId}_${watchOn(after) ? stState(after) : "off"}_${tenMinuteBucket()}` });
   }
 });
 
@@ -1655,13 +1666,13 @@ exports.refreshGameWeather = onSchedule({ schedule: "every 3 hours", timeZone: D
       // Storms within 24 hours: one heads-up to the organizer (only while the game is still "on").
       const kick = new Date(`${String(g.date).slice(0, 10)}T${String(g.time || "18:00").slice(0, 5)}:00`);
       const hoursAway = (kick.getTime() - Date.now()) / 3600000;   // rough (server time zone); fine for a heads-up
-      const state = (g.gameStatus && g.gameStatus.state) || "on";
-      if (f.weather.storm && state === "on" && hoursAway > -2 && hoursAway < 30 && g.organizerId) {
+      const watching = !!(g.gameStatus && g.gameStatus.stormWatch === true);
+      if (f.weather.storm && !watching && hoursAway > -2 && hoursAway < 30 && g.organizerId) {
         await notify([g.organizerId], {
           type: "game_weather",
           eventId: d.id,
           title: `Storms forecast for ${g.title || "your game"} ⛈️`,
-          body: `${f.weather.label} around kickoff (${f.weather.rainPct}% rain). Set the game status in the Admin tab so players know.`,
+          body: `${f.weather.label} around kickoff (${f.weather.rainPct}% rain). Turn on Storm watch in the Admin tab so players know.`,
         }, { key: `stormwarn_${d.id}_${String(g.date).slice(0, 10)}` });
       }
     } catch (e) { logger.warn("weather failed", d.id, e.message); }
