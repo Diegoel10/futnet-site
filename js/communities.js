@@ -1008,12 +1008,14 @@ window.showCommunityMembers = (id, highlightUid) => {
         <div id="cm-list" class="space-y-2">${membersListHtml()}</div>`);
     window.refreshCommunityMembersList();   // fills the count line too
 };
-const LB_TABS = [['wins', 'Most Won Matches', 'matchesWon', 'won'], ['sessions', 'Most Won Sessions', 'sessionsWon', 'won'], ['goals', 'Most Goals', 'goals', 'goals']];
+// [tab, label, value, -, how many they played on this tab, its word]
+const LB_TABS = [['wins', 'Most Won Matches', 'matchesWon', 'won', 'played', 'match'], ['sessions', 'Most Won Sessions', 'sessionsWon', 'won', 'sessionsPlayed', 'session'], ['goals', 'Most Goals', 'goals', 'goals', 'played', 'match']];
+const lbPlayed = (r, t) => { const n = r[t[4]] || 0; return `${n} ${t[5]}${n === 1 ? '' : (t[5] === 'match' ? 'es' : 's')}`; };
 function leaderboardHtml(c, tab) {
     const events = (window.eventsList || []).filter(e => e.communityId === c.id);
     const cur = LB_TABS.find(t => t[0] === tab) || LB_TABS[0];
     const rows = computePlayerStats(events).filter(p => p[cur[2]] > 0)
-        .sort((a, b) => b[cur[2]] - a[cur[2]] || b.played - a.played || String(a.name).localeCompare(String(b.name))).slice(0, 25);
+        .sort((a, b) => b[cur[2]] - a[cur[2]] || (b[cur[4]] || 0) - (a[cur[4]] || 0) || String(a.name).localeCompare(String(b.name))).slice(0, 25);
     return `
         <div class="grid grid-cols-3 gap-1 bg-black/50 border border-white/10 rounded-xl p-1">
             ${LB_TABS.map(t => `<button onclick="setCommunityLeaderboardTab('${jsArg(c.id)}','${t[0]}')" class="py-2 px-1 rounded-lg text-[10px] font-black leading-tight transition ${t[0] === cur[0] ? 'bg-[#00F296] text-slate-950' : 'text-white/70 hover:text-white'}">${t[1]}</button>`).join('')}
@@ -1023,7 +1025,7 @@ function leaderboardHtml(c, tab) {
                 <span class="w-6 text-center font-black text-white/60">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
                 ${avatarImg({ uid: r.uid, name: r.name, avatar: r.avatar }, 'w-8 h-8 rounded-full object-cover')}
                 <span class="flex-1 truncate font-bold text-white">${esc(r.name)}</span>
-                <span class="text-white/50 text-[10px]">${r.played} played</span>
+                <span class="text-white/50 text-[10px]">${lbPlayed(r, cur)}</span>
                 <span class="font-black text-[#00F296] w-10 text-right">${r[cur[2]]}</span>
             </div>`).join('')}</div>`
         : '<p class="text-xs text-white/50 italic text-center py-6">Nothing here yet. Finish a community match and the rankings will show up.</p>'}`;

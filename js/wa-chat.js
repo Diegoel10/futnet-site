@@ -219,7 +219,7 @@ export function renderWhatsApp(messages, opts = {}) {
         }
         // A "run" = messages from the same person within 5 minutes: only the first gets the tail, name and photo.
         const startsRun = !prev || String(prev.uid) !== String(m.uid) || (ms && prev.ms && ms - prev.ms > 5 * 60000);
-        const time = ms ? timeOf(ms) : (m.time || '');
+        const time = m.timeText || (ms ? timeOf(ms) : (m.time || ''));
         const ticks = mine && opts.ticks ? `<span class="wa-ticks ${m.isRead ? 'read' : ''}">✓✓</span>` : '';
         const name = !mine && opts.group && startsRun
             ? `<div class="wa-name" style="color:${nameColor(m.uid || m.name)}">${esc(m.name || 'Player')}</div>` : '';

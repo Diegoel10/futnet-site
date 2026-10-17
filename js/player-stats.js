@@ -193,16 +193,28 @@ export async function mountPlayerStats(boxId, uid, { name, avatar, communityId =
     if (!el || !uid) return;
     const person = personOf(uid, name, avatar);
     boxes[boxId] = { person, communityId, stats: null };
-    el.innerHTML = `<div class="text-xs text-white/50 text-center py-6"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading stats…</div>`;
+    // Last numbers seen show right away; the fresh ones replace them when they arrive.
+    const key = `futnet_stats_${uid}_${communityId || 'all'}`;
+    let shown = false;
+    try {
+        const old = JSON.parse(localStorage.getItem(key) || 'null');
+        if (old && old.totals) {
+            boxes[boxId].stats = old; shown = true;
+            el.innerHTML = `<div class="space-y-3">${statsHtml(old, person, communityId, boxId)}</div>`;
+        }
+    } catch (e) { /* no saved copy */ }
+    if (!shown) el.innerHTML = `<div class="text-xs text-white/50 text-center py-6"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading stats…</div>`;
     try {
         const s = await fetchStats(uid, communityId);
+        try { localStorage.setItem(key, JSON.stringify(s)); } catch (e) { /* storage full / private */ }
+        if (boxes[boxId]?.person.uid !== uid || (boxes[boxId]?.communityId || '') !== (communityId || '')) return;   // switched meanwhile
         boxes[boxId].stats = s;
         const box = document.getElementById(boxId);
         if (box) box.innerHTML = `<div class="space-y-3">${statsHtml(s, person, communityId, boxId)}</div>`;
     } catch (e) {
         console.warn('player stats', e);
         const box = document.getElementById(boxId);
-        if (box) box.innerHTML = `<p class="text-xs text-white/50 text-center py-4">Couldn't load stats right now.</p>`;
+        if (box && !shown) box.innerHTML = `<p class="text-xs text-white/50 text-center py-4">Couldn't load stats right now.</p>`;
     }
 }
 

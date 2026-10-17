@@ -840,7 +840,7 @@ window.openRequestToJoin = function(eventId) {
             <div class="text-sm font-black">${escapeHtml(ev.title || 'Community game')}</div>
             ${mustPay ? `<div class="bg-amber-500/10 border border-amber-400/40 rounded-xl p-3 text-xs text-white/90 leading-relaxed">
                 <b class="text-amber-300">This is a must pay event.</b><br>
-                Send <b>${escapeHtml(costSummary(ev))}</b> via Zelle, Cash App, or Venmo to <b>${who}</b>. ${who} will have to approve your request.
+                Send <b>${escapeHtml(costSummary(ev))}</b> via Zelle, Cash App, Venmo or Apple Pay to <b>${who}</b>. ${who} will have to approve your request.
             </div>` : `<p class="text-xs text-white/70">${who} or a community admin has to approve your request before you are on the roster.</p>`}
             ${pending
                 ? `<p class="text-xs text-[#00F296] font-bold text-center">Your request is waiting for approval.</p>

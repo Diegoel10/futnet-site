@@ -390,12 +390,13 @@ export function readPayOptions(idp) {
 }
 
 // ------------------------------------------------------------------ accepted payments
-// Community admins save how members can pay them: communities/{id}.paymentMethods = { zelle, venmo, cashapp, paypal }
+// Community admins save how members can pay them: communities/{id}.paymentMethods = { zelle, venmo, cashapp, paypal, applepay }
 const PAY_KINDS = [
     ['zelle', 'Zelle', 'fa-solid fa-building-columns', 'Email or phone'],
     ['venmo', 'Venmo', 'fa-brands fa-vimeo-v', '@username'],
     ['cashapp', 'Cash App', 'fa-solid fa-dollar-sign', '$cashtag'],
-    ['paypal', 'PayPal', 'fa-brands fa-paypal', 'paypal.me name or email']
+    ['paypal', 'PayPal', 'fa-brands fa-paypal', 'paypal.me name or email'],
+    ['applepay', 'Apple Pay', 'fa-brands fa-apple', 'Phone or email for Apple Cash']
 ];
 const clean = (v) => String(v || '').trim().slice(0, 80);
 
@@ -420,7 +421,7 @@ export function paymentMethodsHtml(community, cents, adminName) {
             <button type="button" onclick="copyPayValue(this, '${jsArg(val)}')" class="shrink-0 bg-black/60 border border-white/20 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg"><i class="fa-solid fa-copy"></i></button>
         </div>`;
     });
-    if (!rows.length) return `<p class="text-xs text-white/70">Ask ${esc(adminName || 'your admin')} how to pay (Zelle, Venmo, Cash App or PayPal). Once they get it, they add it to your credit.</p>`;
+    if (!rows.length) return `<p class="text-xs text-white/70">Ask ${esc(adminName || 'your admin')} how to pay (Zelle, Venmo, Cash App, PayPal or Apple Pay). Once they get it, they add it to your credit.</p>`;
     return `<div class="space-y-2">${rows.join('')}</div>
         <p class="text-[10px] text-white/50">Send it to ${esc(adminName || 'your admin')}. Once they get it, they add it to your credit and you can join.</p>`;
 }

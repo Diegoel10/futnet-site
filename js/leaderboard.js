@@ -14,7 +14,8 @@ export function computePlayerStats(events) {
                 played: 0,
                 goals: 0,
                 matchesWon: 0,
-                sessionsWon: 0
+                sessionsWon: 0,
+                sessionsPlayed: 0
             };
         } else if (position && position !== 'Player' && playerStats[key].position === 'Player') {
             playerStats[key].position = position;
@@ -84,6 +85,16 @@ export function computePlayerStats(events) {
         });
 
         if (ev.isSessionEnded && matches.length > 0) {
+            // Sessions played: everyone on a team of a finished session, once per session.
+            const seen = new Set();
+            for (let i = 0; i < teamsCount; i++) {
+                ((ev.teamAssignments && ev.teamAssignments[i]) || []).forEach(p => {
+                    if (!p || !p.name) return;
+                    const rec = getPlayerRecord(p.name, p.avatar, p.uid, p.position);
+                    if (seen.has(rec)) return;
+                    seen.add(rec); rec.sessionsPlayed += 1;
+                });
+            }
             const stats = {};
             for (let i = 0; i < teamsCount; i++) {
                 const tName = (ev.teamNames && ev.teamNames[i]) || `Team ${i + 1}`;

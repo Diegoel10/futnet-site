@@ -444,11 +444,17 @@ window.renderActiveChatMessages = function() {
 
     const myUid = window.currentUser?.uid;
     const myName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || '';
-    const list = th.messages.map(m => {
+    // Real send time; older messages without one take the time of the message before them,
+    // then a stable sort by time so every device shows the same order.
+    let prevMs = 0;
+    const list = th.messages.map((m, i) => {
         const mine = (m.senderUid && m.senderUid === myUid) || (!m.senderUid && myName && m.sender && m.sender.toLowerCase() === myName.toLowerCase());
-        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms: msOf(m), time: m.time, isRead: m.isRead === true, media: m.media,
-            deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions };
-    });
+        const real = msOf(m) || 0;
+        const ms = real || prevMs;
+        if (ms) prevMs = ms;
+        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms, time: m.time, timeText: real ? '' : (m.time || ''), isRead: m.isRead === true, media: m.media,
+            deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions, _i: i };
+    }).sort((a, b) => (a.ms - b.ms) || (a._i - b._i));
     const atBottom = isNearBottom();
     container.classList.add('wa-wall');
     container.classList.remove('space-y-3', 'p-4');

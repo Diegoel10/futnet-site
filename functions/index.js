@@ -356,6 +356,40 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
     } catch (e) { logger.warn("weather on save failed", eventId, e.message); }
   }
 
+  // A finished game was saved (ended, results fixed, attendance marked...): rebuild its players' saved stats.
+  if ((before && before.isSessionEnded === true) || (after && after.isSessionEnded === true)) {
+    const keyOf = (g) => g ? JSON.stringify([g.isSessionEnded === true, g.matches || [], g.teamAssignments || {}, g.teamNames || {},
+      arr(g.attendees).map((a) => [uidOf(a), a.attendance || "", a.name || ""]), g.communityId || "", g.date || ""]) : "";
+    if (keyOf(before) !== keyOf(after)) {
+      const g = after || before;
+      const uids = new Set([...arr((before || {}).attendees), ...arr(g.attendees)].map(uidOf));
+      for (let i = 0; i < teamCount(g); i++) teamPlayers(g, i).forEach((p) => uids.add(uidOf(p)));
+      try { await refreshStatsFor([...uids], [(before || {}).communityId, g.communityId]); } catch (e) { logger.warn("stats refresh failed", eventId, e.message); }
+    }
+  }
+
+  // Late cancel (less than 2 hours before kickoff): saved for the attendance stars (2 points instead of 5).
+  // Cancelling earlier is fair notice and isn't recorded. Removed by the organizer doesn't count either.
+  if (before && after && after.isSessionEnded !== true) {
+    const stillIn = new Set(arr(after.attendees).map(uidOf));
+    const declined = new Map(arr(after.declinedList).map((d) => [uidOf(d), d]));
+    const left = uniq(arr(before.attendees).map(uidOf)).filter((u) => u && !stillIn.has(u) && isRealPlayer(u));
+    const start = left.length ? startOf(after) : null;
+    if (start) {
+      const hoursBefore = (start - Date.now()) / 3600000;
+      for (const u of left) {
+        const d = declined.get(u);
+        if (!d || d.removedByAdmin === true || hoursBefore >= 2 || hoursBefore < -6) continue;
+        try {
+          await col("cancellations").doc(`${eventId}_${u}`).set({
+            uid: u, eventId, communityId: after.communityId || "", date: String(after.date || "").slice(0, 10),
+            hoursBefore: Math.round(hoursBefore * 10) / 10, at: Date.now(),
+          });
+        } catch (e) { logger.warn("cancel log", eventId, u, e.message); }
+      }
+    }
+  }
+
   // New game: tell the community it belongs to
   if (!before && after) {
     if (after.communityId) {
@@ -400,6 +434,26 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
       title: "New player joined 🙌",
       body: joined.length === 1 ? `${first} joined ${title}.` : `${first} and ${joined.length - 1} more joined ${title}.`,
     });
+  }
+
+  // a2) Players who cancelled (left on their own, not removed by the organizer) -> tell the organizer
+  const afterIn = new Set(arr(after.attendees).map(uidOf));
+  const declinedNow = new Map(arr(after.declinedList).map((d) => [uidOf(d), d]));
+  const cancelled = [...beforeIn].filter((u) => u && !afterIn.has(u) && u !== organizer
+    && declinedNow.has(u) && declinedNow.get(u).removedByAdmin !== true);
+  if (cancelled.length && after.isSessionEnded !== true) {
+    const start = startOf(after);
+    const hours = start ? (start - Date.now()) / 3600000 : 99;
+    const when = hours < 0 ? " (cancelled after kickoff)" : hours < 2 ? ` (cancelled ${Math.max(1, Math.round(hours * 60))} min before kickoff: late cancel)` : "";
+    const first = await nameOf(cancelled[0]);
+    const spots = arr(after.waitingList).length ? " The waitlist was told about the open spot." : "";
+    await notify([organizer], {
+      type: "game_player_cancelled",
+      senderUid: cancelled[0],
+      eventId,
+      title: hours < 2 ? "Late cancel ⚠️" : "Player cancelled",
+      body: (cancelled.length === 1 ? `${first} can't make it to ${title}${when}.` : `${first} and ${cancelled.length - 1} more cancelled ${title}${when}.`) + spots,
+    }, { key: `left_${eventId}_${cancelled.sort().join("_")}_${Math.floor(Date.now() / 60000)}` });
   }
 
   // b) Non-members asking to join a community game -> tell the organizer
@@ -944,6 +998,83 @@ async function enforcePayment(eventId, before, after) {
   return removed.length > 0 || charged.length > 0;
 }
 
+// ---- a2) guests added / removed later -------------------------------------------
+// The website charges or refunds guests itself (creditPaidCents changes in the same save).
+// When a player's guests change and creditPaidCents did NOT (an app's "Manage guests"),
+// the server does it: extra guests are charged from credit (not enough = those guests are
+// taken off again + a notice), removed guests are refunded by the game's refund policy.
+async function settleGuestChanges(eventId, before, after) {
+  if (!rules.isCreditGame(after)) return false;
+  const prev = new Map(arr(before.attendees).map((a) => [uidOf(a), a]));
+  const todo = arr(after.attendees).filter((a) => {
+    const u = uidOf(a);
+    const b = prev.get(u);
+    return b && isRealPlayer(u) && Number(b.creditPaidCents) > 0 && a.addedByAdmin !== true && a.role !== "Organizer" &&
+      arr(a.guests).length !== arr(b.guests).length &&
+      (Number(a.creditPaidCents) || 0) === (Number(b.creditPaidCents) || 0);
+  }).map((a) => ({ uid: uidOf(a), beforeGuests: arr(prev.get(uidOf(a)).guests) }));
+  if (!todo.length) return false;
+
+  const ref = col("eventsList").doc(eventId);
+  const done = [];
+  await db.runTransaction(async (tx) => {
+    done.length = 0;
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const g = snap.data();
+    const cid = g.communityId;
+    const now = Date.now();
+    const start = startOf(g);
+    const bal = {};
+    for (const t of todo) {
+      const s = await tx.get(credRef(cid, t.uid));
+      bal[t.uid] = s.exists ? (Number(s.data().balanceCents) || 0) : 0;
+    }
+    let changed = false;
+    const attendees = arr(g.attendees).map((a) => {
+      const t = todo.find((x) => x.uid === uidOf(a));
+      if (!t) return a;
+      const paid = Number(a.creditPaidCents) || 0;
+      const cost = rules.costFor(g, arr(a.guests).length);
+      if (cost > paid) {
+        const need = cost - paid;
+        if (bal[t.uid] >= need) {
+          writeCredit(tx, cid, t.uid, a.name, bal[t.uid], -need, "game", "Guest fee", g, eventId);
+          changed = true;
+          done.push({ uid: t.uid, kind: "charged", cents: need });
+          return { ...a, paid: "Credit", creditPaidCents: cost, creditCommunityId: cid, guests: arr(a.guests).map((x) => ({ ...x, paid: "Credit" })) };
+        }
+        changed = true;
+        done.push({ uid: t.uid, kind: "short", cents: need, have: bal[t.uid] });
+        return { ...a, guests: t.beforeGuests };             // not enough credit: guests go back to what was paid for
+      }
+      if (cost < paid) {
+        const back = rules.leaveRefund(g, paid - cost, now, start).now;
+        changed = true;
+        if (back > 0) {
+          writeCredit(tx, cid, t.uid, a.name, bal[t.uid], back, "refund", "Guest removed", g, eventId);
+          done.push({ uid: t.uid, kind: "refunded", cents: back });
+        }
+        return { ...a, creditPaidCents: paid - back };     // what was not refunded still counts as paid
+      }
+      return a;
+    });
+    if (changed) tx.update(ref, { attendees, playersGoing: rules.headsOf(attendees) });
+  });
+  for (const d of done) {
+    const title = after.title || "the game";
+    const msg = d.kind === "charged"
+      ? { title: "Guest added 💳", body: `${money(d.cents)} was taken from your credit for your guest(s) in ${title}.` }
+      : d.kind === "refunded"
+        ? { title: `${money(d.cents)} refunded 💰`, body: `You removed a guest from ${title}, so ${money(d.cents)} is back in your credit.`, sound: "cha_ching" }
+        : { title: "Add credit for your guest 💳", body: `Your guest(s) in ${title} cost ${money(d.cents)} and you have ${money(d.have)} credit, so they weren't added. Send the money to your admin, then add them again.` };
+    await notify([d.uid], { type: d.kind === "refunded" ? "community_credit" : "game_payment_needed", eventId, communityId: after.communityId || "", ...msg },
+      { key: `guests_${eventId}_${d.uid}_${d.kind}_${tenMinuteBucket()}_${d.cents}` });
+  }
+  if (done.length) logger.info(`Guest money ${eventId}:`, done.map((d) => `${d.uid} ${d.kind} ${d.cents}`).join(", "));
+  return done.length > 0;
+}
+
 // ---- b) refund late cancels once someone takes the spot ------------------------
 async function refundFilledSpots(eventId, before, after) {
   const pending = arr(after.pendingRefunds);
@@ -1174,6 +1305,7 @@ exports.onGameMoney = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (e
   try {
     // A fix writes the game again, and that write runs this function again for the next step.
     if (await enforcePayment(eventId, prev, after)) return;
+    if (await settleGuestChanges(eventId, prev, after)) return;
     await refundFilledSpots(eventId, prev, after);
     if (await autoPlace(eventId, after)) return;      // the roster changed: the next run handles the offer
     await updateSpotOffer(eventId, prev, after);
@@ -1800,7 +1932,7 @@ function playerGame(g, uid) {
   };
   const pick = (idx, name, fb) => (Number.isInteger(idx) && idx >= 0 && idx < n) ? idx : (names.indexOf(name) !== -1 ? names.indexOf(name) : fb);
   const table = names.map((nm, i) => ({ i, pts: 0, gf: 0, ga: 0 }));
-  let goals = 0, w = 0, dr = 0, l = 0;
+  let goals = 0, w = 0, dr = 0, l = 0, gf = 0, ga = 0;
   for (const m of arr(g.matches)) {
     if (!m || m.isFinished === false) continue;
     const a = pick(m.teamAIndex, m.teamA, 0), b = pick(m.teamBIndex, m.teamB, 1);
@@ -1812,6 +1944,7 @@ function playerGame(g, uid) {
     goals += [...g1, ...g2].filter(isMine).length;
     if (myTeam === a || myTeam === b) {
       const mine = myTeam === a ? s1 : s2, theirs = myTeam === a ? s2 : s1;
+      gf += mine; ga += theirs;
       if (mine > theirs) w++; else if (mine < theirs) l++; else dr++;
     }
   }
@@ -1819,7 +1952,7 @@ function playerGame(g, uid) {
   const place = myTeam >= 0 && (w + dr + l) > 0 ? order.findIndex((t) => t.i === myTeam) + 1 : 0;
   return {
     eventId: g.id, title: g.title || "Game", date: String(g.date || "").slice(0, 10), communityId: g.communityId || "",
-    goals, w, d: dr, l, place, champion: place === 1, team: myTeam >= 0 ? names[myTeam] : "",
+    goals, w, d: dr, l, gf, ga, place, champion: place === 1, team: myTeam >= 0 ? names[myTeam] : "",
     attendance: (att && att.attendance) || "", signedUp: !!att,
   };
 }
@@ -1868,13 +2001,214 @@ function buildPlayerStats(games, uid, communityId) {
   };
 }
 
-exports.playerStats = onCall(async (request) => {
+// ---------------------------------------------------------------------------
+// 18. Stars: attendance (are they reliable?) and skill (how good, from the stats). Shown to everyone.
+//   Attendance, points per game: on time 5, late 4, cancelled < 2 h before kickoff 2, no-show 0.
+//   Skill, per match, ranked against the other players (so 3 stars = middle of the pack):
+//     win rate 35%, team +/- per match 30%, goals per match 25%, titles 10%
+//     (keepers/defenders: goals 10%, +/- 45%; forwards: goals 30%, +/- 25%).
+//   Both: 60% last 10 games + 40% whole history once there are 10 games; "New" until 3 games.
+//   Skill is pulled toward 3 stars while there are few games, so one lucky night isn't 5 stars.
+// ---------------------------------------------------------------------------
+let ratingIndex = { at: 0, byUid: null, cancels: null };
+async function ratingData() {
+  if (ratingIndex.byUid && Date.now() - ratingIndex.at < 3 * 60000) return ratingIndex;
+  const games = await endedGames();
+  const byUid = {};
+  for (const g of games) {
+    const uids = new Set(arr(g.attendees).map(uidOf));
+    for (let i = 0; i < teamCount(g); i++) teamPlayers(g, i).forEach((p) => uids.add(uidOf(p)));
+    for (const u of uids) {
+      if (!isRealPlayer(u)) continue;
+      const r = playerGame(g, u);
+      if (r) (byUid[u] = byUid[u] || []).push(r);
+    }
+  }
+  Object.values(byUid).forEach((list) => list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)));
+  let cancels = {};
+  try {
+    const snap = await col("cancellations").get();
+    snap.docs.forEach((d) => { const c = d.data() || {}; if (c.uid) (cancels[c.uid] = cancels[c.uid] || []).push(c); });
+  } catch (e) { cancels = {}; }
+  ratingIndex = { at: Date.now(), byUid, cancels };
+  return ratingIndex;
+}
+
+const avg = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0);
+const halfStars = (v) => Math.max(0, Math.min(5, Math.round(v * 2) / 2));
+const blend = (all, recent, n) => (n >= 10 ? 0.6 * recent + 0.4 * all : all);
+
+function attendanceRating(records, cancels, communityId) {
+  const played = new Set(records.map((r) => r.eventId));
+  const today = new Date().toISOString().slice(0, 10);
+  const entries = [
+    ...records.filter((r) => r.signedUp).map((r) => ({ date: r.date, pts: r.attendance === "noshow" ? 0 : r.attendance === "late" ? 4 : 5 })),
+    ...cancels.filter((c) => !played.has(c.eventId) && c.date <= today && (!communityId || c.communityId === communityId)).map((c) => ({ date: c.date, pts: 2 })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const n = entries.length;
+  const score = blend(avg(entries.map((e) => e.pts)), avg(entries.slice(0, 10).map((e) => e.pts)), n);
+  return {
+    score: Math.round(score * 10) / 10, stars: halfStars(score), games: n, isNew: n < 3,
+    onTime: entries.filter((e) => e.pts === 5).length, late: entries.filter((e) => e.pts === 4).length,
+    lateCancels: entries.filter((e) => e.pts === 2).length, noShows: entries.filter((e) => e.pts === 0).length,
+  };
+}
+
+function rates(list) {
+  const showed = list.filter((r) => r.attendance !== "noshow");
+  const m = showed.reduce((s, r) => s + r.w + r.d + r.l, 0);
+  if (!m) return null;
+  return {
+    win: showed.reduce((s, r) => s + r.w, 0) / m,
+    pm: showed.reduce((s, r) => s + r.gf - r.ga, 0) / m,
+    gpm: showed.reduce((s, r) => s + r.goals, 0) / m,
+    title: showed.filter((r) => r.champion).length / showed.length,
+    games: showed.length,
+  };
+}
+
+function skillWeights(position) {
+  const p = String(position || "").toLowerCase();
+  if (/goal|keeper|gk|defen|back|cb|lb|rb/.test(p)) return { win: 0.35, pm: 0.45, gpm: 0.10, title: 0.10 };
+  if (/forw|strik|wing|st\b|cf|attack/.test(p)) return { win: 0.35, pm: 0.25, gpm: 0.30, title: 0.10 };
+  return { win: 0.35, pm: 0.30, gpm: 0.25, title: 0.10 };
+}
+
+/** Everyone's rates in this scope (players with 3+ games), to rank against. */
+function skillPopulation(byUid, communityId) {
+  const pop = { win: [], pm: [], gpm: [], title: [] };
+  for (const list of Object.values(byUid)) {
+    const r = rates(communityId ? list.filter((x) => x.communityId === communityId) : list);
+    if (!r || r.games < 3) continue;
+    pop.win.push(r.win); pop.pm.push(r.pm); pop.gpm.push(r.gpm); pop.title.push(r.title);
+  }
+  return pop;
+}
+
+function skillRating(records, pop, position) {
+  const showed = records.filter((r) => r.attendance !== "noshow");
+  const all = rates(showed);
+  const n = all ? all.games : 0;
+  if (!all || n < 3) return { score: 0, stars: 0, games: n, isNew: true };
+  const pct = (list, x) => (list.length ? (list.filter((v) => v < x).length + 0.5 * list.filter((v) => v === x).length) / list.length : 0.5);
+  const w = skillWeights(position);
+  const composite = (r) => w.win * pct(pop.win, r.win) + w.pm * pct(pop.pm, r.pm) + w.gpm * pct(pop.gpm, r.gpm) + w.title * pct(pop.title, r.title);
+  const recent = rates(showed.slice(0, 10)) || all;
+  const raw = 1 + 4 * blend(composite(all), composite(recent), n);
+  const score = 3 + (raw - 3) * (n / (n + 4));   // few games -> closer to 3
+  return { score: Math.round(score * 10) / 10, stars: halfStars(score), games: n, isNew: false };
+}
+
+async function positionOf(uid) {
+  try { return ((await col("directory").doc(uid).get()).data() || {}).position || ""; } catch (e) { return ""; }
+}
+
+async function ratingsFor(uid, communityId, position) {
+  const { byUid, cancels } = await ratingData();
+  const all = byUid[uid] || [];
+  const records = communityId ? all.filter((r) => r.communityId === communityId) : all;
+  return {
+    attendance: attendanceRating(records, cancels[uid] || [], communityId),
+    skill: skillRating(records, skillPopulation(byUid, communityId), position),
+  };
+}
+
+/** Community Info: top 5 players (skill stars) and top 5 scorers, from this community's finished games. */
+exports.communityTop = onCall(async (request) => {
   if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
-  const uid = String((request.data || {}).uid || request.auth.uid);
   const communityId = String((request.data || {}).communityId || "");
+  if (!communityId) throw new HttpsError("invalid-argument", "Missing community.");
+  const { byUid } = await ratingData();
+  const pop = skillPopulation(byUid, communityId);
+  const rows = [];
+  for (const [u, list] of Object.entries(byUid)) {
+    const mine = list.filter((r) => r.communityId === communityId && r.attendance !== "noshow");
+    if (!mine.length) continue;
+    rows.push({ uid: u, list: mine, games: mine.length, goals: mine.reduce((s, r) => s + r.goals, 0) });
+  }
+  const scorers = rows.filter((r) => r.goals > 0).sort((a, b) => (b.goals - a.goals) || (a.games - b.games)).slice(0, 5);
+  const candidates = rows.filter((r) => r.games >= 3);
+  const positions = await Promise.all(candidates.map((r) => positionOf(r.uid)));
+  const players = candidates.map((r, i) => ({ ...r, skill: skillRating(r.list, pop, positions[i]) }))
+    .sort((a, b) => (b.skill.score - a.skill.score) || (b.games - a.games)).slice(0, 5);
+  // Names + photos from the directory
+  const uids = uniq([...players, ...scorers].map((r) => r.uid));
+  const dir = {};
+  await Promise.all(uids.map((u) => col("directory").doc(u).get().then((d) => { dir[u] = d.data() || {}; }).catch(() => { dir[u] = {}; })));
+  const who = (u) => {
+    const d = dir[u] || {};
+    return { uid: u, name: d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player", avatar: String(d.avatar || "").startsWith("http") ? d.avatar : "" };
+  };
+  return {
+    players: players.map((r) => ({ ...who(r.uid), stars: r.skill.stars, score: r.skill.score, games: r.games })),
+    scorers: scorers.map((r) => ({ ...who(r.uid), goals: r.goals, games: r.games })),
+  };
+});
+
+/** Stars for a list of players (rosters): { ratings: { uid: { skill, attendance } } } */
+exports.playerRatings = onCall(async (request) => {
+  if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
+  const uids = arr((request.data || {}).uids).map(String).filter(isRealPlayer).slice(0, 80);
+  const { byUid, cancels } = await ratingData();
+  const pop = skillPopulation(byUid, "");
+  const positions = await Promise.all(uids.map(positionOf));
+  const ratings = {};
+  uids.forEach((u, i) => {
+    const records = byUid[u] || [];
+    const sk = skillRating(records, pop, positions[i]);
+    const at = attendanceRating(records, cancels[u] || [], "");
+    ratings[u] = { skill: { stars: sk.stars, isNew: sk.isNew }, attendance: { stars: at.stars, isNew: at.isNew } };
+  });
+  return { ratings };
+});
+
+async function computePlayerStats(uid, communityId) {
   const stats = buildPlayerStats(await endedGames(), uid, communityId);
+  stats.ratings = await ratingsFor(uid, communityId, await positionOf(uid));
   // Community names for the switch
   const names = await Promise.all(stats.communities.map((c) => col("communities").doc(c.id).get().then((s) => (s.data() || {}).name || "Community").catch(() => "Community")));
   stats.communities = stats.communities.map((c, i) => ({ ...c, name: names[i] })).sort((a, b) => b.games - a.games);
   return stats;
+}
+
+// Ready-made stats: one saved answer per player (and per community), rebuilt when a finished game
+// changes and every night, so opening a profile is one quick read instead of going through every game.
+const statsCacheRef = (uid, cid) => col("playerStatsCache").doc(`${uid}_${cid || "all"}`);
+async function saveStats(uid, cid) {
+  const stats = await computePlayerStats(uid, cid);
+  await statsCacheRef(uid, cid).set({ stats, at: Date.now() });
+  return stats;
+}
+async function refreshStatsFor(uids, cids) {
+  endedCache.at = 0; ratingIndex.at = 0;            // read the games again
+  for (const u of uniq(uids).filter(isRealPlayer)) {
+    for (const c of uniq(["", ...cids.filter(Boolean)])) {
+      try { await saveStats(u, c); } catch (e) { logger.warn("stats rebuild failed", u, c, e.message); }
+    }
+  }
+}
+
+exports.playerStats = onCall(async (request) => {
+  if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
+  const uid = String((request.data || {}).uid || request.auth.uid);
+  const communityId = String((request.data || {}).communityId || "");
+  try {
+    const s = await statsCacheRef(uid, communityId).get();
+    const d = s.exists ? s.data() : null;
+    if (d && d.stats && Date.now() - (Number(d.at) || 0) < 26 * 3600000) return d.stats;
+  } catch (e) { /* build it below */ }
+  return saveStats(uid, communityId);
+});
+
+/** Every night: rebuild everyone's saved stats (stars move a little as other players play). */
+exports.rebuildPlayerStats = onSchedule({ schedule: "every day 04:00", timeZone: DEFAULT_TZ, timeoutSeconds: 540, memory: "512MiB" }, async () => {
+  endedCache.at = 0; ratingIndex.at = 0;
+  const { byUid } = await ratingData();
+  let n = 0;
+  for (const [u, list] of Object.entries(byUid)) {
+    for (const c of uniq(["", ...list.map((r) => r.communityId).filter(Boolean)])) {
+      try { await saveStats(u, c); n++; } catch (e) { logger.warn("stats rebuild failed", u, c, e.message); }
+    }
+  }
+  logger.info(`Rebuilt ${n} saved stats`);
 });
