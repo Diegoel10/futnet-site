@@ -11,7 +11,7 @@
 // A player who paid with credit carries on the roster entry:  creditPaidCents, creditCommunityId.
 import { db, appId } from './firebase-config.js';
 import {
-    doc, collection, runTransaction, serverTimestamp, getDoc
+    doc, collection, runTransaction, serverTimestamp, getDoc, getDocs, query, where
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-store.js';
 import { policyLines, fullRefundAllowed, leaveRefund, startMsOf, refundsOnCancel, CLAIM_MINUTES, DEFAULT_CLAIM_MINUTES, claimMinutesOf, partialPctOf } from './money-rules.js';
@@ -249,53 +249,133 @@ export function adminCreditHtml(c, members, credits, ledger) {
             <span class="text-sm font-black text-[#00F296]">${dollars(total)}</span>
         </div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Members</div>
-            <div class="space-y-2">${members.map(m => {
+            <div class="relative mb-2">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-xs"></i>
+                <input id="credit-search" type="search" placeholder="Search members" autocomplete="off" value="${esc(window._creditSearch || '')}" oninput="filterCreditMembers(this.value)"
+                    class="w-full bg-black/50 border border-white/15 focus:border-[#00F296] outline-none rounded-xl pl-8 pr-3 py-2.5 text-base sm:text-sm text-white placeholder-white/40">
+            </div>
+            <div id="credit-members" class="space-y-2">${members.map(m => {
                 const bal = credits[m.uid]?.balanceCents || 0;
-                return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
+                const q = foldName(window._creditSearch || '');
+                const hide = q && !foldName(m.name || '').includes(q);
+                return `<div data-credit-name="${esc(foldName(m.name || ''))}" class="${hide ? 'hidden ' : ''}flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
                     ${photoImg(m, 'w-9 h-9 border border-emerald-500/40')}
                     <div class="flex-1 min-w-0"><div class="text-xs font-bold text-white truncate">${esc(m.name || 'Player')}</div>
                     <div class="text-[10px] ${bal > 0 ? 'text-[#00F296]' : 'text-white/50'}">Balance ${dollars(bal)}</div></div>
-                    <button onclick="openCreditModal('${jsArg(c.id)}', '${jsArg(m.uid)}', '${jsArg(m.name || 'Member')}')" class="${BTN_PRIMARY}">Add / Edit</button>
+                    <button onclick="openCreditModal('${jsArg(c.id)}', '${jsArg(m.uid)}', '${jsArg(m.name || 'Member')}')" class="${BTN_PRIMARY} shrink-0">Manage credits</button>
                 </div>`;
-            }).join('') || '<p class="text-xs text-white/50 italic">No members yet.</p>'}</div></div>
+            }).join('') || '<p class="text-xs text-white/50 italic">No members yet.</p>'}</div>
+            <p id="credit-no-match" class="hidden text-xs text-white/50 italic text-center py-3">No members match your search.</p></div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Recent activity</div>
             <div class="space-y-1.5">${ledger.length ? ledger.slice(0, 30).map(l => ledgerLine(l, true)).join('') : '<p class="text-xs text-white/50 italic">Nothing yet.</p>'}</div></div>
     </div>`;
 }
 
+/** Lowercase, no accents: "José" matches "jose". */
+const foldName = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+/** Credit tab search: hides members whose name doesn't match (kept while the list refreshes). */
+window.filterCreditMembers = function(v) {
+    window._creditSearch = String(v || '');
+    const q = foldName(v);
+    let shown = 0;
+    document.querySelectorAll('#credit-members [data-credit-name]').forEach(row => {
+        const ok = !q || row.getAttribute('data-credit-name').includes(q);
+        row.classList.toggle('hidden', !ok);
+        if (ok) shown++;
+    });
+    document.getElementById('credit-no-match')?.classList.toggle('hidden', shown > 0 || !q);
+};
+
+const TAB_ON = 'py-2 rounded-lg text-[11px] font-black bg-[#00F296] text-slate-950';
+const TAB_OFF = 'py-2 rounded-lg text-[11px] font-black text-white/60';
+
+/** Manage credits for one member: Add, Remove, or History (their whole ledger). */
 window.openCreditModal = function(cid, uid, name) {
     document.getElementById('credit-modal')?.remove();
     const el = document.createElement('div');
     el.id = 'credit-modal';
     el.className = 'fixed inset-0 z-[210] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
     el.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-5 space-y-4 text-white shadow-2xl" onclick="event.stopPropagation()">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-5 space-y-4 text-white shadow-2xl max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h4 class="text-xs font-black uppercase truncate">Credit • ${esc(name)}</h4>
+                <div class="min-w-0"><h4 class="text-xs font-black uppercase truncate">Manage credits • ${esc(name)}</h4>
+                    <div class="text-[11px] text-white/60 mt-0.5">Balance: <span id="credit-modal-bal" class="font-black text-[#00F296]">…</span></div></div>
                 <button onclick="document.getElementById('credit-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="grid grid-cols-2 gap-2 bg-black/60 p-1 rounded-xl border border-white/10">
-                <button id="credit-mode-add" onclick="setCreditMode('add')" class="py-2 rounded-lg text-[11px] font-black bg-[#00F296] text-slate-950">Add credit</button>
-                <button id="credit-mode-remove" onclick="setCreditMode('remove')" class="py-2 rounded-lg text-[11px] font-black text-white/60">Remove credit</button>
+            <div class="grid grid-cols-3 gap-1 bg-black/60 p-1 rounded-xl border border-white/10">
+                <button id="credit-mode-add" onclick="setCreditMode('add')" class="${TAB_ON}">Add</button>
+                <button id="credit-mode-remove" onclick="setCreditMode('remove')" class="${TAB_OFF}">Remove</button>
+                <button id="credit-mode-history" onclick="setCreditMode('history')" class="${TAB_OFF}">History</button>
             </div>
-            <div><label class="text-[10px] font-black uppercase text-white/60">Amount ($)</label>
-                <input id="credit-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="20" class="${INPUT} mt-1"></div>
-            <div><label class="text-[10px] font-black uppercase text-white/60">Note (optional)</label>
-                <input id="credit-note" maxlength="120" placeholder="Zelle, Cash App, cash..." class="${INPUT} mt-1"></div>
-            <button id="credit-save" onclick="saveCreditModal('${jsArg(cid)}', '${jsArg(uid)}', '${jsArg(name)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Save</button>
+            <div id="credit-form" class="space-y-4">
+                <div><label class="text-[10px] font-black uppercase text-white/60">Amount ($)</label>
+                    <input id="credit-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="20" class="${INPUT} mt-1"></div>
+                <div><label class="text-[10px] font-black uppercase text-white/60">Note (optional)</label>
+                    <input id="credit-note" maxlength="120" placeholder="Zelle, Cash App, cash..." class="${INPUT} mt-1"></div>
+                <button id="credit-save" onclick="saveCreditModal('${jsArg(cid)}', '${jsArg(uid)}', '${jsArg(name)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">Add credit</button>
+            </div>
+            <div id="credit-history" class="hidden space-y-1.5 overflow-y-auto min-h-0 -mx-1 px-1"></div>
         </div>`;
     el.onclick = () => el.remove();
     document.body.appendChild(el);
     window._creditMode = 'add';
+    window._creditFor = { cid, uid, name };
+    loadCreditHistory(cid, uid);
     setTimeout(() => document.getElementById('credit-amount')?.focus(), 50);
 };
 
 window.setCreditMode = function(mode) {
     window._creditMode = mode;
-    const on = 'py-2 rounded-lg text-[11px] font-black bg-[#00F296] text-slate-950';
-    const off = 'py-2 rounded-lg text-[11px] font-black text-white/60';
-    document.getElementById('credit-mode-add').className = mode === 'add' ? on : off;
-    document.getElementById('credit-mode-remove').className = mode === 'remove' ? on : off;
+    ['add', 'remove', 'history'].forEach(m => { const b = document.getElementById(`credit-mode-${m}`); if (b) b.className = m === mode ? TAB_ON : TAB_OFF; });
+    document.getElementById('credit-form')?.classList.toggle('hidden', mode === 'history');
+    document.getElementById('credit-history')?.classList.toggle('hidden', mode !== 'history');
+    const save = document.getElementById('credit-save');
+    if (save) save.textContent = mode === 'remove' ? 'Remove credit' : 'Add credit';
+};
+
+/** One member's full credit history (every add, removal, game fee and refund), newest first. */
+async function loadCreditHistory(cid, uid) {
+    const box = document.getElementById('credit-history');
+    if (box) box.innerHTML = '<p class="text-xs text-white/50 text-center py-4"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading history…</p>';
+    try {
+        const [bal, snap] = await Promise.all([getDoc(credRef(cid, uid)), getDocs(query(ledgerCol(cid), where('uid', '==', String(uid))))]);
+        const balEl = document.getElementById('credit-modal-bal');
+        if (balEl) balEl.textContent = dollars(bal.exists() ? (bal.data().balanceCents || 0) : 0);
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => tsMs(b.at) - tsMs(a.at));
+        const b = document.getElementById('credit-history'); if (!b) return;
+        if (!rows.length) { b.innerHTML = '<p class="text-xs text-white/50 italic text-center py-4">No credit activity yet.</p>'; return; }
+        const added = rows.filter(r => r.amountCents > 0).reduce((t, r) => t + r.amountCents, 0);
+        const used = rows.filter(r => r.amountCents < 0).reduce((t, r) => t - r.amountCents, 0);
+        b.innerHTML = `<div class="grid grid-cols-2 gap-2 mb-2">
+                <div class="bg-black/40 border border-white/10 rounded-xl p-2 text-center"><div class="text-[9px] font-black uppercase text-white/50">Added + refunds</div><div class="text-sm font-black text-[#00F296]">${dollars(added)}</div></div>
+                <div class="bg-black/40 border border-white/10 rounded-xl p-2 text-center"><div class="text-[9px] font-black uppercase text-white/50">Used + removed</div><div class="text-sm font-black text-red-300">${dollars(used)}</div></div>
+            </div>` + rows.map(l => historyLine(l)).join('');
+    } catch (e) {
+        console.error('credit history', e);
+        const b = document.getElementById('credit-history');
+        if (b) b.innerHTML = '<p class="text-xs text-red-300 text-center py-4">Could not load the history. Try again.</p>';
+    }
+}
+
+/** A ledger line with the balance after it (so the admin can follow the money step by step). */
+const historyLine = (l) => {
+    const plus = (l.amountCents || 0) > 0;
+    const when = tsMs(l.at) ? new Date(tsMs(l.at)).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'just now';
+    const label = l.type === 'topup' ? 'Credit added' : l.type === 'game' ? `Game: ${l.eventTitle || ''}` : l.type === 'refund' ? `Refund: ${l.eventTitle || l.note || ''}` : (plus ? 'Credit added' : 'Credit removed');
+    const bits = [when];
+    if (l.note && l.type !== 'game') bits.push(esc(l.note));
+    if (l.byName && (l.type === 'topup' || l.type === 'adjust')) bits.push('by ' + esc(l.byName));
+    return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2">
+        <div class="flex-1 min-w-0">
+            <div class="text-[11px] font-bold text-white truncate">${esc(label)}</div>
+            <div class="text-[10px] text-white/50">${bits.join(' • ')}</div>
+        </div>
+        <div class="text-right shrink-0">
+            <div class="text-xs font-black ${plus ? 'text-[#00F296]' : 'text-red-300'}">${plus ? '+' : ''}${dollars(l.amountCents)}</div>
+            ${typeof l.balanceAfterCents === 'number' ? `<div class="text-[9px] text-white/40">Bal. ${dollars(l.balanceAfterCents)}</div>` : ''}
+        </div>
+    </div>`;
 };
 
 window.saveCreditModal = async function(cid, uid, name) {
