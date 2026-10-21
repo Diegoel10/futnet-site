@@ -131,8 +131,8 @@ export function renderRosterTab(event) {
                         <p class="text-[11px] text-white/70">Format: ${event.format || '11v11'} • Teams: ${event.teamsCount || 3}</p>
                     </div>
                 </div>
-                <button onclick="openTeamMakingModal('${event.id}')" class="${event.capsDraft && event.capsDraft.status === 'live' ? 'bg-amber-400' : 'bg-[#00F296]'} hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-[0_0_15px_rgba(0,242,150,0.4)] transition">
-                    ${event.capsDraft && event.capsDraft.status === 'live' ? '🧢 Caps mode live' : (window.currentUser && (event.organizerId === window.currentUser.uid || (event.communityId && (window.myCommunityRoles || {})[event.communityId] === 'admin')) ? 'Build Teams' : 'View Teams')}
+                <button onclick="openTeamMakingModal('${event.id}')" class="bg-[#00F296] hover:opacity-90 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs shadow-[0_0_15px_rgba(0,242,150,0.4)] transition">
+                    Build Teams
                 </button>
             </div>
 

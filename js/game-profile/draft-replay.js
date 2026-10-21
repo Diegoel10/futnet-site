@@ -24,7 +24,7 @@ async function dataOf(ev) {
     const count = ev.teamsCount || 3;
     const names = window.getTeamNames(ev), colors = window.getTeamColors(ev);
     const ta = ev.teamAssignments || {};
-    const picks = ((ev.capsDraft && ev.capsDraft.picks) || []).slice().sort((a, b) => (a.no || 0) - (b.no || 0));
+    const picks = ((ev.capsDraft && ev.capsDraft.picks) || []).filter(p => !p.removed).sort((a, b) => (a.no || 0) - (b.no || 0));
     const teams = Array.from({ length: count }, (_, i) => {
         const players = listOf(ta, i);
         const cu = capOf(ev, i);
