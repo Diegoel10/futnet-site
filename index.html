@@ -764,8 +764,11 @@
                 const hashMatch = window.location.hash.match(/[#&]event=([^&/]+)/);
                 const queryId = new URLSearchParams(window.location.search).get('event');
                 id = hashMatch ? decodeURIComponent(hashMatch[1]) : queryId;
-                if (id) sessionStorage.setItem('futnet_pending_event', id);
+                // Captains link (#event=ID&caps=1): open the team builder on Caps mode
+                const capsFlag = /[#&?]caps=1\b/.test(window.location.hash + window.location.search);
+                if (id) { sessionStorage.setItem('futnet_pending_event', id); sessionStorage.setItem('futnet_pending_caps', capsFlag ? '1' : ''); }
                 else id = sessionStorage.getItem('futnet_pending_event');
+                window.deepLinkCaps = sessionStorage.getItem('futnet_pending_caps') === '1';
             } catch (e) { /* storage blocked: the link still works when the person is already signed in */ }
             window.deepLinkEventId = id || null;
         })();
@@ -809,6 +812,9 @@
                 const found = (window.eventsList || []).some(ev => String(ev.id) === String(id));
                 if (found && typeof window.openEventDetails === 'function') {
                     window.openEventDetails(id);
+                    if (window.deepLinkCaps && typeof window.openCapsMode === 'function') setTimeout(() => window.openCapsMode(id), 400);
+                    window.deepLinkCaps = false;
+                    try { sessionStorage.removeItem('futnet_pending_caps'); } catch (e) {}
                     finish();
                     return;
                 }

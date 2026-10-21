@@ -506,10 +506,14 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
       type: "team_assigned",
       senderUid: organizer,
       eventId,
-      title: "You've been assigned to a team 👕",
+      title: after.capsDraft && after.capsDraft.status === "live" ? "You've been picked! 🧢" : "You've been assigned to a team 👕",
       body: `You're on ${teamName(after, idx)} for ${title}.`,
     }, { key: `team_${eventId}_${uid}_${idx}` });
   }
+
+  // e2) Caps mode (captains draft): tell the captains, tell whoever is on the clock, and when a picked
+  //     player cancels, that team gets the next pick (then the normal order goes on).
+  try { await capsDraftUpdates(eventId, before, after, title, organizer); } catch (e) { logger.warn("caps draft", eventId, e.message); }
 
   // f) Admin tapped End Event -> results are ready
   if (!before.isSessionEnded && after.isSessionEnded === true) {
@@ -896,6 +900,86 @@ exports.onPhoneTokenSaved = onDocumentWritten(`${BASE}/directory/{uid}`, async (
   }
 });
 // ---------------------------------------------------------------------------
+// 4b. Caps mode helpers
+// ---------------------------------------------------------------------------
+const capsLink = (eventId) => `https://futnet.site/#event=${encodeURIComponent(eventId)}&caps=1`;
+const capOfTeam = (g, t) => String(((g.teamCaptains || {})[t] ?? (g.teamCaptains || {})[String(t)]) || "");
+const teamUids = (g, t) => arr(((g.teamAssignments || {})[t] ?? (g.teamAssignments || {})[String(t)])).filter((p) => p && uidOf(p)).map(uidOf);
+/** Everyone going (and their guests: "<uid>_guest_<n>"). */
+function goingIds(g) {
+  const out = new Set();
+  arr(g.attendees).forEach((a) => { const u = uidOf(a); if (!u) return; out.add(u); arr(a.guests).forEach((_, i) => out.add(`${u}_guest_${i}`)); });
+  return out;
+}
+
+async function capsDraftUpdates(eventId, before, after, title, organizer) {
+  const d = after.capsDraft;
+  const b = before.capsDraft || null;
+  if (!d || d.status !== "live") return;
+  const count = Number(after.teamsCount) || 3;
+
+  // 1) Just started: every captain gets a notification with the link.
+  if (!b || b.status !== "live" || b.startedAt !== d.startedAt) {
+    for (let t = 0; t < count; t++) {
+      const cap = capOfTeam(after, t);
+      if (!cap) continue;
+      const first = d.mode === "turns" && d.turnTeam === t;
+      await notify([cap], {
+        type: "caps_captain",
+        senderUid: organizer,
+        eventId,
+        link: capsLink(eventId),
+        title: "You're a captain! 🧢",
+        body: d.mode === "turns"
+          ? `You captain ${teamName(after, t)} for ${title}. ${first ? "You pick first, go!" : "Captains take turns picking. We'll tell you when it's your turn."}`
+          : `You captain ${teamName(after, t)} for ${title}. Open pick: pick your players whenever you're ready.`,
+      }, { key: `caps_cap_${eventId}_${d.startedAt}_${t}` });
+    }
+  }
+
+  // 2) A picked player cancelled (left the game): their team picks next.
+  if (b && b.status === "live" && d.mode === "turns") {
+    const going = goingIds(after);
+    const owed = [];
+    for (let t = 0; t < count; t++) {
+      const lost = teamUids(before, t).filter((u) => !teamUids(after, t).includes(u) && !going.has(u));
+      lost.forEach(() => owed.push(t));
+    }
+    if (owed.length) {
+      const ref = col("eventsList").doc(eventId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const g = snap.exists ? snap.data() : null;
+        if (!g || !g.capsDraft || g.capsDraft.status !== "live") return;
+        const priority = [...arr(g.capsDraft.priority), ...owed];
+        tx.update(ref, { "capsDraft.priority": priority, "capsDraft.turnTeam": priority[0] });
+      });
+      return;   // the write above runs this again and sends the "your turn" notification
+    }
+  }
+
+  // 3) Someone new is on the clock: tell that captain.
+  if (d.mode === "turns" && d.turnTeam !== null && d.turnTeam !== undefined) {
+    const changed = !b || b.turnTeam !== d.turnTeam || arr(b.picks).length !== arr(d.picks).length;
+    const cap = capOfTeam(after, d.turnTeam);
+    if (changed && cap) {
+      const last = arr(d.picks)[arr(d.picks).length - 1];
+      const extra = arr(d.priority).includes(d.turnTeam);
+      await notify([cap], {
+        type: "caps_turn",
+        senderUid: organizer,
+        eventId,
+        link: capsLink(eventId),
+        title: "Your pick! 🧢",
+        body: extra
+          ? `A player on ${teamName(after, d.turnTeam)} cancelled, so you pick next.`
+          : last ? `${last.name || "A player"} was just picked. It's your turn for ${teamName(after, d.turnTeam)}.` : `You pick first for ${teamName(after, d.turnTeam)}.`,
+      }, { key: `caps_turn_${eventId}_${d.startedAt}_${arr(d.picks).length}_${d.turnTeam}` });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 11. Money + waitlist (same rules as the website: money-rules.js)
 //   a) Must-pay games: nobody keeps a spot without paying, whatever app or link they used
 //   b) Late cancels with "refund if the spot gets filled": refunded when someone takes the spot
@@ -908,6 +992,64 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const FV = admin.firestore.FieldValue;
 const DEFAULT_TZ = "America/New_York";
 const money = (c) => `$${(Math.abs(Number(c) || 0) / 100).toFixed(2)}`;
+
+/**
+ * Caps mode time limit: every 5 minutes, drafts past their deadline get the players nobody picked
+ * placed at random (smallest team first), then the line ups are built and everyone is told.
+ */
+exports.capsDeadlines = onSchedule({ schedule: "every 5 minutes", timeZone: DEFAULT_TZ }, async () => {
+  const now = Date.now();
+  const snap = await col("eventsList").where("capsDraft.status", "==", "live").get();
+  for (const docSnap of snap.docs) {
+    const g0 = docSnap.data() || {};
+    const at = Number(g0.capsDraft && g0.capsDraft.deadlineAt) || 0;
+    if (!at || at > now) continue;
+    let placed = 0;
+    try {
+      await db.runTransaction(async (tx) => {
+        placed = 0;
+        const s = await tx.get(docSnap.ref);
+        const g = s.exists ? s.data() : null;
+        if (!g || !g.capsDraft || g.capsDraft.status !== "live") return;
+        const count = Number(g.teamsCount) || 3;
+        const ta = {};
+        for (let t = 0; t < count; t++) ta[t] = arr((g.teamAssignments || {})[t] ?? (g.teamAssignments || {})[String(t)]).filter((p) => p && uidOf(p));
+        const taken = new Set(Object.values(ta).flat().map(uidOf));
+        // everyone going (and their guests) who wasn't picked
+        const pool = [];
+        arr(g.attendees).forEach((a) => {
+          const u = uidOf(a); if (!u) return;
+          if (!taken.has(u)) pool.push({ uid: u, name: a.name || a.firstName || "Player", position: a.position || "Player" });
+          arr(a.guests).forEach((gu, i) => { const id = `${u}_guest_${i}`; if (!taken.has(id)) pool.push({ uid: id, name: (gu && gu.name) || "Guest", position: "Guest", isHostGuest: true, hostUid: u }); });
+        });
+        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+        pool.forEach((p) => {
+          const sizes = Object.keys(ta).map((t) => ta[t].length);
+          const min = Math.min(...sizes);
+          const options = Object.keys(ta).filter((t) => ta[t].length === min);
+          ta[options[Math.floor(Math.random() * options.length)]].push({ ...p, randomPick: true });
+          placed++;
+        });
+        // line ups: chosen positions first, then everyone else
+        Object.keys(ta).forEach((t) => {
+          ta[t] = ta[t].slice().sort((a, b) => (Number.isInteger(a.slot) ? a.slot : 999) - (Number.isInteger(b.slot) ? b.slot : 999))
+            .map((p) => { const c = { ...p }; delete c.slot; return c; });
+        });
+        tx.update(docSnap.ref, { teamAssignments: ta, "capsDraft.status": "done", "capsDraft.turnTeam": null, "capsDraft.doneAt": now, "capsDraft.timedOut": true });
+      });
+      const title = g0.title || "your game";
+      const caps = Object.values(g0.teamCaptains || {}).map(String).filter(Boolean);
+      await notify(uniq([...caps, g0.organizerId]), {
+        type: "caps_timeout",
+        eventId: docSnap.id,
+        title: "Time's up! ⏱️ Teams are set",
+        body: placed ? `The draft for ${title} ran out of time. ${placed} player(s) were put on teams at random.` : `The draft for ${title} is done. Teams are set.`,
+      }, { key: `caps_timeout_${docSnap.id}_${at}` });
+      logger.info(`Caps deadline ${docSnap.id}: placed ${placed} at random`);
+    } catch (e) { logger.warn("caps deadline failed", docSnap.id, e.message); }
+  }
+});
+
 
 /** Wall-clock time in a time zone -> ms (games are saved as "2026-10-20" + "7:00 PM", local time). */
 function tzOffsetMs(t, tz) {

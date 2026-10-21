@@ -81,6 +81,8 @@ window.initEventsLiveListener = function() {
         if (window.activeModalEventId && window.renderEventDetailModalContent) {
             window.renderEventDetailModalContent();
         }
+        // Team builder open (e.g. a captains draft): show other people's picks live.
+        if (window.refreshTeamBuilderLive) window.refreshTeamBuilderLive();
 
         const splash = document.getElementById('loading-screen') || document.querySelector('.loading-screen');
         if (splash) splash.style.display = 'none';
