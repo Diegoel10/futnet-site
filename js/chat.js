@@ -1,7 +1,7 @@
 // js/chat.js: Handles WhatsApp-style messaging threads, directory user search, real-time chat sync, read receipts, and typing indicators
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot, query as fsQuery, orderBy, limit, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
+import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, addPollButton, POLL_PREFIX, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
 
 const STOCK = 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';   // old placeholder: never shown or saved
 // A player's real profile photo: live player list first (always current), then what the chat saved.
@@ -461,6 +461,7 @@ window.renderActiveChatMessages = function() {
     container.classList.add('py-2');
     container.innerHTML = renderWhatsApp(list, { myUid, group: false, ticks: true, scope: { kind: 'dm', id: th.id } })
         + `<div id="dm-typing-bubble">${typingBubbleHtml(window._dmPartnerTyping ? [window._dmPartnerTyping] : [])}</div>`;
+    ensureChatAttach();   // hides the poll button in private chats
     if (atBottom || window._forceChatBottom) scrollChatToBottom();
     window._forceChatBottom = false;
 };
@@ -513,8 +514,17 @@ async function sendChatFile(file) {
 
 // The 📎 button next to the message box (added once).
 function ensureChatAttach() {
-    addAttachButton(document.getElementById('active-chat-input'), sendChatFile);
+    const input = document.getElementById('active-chat-input');
+    addAttachButton(input, sendChatFile);
+    // 📊 Polls: community chats only (not private chats).
+    addPollButton(input, (poll) => {
+        if (!String(window.activeChatThreadId).startsWith('community:')) return;
+        stopTyping(String(window.activeChatThreadId));
+        window._forceChatBottom = true;
+        window.sendCommunityChatMessage(POLL_PREFIX + poll.question, null, poll);
+    }, () => String(window.activeChatThreadId || '').startsWith('community:'));
 }
+window.refreshChatPollButton = ensureChatAttach;
 document.addEventListener('DOMContentLoaded', ensureChatAttach);
 setTimeout(ensureChatAttach, 1500);
 

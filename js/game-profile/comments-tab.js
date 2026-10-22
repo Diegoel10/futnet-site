@@ -1,6 +1,6 @@
 // js/game-profile/comments-tab.js
 import { mutateEvent, safeAvatar, escapeHtml } from './event-store.js';
-import { renderWhatsApp, typingBubbleHtml, watchTyping, reportTyping, stopTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from '../wa-chat.js';
+import { renderWhatsApp, typingBubbleHtml, watchTyping, reportTyping, stopTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL, openPollComposer, POLL_PREFIX } from '../wa-chat.js';
 
 export function renderCommentsTab(event) {
     const activeEvent = event || window.currentSelectedEvent || {};
@@ -13,7 +13,7 @@ export function renderCommentsTab(event) {
         const uid = c.uid || c.userId || c.authorId || '';
         return {
             id: 'c' + i, uid, name: c.name || c.userName || 'Player',
-            avatar: c.avatar || c.userAvatar, text: c.text || '', ms: msOf(c), time: c.timestamp, media: c.media,
+            avatar: c.avatar || c.userAvatar, text: c.text || '', ms: msOf(c), time: c.timestamp, media: c.media, poll: c.poll,
             // how the server finds this comment: its id, or "<uid>:<createdAt>" for older ones
             key: c.id || (uid && c.createdAt ? `${uid}:${c.createdAt}` : ''),
             deleted: c.deleted === true, edited: c.edited === true, reactions: c.reactions
@@ -51,6 +51,10 @@ export function renderCommentsTab(event) {
                 <button type="button" onclick="document.getElementById('game-comment-file').click()" aria-label="Send a photo or video" title="Send a photo or video"
                     class="w-10 h-10 rounded-full text-[#8696A0] hover:text-white flex items-center justify-center shrink-0 text-lg">
                     <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <button type="button" onclick="handleGameCommentPoll('${escapeHtml(String(eventId))}')" aria-label="Send a poll" title="Send a poll"
+                    class="w-10 h-10 -ml-2 rounded-full text-[#8696A0] hover:text-white flex items-center justify-center shrink-0 text-lg">
+                    <i class="fa-solid fa-square-poll-vertical"></i>
                 </button>
                 <input type="text" id="game-comment-input" autocomplete="off" value="${escapeHtml(draft)}"
                     oninput="window._commentDraft = this.value; handleGameCommentTyping('${escapeHtml(String(eventId))}')"
@@ -98,6 +102,13 @@ window.handleSendGameComment = async function(eventId) {
     if (!ok && input) input.value = messageText;
 };
 
+// 📊 A poll in the game's comments.
+window.handleGameCommentPoll = function(eventId) {
+    const targetEventId = eventId || window.activeModalEventId;
+    if (!targetEventId) return;
+    openPollComposer((poll) => postComment(targetEventId, POLL_PREFIX + poll.question, null, poll));
+};
+
 // 📎 A photo or video was picked for the game's comments.
 window.handleGameCommentFile = async function(eventId, picker) {
     const file = picker && picker.files && picker.files[0];
@@ -124,7 +135,7 @@ window.handleGameCommentFile = async function(eventId, picker) {
 
 // Adds one comment. Only the comments list is changed, on top of the freshest copy of the game
 // (the old version re-saved the whole game, which failed on big games and could undo other people's changes).
-async function postComment(targetEventId, text, media) {
+async function postComment(targetEventId, text, media, poll) {
     const user = window.currentUser;
     if (!user || !user.uid) { window.showToast("Please sign in to comment.", "error"); return false; }
     const profile = window.userProfile || {};
@@ -139,6 +150,7 @@ async function postComment(targetEventId, text, media) {
         createdAt: Date.now()
     };
     if (media) newComment.media = media;
+    if (poll) newComment.poll = poll;
     const av = safeAvatar(profile.avatar || user.photoURL || '');   // web links only; photos come from the profile
     if (av) newComment.avatar = av;
 

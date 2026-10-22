@@ -13,10 +13,13 @@ const OUTRO = 3.2;       // final teams held at the end
 
 const listOf = (ta, i) => ((ta || {})[i] ?? (ta || {})[String(i)] ?? []).filter(p => p && p.uid);
 const capOf = (ev, i) => String(((ev.teamCaptains || {})[i] ?? (ev.teamCaptains || {})[String(i)]) || '');
+// Same photo the rest of the site shows (their current profile picture), including photos saved
+// inside the profile (data:image). Made-up initials avatars are skipped: the card draws its own.
 const photo = (p, ev) => {
-    const d = (window.directoryList || []).find(u => String(u.uid) === String(p.uid));
-    const a = (d && (d.avatar || d.photoURL)) || (ev.attendees || []).find(x => String(x.uid) === String(p.uid))?.avatar || p.avatar || '';
-    return /^https?:\/\//.test(a) ? a : '';
+    const person = { uid: p.uid, name: p.name, avatar: p.avatar || (ev.attendees || []).find(x => String(x.uid) === String(p.uid))?.avatar };
+    const a = String((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(person) : person.avatar) || '');
+    if (a.includes('api.dicebear.com')) return '';
+    return /^https?:\/\//.test(a) || /^data:image\//.test(a) ? a : '';
 };
 
 /** Everything the drawings need, from the game. */
@@ -226,47 +229,144 @@ window.openDraftReplay = async function(eventId) {
     });
 };
 
-// ---------------------------------------------------------------- team card (image)
+// ---------------------------------------------------------------- squad card: one team on its half of the pitch
+async function drawSquad(ctx, d, t, ti, pitch) {
+    background(ctx, d.bg, t.ring);
+    header(ctx, d.logo);
+    const ev = d.ev;
+    const rowsDef = (window.teamFormationRows ? window.teamFormationRows(ev, ti) : [3, 2, 1]) || [3, 2, 1];
+    const rows = [...rowsDef].reverse();               // forwards on top, keeper at the bottom
+    const slots = rows.reduce((a, b) => a + b, 0) + 1;
+    const onPitch = t.players.slice(0, slots), bench = t.players.slice(slots);
+
+    // the pitch (our half: middle line at the top, our goal at the bottom)
+    const px = 60, py = 175, pw = 860, ph = H - 190 - py - 10;
+    ctx.save();
+    rr(ctx, px, py, pw, ph, 28); ctx.clip();
+    if (pitch) ctx.drawImage(pitch, 0, 640, pitch.width, pitch.height - 640 - 60, px, py, pw, ph);
+    else { ctx.fillStyle = '#0b3d1f'; ctx.fillRect(px, py, pw, ph); }
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(px, py, pw, ph);
+    ctx.restore();
+    ctx.save(); rr(ctx, px, py, pw, ph, 28); ctx.lineWidth = 5; ctx.strokeStyle = t.ring; ctx.stroke(); ctx.restore();
+
+    const lines = [...rows, 1];
+    const top = py + 72, bottom = py + ph - 100;
+    const r = Math.max(30, Math.min(48, (ph - 120) / lines.length / 2 - 16));
+    let k = 0;
+    lines.forEach((n, li) => {
+        const y = lines.length === 1 ? (top + bottom) / 2 : top + (bottom - top) * li / (lines.length - 1);
+        for (let c = 0; c < n; c++) {
+            const x = px + pw * (c + 1) / (n + 1);
+            const p = onPitch[k];
+            const label = li === lines.length - 1 ? 'GK' : (li === 0 ? 'FWD' : (li === lines.length - 2 ? 'DEF' : 'MID'));
+            if (p) {
+                avatar(ctx, d.imgs[String(p.uid)], p.name, x, y, r, t.ring, { glow: true, ringWidth: 5 });
+                if (p === t.captain) {
+                    ctx.save(); ctx.beginPath(); ctx.arc(x + r * 0.78, y - r * 0.78, r * 0.36, 0, Math.PI * 2); ctx.fillStyle = GOLD; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#0b0f14'; ctx.stroke(); ctx.restore();
+                    text(ctx, 'C', x + r * 0.78, y - r * 0.75, { font: `900 ${Math.round(r * 0.44)}px ${BODY}`, color: '#0b0f14', shadow: false });
+                }
+                const nm = String(p.name || 'Player').split(' ')[0];
+                const font = fitFont(ctx, nm, BODY, 900, 24, pw / (n + 1) - 10);
+                ctx.font = font;
+                const tw = ctx.measureText(nm).width + 22;
+                ctx.save(); rr(ctx, x - tw / 2, y + r + 8, tw, 34, 17); ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fill(); ctx.restore();
+                text(ctx, nm, x, y + r + 26, { font, shadow: false });
+            } else {
+                ctx.save(); ctx.setLineDash([8, 7]); ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+                ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+                text(ctx, label, x, y, { font: `900 20px ${BODY}`, color: 'rgba(255,255,255,0.75)' });
+            }
+            k++;
+        }
+    });
+
+    // right side: team name, formation, bench
+    const rx = 950, rw = W - rx - 60;
+    ctx.save(); rr(ctx, rx, py, rw, ph, 24); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = t.ring + '88'; ctx.stroke(); ctx.restore();
+    ctx.save(); rr(ctx, rx, py, rw, 120, 24); ctx.fillStyle = t.color; ctx.fill(); ctx.restore();
+    const nameColor = window.teamTextOn ? window.teamTextOn(t.color) : '#fff';
+    text(ctx, String(t.name).toUpperCase(), rx + rw / 2, py + 48, { font: fitFont(ctx, String(t.name).toUpperCase(), BLOCK, '', 60, rw - 30), color: nameColor, shadow: false });
+    text(ctx, `${t.players.length} PLAYERS`, rx + rw / 2, py + 96, { font: `900 22px ${BODY}`, color: nameColor, shadow: false });
+    text(ctx, 'FORMATION', rx + rw / 2, py + 170, { font: `800 24px ${BODY}`, color: 'rgba(255,255,255,0.7)' });
+    text(ctx, rowsDef.join('-'), rx + rw / 2, py + 228, { font: `84px ${BLOCK}`, color: GREEN, stroke: { width: 6, color: 'rgba(0,0,0,0.7)' } });
+    if (t.captain) {
+        text(ctx, 'CAPTAIN', rx + rw / 2, py + 300, { font: `800 24px ${BODY}`, color: 'rgba(255,255,255,0.7)' });
+        text(ctx, String(t.captain.name || ''), rx + rw / 2, py + 340, { font: fitFont(ctx, String(t.captain.name || ''), BODY, 900, 36, rw - 20), color: GOLD });
+    }
+    if (bench.length) {
+        let y = py + 400;
+        text(ctx, 'BENCH', rx + rw / 2, y, { font: `800 24px ${BODY}`, color: 'rgba(255,255,255,0.7)' });
+        bench.slice(0, 5).forEach((p, i) => {
+            const yy = y + 50 + i * 62;
+            avatar(ctx, d.imgs[String(p.uid)], p.name, rx + 46, yy, 24, t.ring, { glow: false, ringWidth: 3 });
+            text(ctx, String(p.name || 'Player'), rx + 84, yy, { font: fitFont(ctx, String(p.name || 'Player'), BODY, 800, 28, rw - 100), align: 'left' });
+        });
+        if (bench.length > 5) text(ctx, `+${bench.length - 5} more`, rx + rw / 2, y + 50 + 5 * 62, { font: `800 24px ${BODY}`, color: 'rgba(255,255,255,0.7)' });
+    }
+    text(ctx, (d.info || d.title).toUpperCase(), W / 2, 130, { font: fitFont(ctx, (d.info || d.title).toUpperCase(), BODY, 800, 28, W - 700), color: GREEN });
+    footer(ctx);
+}
+
+// ---------------------------------------------------------------- team cards (images): all teams + one per squad
 window.openTeamCard = async function(eventId) {
     const ev = (window.eventsList || []).find(e => e.id === eventId);
     if (!ev) return;
     const hasPlayers = Object.values(ev.teamAssignments || {}).some(a => (a || []).some(p => p && p.uid));
     if (!hasPlayers) { window.showToast && window.showToast('Put players on the teams first.', 'error'); return; }
-    const m = modalShell('team-card-modal', '📸 Team card');
+    const m = modalShell('team-card-modal', '📸 Team cards');
     await loadFonts();
     const d = await dataOf(ev);
-    const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    drawFrame(canvas.getContext('2d'), d, { shownPicks: [], heading: 'THE TEAMS', sub: (d.info || d.title).toUpperCase(), finalTeams: true });
-    canvas.className = 'w-full h-auto rounded-2xl border border-white/10 shadow-xl';
+    const pitch = await loadImage('img/TeamBuildField.png');
+    const cards = [];
+    const make = async (key, title, fn) => {
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        await fn(c.getContext('2d'));
+        cards.push({ key, title, canvas: c });
+    };
+    await make('teams', 'All teams', async (ctx) => drawFrame(ctx, d, { shownPicks: [], heading: 'THE TEAMS', sub: (d.info || d.title).toUpperCase(), finalTeams: true }));
+    for (let i = 0; i < d.teams.length; i++) {
+        if (!d.teams[i].players.length) continue;
+        await make(`team-${i + 1}`, d.teams[i].name, (ctx) => drawSquad(ctx, d, d.teams[i], i, pitch));
+    }
+    const files = [];
+    for (const c of cards) {
+        try { files.push(new File([await toBlob(c.canvas)], `${slug(d.title)}-${c.key}.jpg`, { type: 'image/jpeg' })); } catch (e) { files.push(null); }
+    }
     const body = m.querySelector('[data-body]');
-    body.innerHTML = '';
-    body.appendChild(canvas);
-    let file = null;
-    try { file = new File([await toBlob(canvas)], `${slug(d.title)}-teams.jpg`, { type: 'image/jpeg' }); } catch (e) { file = null; }
-    const row = document.createElement('div');
-    row.className = 'flex gap-2';
-    const canShare = file && navigator.canShare && navigator.canShare({ files: [file] });
-    row.innerHTML = file
-        ? `${canShare ? '<button data-share class="flex-1 bg-[#25D366] text-slate-950 font-black py-3 rounded-xl text-sm"><i class="fa-brands fa-whatsapp mr-1"></i> Share</button>' : ''}
-           <button data-save class="${canShare ? '' : 'flex-1 '}bg-black/60 border border-white/20 text-white font-bold py-3 px-4 rounded-xl text-sm"><i class="fa-solid fa-download mr-1"></i> Save</button>`
-        : '<p class="text-xs text-amber-300 text-center w-full">Some photos couldn\'t be added. Take a screenshot instead.</p>';
-    body.appendChild(row);
-    row.querySelector('[data-share]')?.addEventListener('click', () => navigator.share({ files: [file] }).catch(() => {}));
-    row.querySelector('[data-save]')?.addEventListener('click', () => {
-        const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name;
-        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    });
-    if (ev.communityId && window.postToCommunityFeed && file && (window.myCommunityRoles || {})[ev.communityId]) {
+    body.innerHTML = '<p class="text-[11px] text-white/60">Send them one by one so each one pops in the chat.</p>';
+    if (files.some(f => !f)) body.innerHTML += '<p class="text-xs text-amber-300">Some photos couldn\'t be added. Take a screenshot instead.</p>';
+    if (ev.communityId && window.postToCommunityFeed && files.every(Boolean) && (window.myCommunityRoles || {})[ev.communityId]) {
         const post = document.createElement('button');
         post.className = 'w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm';
-        post.innerHTML = '<i class="fa-solid fa-users mr-1"></i> Post to the community feed';
+        post.innerHTML = '<i class="fa-solid fa-users mr-1"></i> Post all to the community feed';
         post.onclick = async () => {
             post.disabled = true; post.textContent = 'Posting…';
-            const ok = await window.postToCommunityFeed(ev.communityId, `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + ev.date : ''}`, [file]);
+            const ok = await window.postToCommunityFeed(ev.communityId, `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + ev.date : ''}`, files);
             post.textContent = ok ? 'Posted to the feed ✓' : "Couldn't post. Try again";
             if (!ok) post.disabled = false;
         };
         body.appendChild(post);
     }
+    cards.forEach((c, i) => {
+        const box = document.createElement('div');
+        box.className = 'space-y-2 pt-2';
+        c.canvas.className = 'w-full h-auto rounded-2xl border border-white/10 shadow-xl';
+        box.appendChild(c.canvas);
+        const file = files[i];
+        if (file) {
+            const row = document.createElement('div');
+            row.className = 'flex gap-2';
+            const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+            row.innerHTML = `${canShare ? `<button data-share class="flex-1 bg-[#25D366] text-slate-950 font-black py-3 rounded-xl text-sm"><i class="fa-brands fa-whatsapp mr-1"></i> Share ${c.title.replace(/[<>&"]/g, '')}</button>` : ''}
+                <button data-save class="${canShare ? '' : 'flex-1 '}bg-black/60 border border-white/20 text-white font-bold py-3 px-4 rounded-xl text-sm"><i class="fa-solid fa-download mr-1"></i> Save</button>`;
+            row.querySelector('[data-share]')?.addEventListener('click', () => navigator.share({ files: [file] }).catch(() => {}));
+            row.querySelector('[data-save]').addEventListener('click', () => {
+                const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name;
+                document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+            });
+            box.appendChild(row);
+        }
+        body.appendChild(box);
+    });
 };

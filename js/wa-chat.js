@@ -74,6 +74,19 @@ export function nameColor(key) {
     .wa-menu .item { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px 10px; border-radius: 10px; font-size: 15px; }
     .wa-menu .item:hover { background: rgba(255,255,255,.06); }
     .wa-menu .item.danger { color: #F15C6D; }
+    .wa-poll { min-width: min(250px, 62vw); padding: 2px 0 4px; }
+    .wa-poll-q { font-weight: 700; font-size: 15px; margin: 0 0 2px; white-space: pre-wrap; word-break: break-word; }
+    .wa-poll-sub { font-size: 11px; color: #8696A0; margin-bottom: 6px; }
+    .wa-poll-opt { display: block; width: 100%; text-align: left; margin: 6px 0; position: relative; }
+    .wa-poll-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .wa-poll-dot { width: 18px; height: 18px; border-radius: 9999px; border: 2px solid #8696A0; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+    .wa-poll-opt.on .wa-poll-dot { background: #00A884; border-color: #00A884; color: #0B141A; }
+    .wa-poll-txt { flex: 1; min-width: 0; word-break: break-word; }
+    .wa-poll-n { font-size: 12px; color: #AEBAC1; }
+    .wa-poll-bar { height: 5px; border-radius: 9999px; background: rgba(255,255,255,.12); margin: 5px 0 0 26px; overflow: hidden; }
+    .wa-poll-bar i { display: block; height: 100%; background: #00A884; border-radius: 9999px; transition: width .3s; }
+    .wa-poll-votes { display: block; width: 100%; text-align: center; color: #53BDEB; font-size: 13px; font-weight: 600; padding: 6px 0 0; margin-top: 4px; border-top: 1px solid rgba(255,255,255,.08); }
+    .wa-menu input.wa-in { width: 100%; background: #2A3942; color: #E9EDEF; border-radius: 10px; padding: 10px; font-size: 16px; border: 0; outline: none; margin-top: 6px; }
     .wa-menu textarea { width: 100%; min-height: 90px; background: #2A3942; color: #E9EDEF; border-radius: 10px; padding: 10px; font-size: 16px; border: 0; outline: none; }
     `;
     document.head.appendChild(st);
@@ -199,8 +212,107 @@ window.waMsgMenu = function(key) {
     document.addEventListener('touchend', cancel); document.addEventListener('touchmove', cancel, { passive: true });
 })();
 
+// ---- polls (community chats and game comments)
+// Saved on the message: poll: { question, options: [text, ...], votes: { uid: optionIndex } }.
+// The message text is "📊 <question>" so chat lists, notifications and older apps still read nicely.
+export const POLL_PREFIX = '📊 ';
+function pollHtml(poll, myUid, key) {
+    const votes = poll.votes && typeof poll.votes === 'object' ? poll.votes : {};
+    const total = Object.keys(votes).length;
+    const mine = votes[myUid];
+    const counts = poll.options.map((_, i) => Object.values(votes).filter(v => Number(v) === i).length);
+    const top = Math.max(1, ...counts);
+    return `<div class="wa-poll">
+        <div class="wa-poll-q">${esc(poll.question || 'Poll')}</div>
+        <div class="wa-poll-sub">${key ? 'Pick one. Tap again to change.' : 'Poll'}</div>
+        ${poll.options.map((o, i) => `<button type="button" class="wa-poll-opt ${Number(mine) === i ? 'on' : ''}" ${key ? `onclick="waPollVote('${esc(key)}', ${i})"` : 'disabled'}>
+            <span class="wa-poll-row"><span class="wa-poll-dot">${Number(mine) === i ? '✓' : ''}</span><span class="wa-poll-txt">${esc(o)}</span><span class="wa-poll-n">${counts[i]}</span></span>
+            <span class="wa-poll-bar"><i style="width:${total ? Math.round(counts[i] / top * 100) : 0}%"></i></span></button>`).join('')}
+        ${key ? `<button type="button" class="wa-poll-votes" onclick="waPollVoters('${esc(key)}')">${total ? `View votes (${total})` : 'No votes yet'}</button>` : ''}
+    </div>`;
+}
+
+window.waPollVote = function(key, i) {
+    const m = msgRegistry[key];
+    if (!m || !m.poll) return;
+    const mine = (m.poll.votes || {})[window.currentUser?.uid];
+    runAction(key, 'vote', Number(mine) === i ? '' : String(i));   // tapping your own answer again takes the vote back
+};
+
+/** Who voted for what. */
+window.waPollVoters = function(key) {
+    const m = msgRegistry[key];
+    if (!m || !m.poll) return;
+    const votes = m.poll.votes || {};
+    const nameOf = (uid) => {
+        if (uid === window.currentUser?.uid) return 'You';
+        const d = (window.directoryList || window.cachedDirectoryList || []).find(u => String(u.uid) === String(uid));
+        return (d && (d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim())) || 'Player';
+    };
+    openSheet(`<div style="font-weight:700;margin:2px 4px 8px">${esc(m.poll.question || 'Poll')}</div>
+        <div style="max-height:60vh;overflow-y:auto">${m.poll.options.map((o, i) => {
+            const who = Object.keys(votes).filter(u => Number(votes[u]) === i).map(nameOf);
+            return `<div style="padding:8px 6px;border-top:1px solid rgba(255,255,255,.08)">
+                <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px"><span>${esc(o)}</span><span style="color:#8696A0">${who.length} vote${who.length === 1 ? '' : 's'}</span></div>
+                <div style="font-size:13px;color:#AEBAC1;margin-top:3px">${who.length ? who.map(esc).join(', ') : '—'}</div></div>`;
+        }).join('')}</div>`);
+};
+
+/** The "new poll" form. onSend({ question, options }) */
+export function openPollComposer(onSend) {
+    let options = ['', ''];
+    let question = '';
+    const draw = () => {
+        const w = openSheet(`
+            <div style="font-weight:700;margin:2px 4px 6px">📊 New poll</div>
+            <input class="wa-in" id="wa-poll-q" maxlength="200" placeholder="Ask a question" value="${esc(question)}">
+            ${options.map((o, i) => `<div style="display:flex;gap:6px;align-items:center"><input class="wa-in" data-opt="${i}" maxlength="80" placeholder="Option ${i + 1}" value="${esc(o)}">
+                ${options.length > 2 ? `<button type="button" data-del="${i}" aria-label="Remove option" style="margin-top:6px;width:36px;height:36px;color:#F15C6D;flex-shrink:0">✕</button>` : ''}</div>`).join('')}
+            ${options.length < 6 ? '<button type="button" class="item" data-a="add" style="color:#00A884"><i class="fa-solid fa-plus w-5"></i> Add option</button>' : ''}
+            <div style="display:flex;gap:8px;margin-top:8px">
+                <button type="button" class="item" style="justify-content:center;background:rgba(255,255,255,.06)" data-a="cancel">Cancel</button>
+                <button type="button" class="item" style="justify-content:center;background:#00A884;color:#0B141A;font-weight:700" data-a="send">Send</button>
+            </div>`);
+        const save = () => {
+            question = w.querySelector('#wa-poll-q').value;
+            w.querySelectorAll('[data-opt]').forEach(el => { options[+el.dataset.opt] = el.value; });
+        };
+        w.querySelector('[data-a="add"]')?.addEventListener('click', () => { save(); options.push(''); draw(); setTimeout(() => document.querySelector(`#wa-msg-menu [data-opt="${options.length - 1}"]`)?.focus(), 30); });
+        w.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => { save(); options.splice(+b.dataset.del, 1); draw(); }));
+        w.querySelector('[data-a="cancel"]').onclick = closeMenu;
+        w.querySelector('[data-a="send"]').onclick = () => {
+            save();
+            const q = question.trim();
+            const opts = options.map(o => o.trim()).filter(Boolean);
+            if (!q) { window.showToast && window.showToast('Write the question.', 'error'); return; }
+            if (opts.length < 2) { window.showToast && window.showToast('Add at least 2 options.', 'error'); return; }
+            if (new Set(opts.map(o => o.toLowerCase())).size !== opts.length) { window.showToast && window.showToast('Two options are the same.', 'error'); return; }
+            closeMenu();
+            onSend({ question: q.slice(0, 200), options: opts.slice(0, 6).map(o => o.slice(0, 80)), votes: {} });
+        };
+        if (!question) setTimeout(() => w.querySelector('#wa-poll-q')?.focus(), 30);
+    };
+    draw();
+}
+
+/** 📊 button next to a message box (added once). show() decides if it's visible (e.g. not in private chats). */
+export function addPollButton(inputEl, onPoll, show) {
+    if (!inputEl) return null;
+    let btn = inputEl.parentNode.querySelector('.wa-poll-btn');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'wa-poll-btn'; btn.title = 'Send a poll'; btn.setAttribute('aria-label', 'Send a poll');
+        btn.innerHTML = '<i class="fa-solid fa-square-poll-vertical"></i>';
+        btn.style.cssText = 'width:40px;height:40px;flex-shrink:0;border-radius:9999px;display:flex;align-items:center;justify-content:center;color:#8696A0;font-size:19px;background:transparent';
+        btn.addEventListener('click', () => openPollComposer(onPoll));
+        inputEl.parentNode.insertBefore(btn, inputEl);
+    }
+    if (show) btn.style.display = show() ? 'flex' : 'none';
+    return btn;
+}
+
 /**
- * messages: [{ id, uid, name, avatar, text, ms, time, isRead, media?, key?, deleted?, edited?, reactions? }]
+ * messages: [{ id, uid, name, avatar, text, ms, time, isRead, media?, key?, deleted?, edited?, reactions?, poll? }]
  * opts: { myUid, group (show names + photos of others), ticks (show ✓✓ on mine), avatarOf(uid, name, avatar),
  *         scope: { kind: 'dm' | 'community' | 'game', id, canModerate } to allow edit / delete / react }
  */
@@ -235,11 +347,11 @@ export function renderWhatsApp(messages, opts = {}) {
         const key = sc && sc.kind && sc.id && msgKey && !deleted && !String(msgKey).startsWith('app_') ? `${sc.kind}|${sc.id}|${msgKey}` : '';
         if (key) {
             const reacts = m.reactions && typeof m.reactions === 'object' ? m.reactions : {};
-            msgRegistry[key] = { text: caption || '', mine, canModerate: !!sc.canModerate, myReaction: reacts[myUid] || '' };
+            msgRegistry[key] = { text: m.poll ? '' : (caption || ''), mine, canModerate: !!sc.canModerate, myReaction: reacts[myUid] || '', poll: m.poll || null };
         }
         const body = deleted
             ? `<span class="wa-text wa-deleted"><i class="fa-solid fa-ban" style="margin-right:5px"></i>${DELETED_TEXT}</span>`
-            : `${media}<span class="wa-text">${esc(caption)}</span>`;
+            : (m.poll && Array.isArray(m.poll.options) ? pollHtml(m.poll, myUid, key) : `${media}<span class="wa-text">${esc(caption)}</span>`);
         const edited = m.edited && !deleted ? '<span class="wa-edited">Edited</span>' : '';
         html += `
             <div class="wa-row ${mine ? 'me' : ''} ${startsRun ? 'wa-gap-l' : 'wa-gap-s'}">
@@ -483,4 +595,4 @@ window.waOpenMedia = function(type, url) {
     document.body.appendChild(el);
 };
 
-Object.assign(window.waChat, { messageAction, uploadMedia, mediaHtml, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL });
+Object.assign(window.waChat, { openPollComposer, addPollButton, messageAction, uploadMedia, mediaHtml, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL });

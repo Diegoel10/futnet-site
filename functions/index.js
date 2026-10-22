@@ -937,6 +937,43 @@ async function capsDraftUpdates(eventId, before, after, title, organizer) {
     }
   }
 
+  // 1b) Admin changed a captain during the draft: tell the new captain.
+  if (b && b.status === "live" && b.startedAt === d.startedAt) {
+    for (let t = 0; t < count; t++) {
+      const was = capOfTeam(before, t), now = capOfTeam(after, t);
+      if (!now || now === was) continue;
+      await notify([now], {
+        type: "caps_captain",
+        senderUid: organizer,
+        eventId,
+        link: capsLink(eventId),
+        title: "You're the captain now! 🧢",
+        body: `You captain ${teamName(after, t)} for ${title}.${d.mode === "turns" && d.turnTeam === t ? " It's your pick!" : ""}`,
+      }, { key: `caps_newcap_${eventId}_${d.startedAt}_${t}_${now}` });
+    }
+  }
+
+  // 1c) A captain cancelled (left the game) during the draft: ask the admins for a new captain.
+  if (b && b.status === "live") {
+    const going = goingIds(after);
+    const lost = [];
+    for (let t = 0; t < count; t++) {
+      const was = capOfTeam(before, t);
+      if (was && !going.has(was) && goingIds(before).has(was)) lost.push(t);
+    }
+    if (lost.length) {
+      const { admins } = after.communityId ? await communityMembers(after.communityId) : { admins: [] };
+      const names = await Promise.all(lost.map((t) => nameOf(capOfTeam(before, t))));
+      await notify(uniq([organizer, ...admins]), {
+        type: "caps_need_captain",
+        eventId,
+        link: capsLink(eventId),
+        title: "Pick a new captain 🧢",
+        body: `${names.join(" and ")} cancelled ${title}, so ${lost.map((t) => teamName(after, t)).join(" and ")} need${lost.length === 1 ? "s" : ""} a new captain. Open Caps mode to pick one.`,
+      }, { key: `caps_lostcap_${eventId}_${d.startedAt}_${lost.join("-")}_${tenMinuteBucket()}` });
+    }
+  }
+
   // 2) A picked player cancelled (left the game): their team picks next.
   if (b && b.status === "live" && d.mode === "turns") {
     const going = goingIds(after);
@@ -1727,6 +1764,18 @@ function applyMessageAction(m, caller, action, value, canModerate) {
     m.text = text;
     m.edited = true;
     m.editedAt = Date.now();
+  } else if (action === "vote") {
+    // Polls: one vote each; "" takes your vote back.
+    const p = m.poll && typeof m.poll === "object" ? m.poll : null;
+    if (!p || !Array.isArray(p.options)) throw new HttpsError("failed-precondition", "That message isn't a poll.");
+    const votes = { ...(p.votes && typeof p.votes === "object" ? p.votes : {}) };
+    if (value === "") delete votes[caller];
+    else {
+      const i = parseInt(value, 10);
+      if (!Number.isInteger(i) || i < 0 || i >= p.options.length) throw new HttpsError("invalid-argument", "That option doesn't exist.");
+      votes[caller] = i;
+    }
+    m.poll = { ...p, votes };
   } else if (action === "delete") {
     if (sender !== caller && !canModerate) throw new HttpsError("permission-denied", "You can only delete your own messages.");
     m.deleted = true;
@@ -1734,6 +1783,7 @@ function applyMessageAction(m, caller, action, value, canModerate) {
     m.text = "";
     delete m.media;
     delete m.reactions;
+    delete m.poll;
   } else {
     throw new HttpsError("invalid-argument", "Unknown action.");
   }
@@ -1797,7 +1847,8 @@ exports.messageAction = onCall(async (request) => {
       const m = applyMessageAction({ ...s.data() }, caller, action, value, isAdmin);
       const patch = { reactions: m.reactions || FV.delete() };
       if (action === "edit") Object.assign(patch, { text: m.text, edited: true, editedAt: m.editedAt });
-      if (action === "delete") Object.assign(patch, { text: "", deleted: true, deletedBy: caller, media: FV.delete(), reactions: FV.delete() });
+      if (action === "delete") Object.assign(patch, { text: "", deleted: true, deletedBy: caller, media: FV.delete(), reactions: FV.delete(), poll: FV.delete() });
+      if (action === "vote") patch.poll = m.poll;
       tx.update(mRef, patch);
     });
     return { ok: true };

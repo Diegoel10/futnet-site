@@ -227,6 +227,7 @@ function formationRows(event, teamIdx) {
     const key = ((window.teamFormations || {})[event.id] || {})[teamIdx] ?? (event.teamFormations || {})[teamIdx] ?? (event.teamFormations || {})[String(teamIdx)];
     return fmts[key] || Object.values(fmts)[0];
 }
+window.teamFormationRows = (event, teamIdx) => formationRows(event, teamIdx);   // used by the squad cards
 /** Position name of every spot on a team's pitch, in the same order the pitch is drawn (forwards first, keeper last). */
 function slotLabels(event, teamIdx) {
     const rows = [...formationRows(event, teamIdx)].reverse();
@@ -1397,6 +1398,9 @@ function renderCapsTab(event) {
     const capName = (i) => (teamList(ta, i).find(p => String(p.uid) === captainOf(event, i)) || {}).name || 'Captain';
     const avatar = (p) => `<img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='${AV_FALLBACK}'">`;
 
+    // A captain who cancelled (or was removed from the game): the admin picks a new one.
+    const goingIds = new Set(getFlattenedPlayersList(event.attendees).map(p => String(p.uid)));
+    const noCap = Array.from({ length: count }, (_, i) => i).filter(i => { const c = captainOf(event, i); return !c || !goingIds.has(c); });
     let banner;
     if (!live) banner = `<div class="bg-[#00F296]/15 border border-[#00F296]/50 rounded-2xl p-3 text-center text-xs font-black text-[#00F296]">✅ Teams are set and the line ups are built.</div>`;
     else if (!pool.length) banner = `<div class="bg-[#00F296]/15 border border-[#00F296]/50 rounded-2xl p-3 text-center text-xs font-black text-[#00F296]">Everyone's been picked! Tap Build line up.</div>`;
@@ -1405,7 +1409,7 @@ function renderCapsTab(event) {
         const makeUp = (d.priority || []).includes(turn);
         banner = `<div class="rounded-2xl p-3 text-center border-2 ${mine ? 'bg-amber-400 text-slate-950 border-amber-300 animate-pulse' : 'bg-black/50 border-white/15 text-white'}">
             <div class="text-[10px] font-black uppercase tracking-wider ${mine ? '' : 'text-white/60'}">Pick ${(d.picks || []).length + 1}${makeUp ? ' · extra pick: a player on this team cancelled' : ''}</div>
-            ${mine ? `<div class="text-sm font-black">🧢 It's your turn! Pick a player</div>` : (() => {
+            ${mine ? `<div class="text-sm font-black">🧢 It's your turn! Pick a player</div>` : noCap.includes(turn) ? `<div class="text-sm font-black">${escapeHtml(names[turn])} needs a new captain before picking</div>` : (() => {
                 const cp = teamList(ta, turn).find(p => String(p.uid) === captainOf(event, turn)) || { uid: captainOf(event, turn), name: capName(turn) };
                 return `<div class="flex items-center justify-center gap-2.5 mt-1"><img src="${escapeHtml(resolvePlayerAvatar(cp, event.attendees))}" class="w-10 h-10 rounded-full object-cover border-2" style="border-color:${window.teamAccent(colors[turn])}" onerror="this.src='${AV_FALLBACK}'">
                     <div class="text-sm font-black text-left">Waiting for ${escapeHtml(capName(turn))}<div class="text-[10px] font-bold text-white/60">${escapeHtml(names[turn])} is picking…</div></div></div>`;
@@ -1428,7 +1432,8 @@ function renderCapsTab(event) {
         return `<div class="bg-[#040E13]/95 border-2 rounded-2xl p-3 space-y-2" style="border-color:${window.teamAccent(colors[i])}66">
             <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full border border-white/40" style="background:${colors[i]}"></span>
                 <span class="text-xs font-black uppercase flex-1" style="color:${window.teamAccent(colors[i])}">${escapeHtml(names[i])} (${players.length})</span>
-                ${i === myTeam ? '<span class="text-[9px] font-black uppercase bg-amber-400 text-slate-950 rounded-full px-2 py-0.5">Your team</span>' : ''}</div>
+                ${i === myTeam ? '<span class="text-[9px] font-black uppercase bg-amber-400 text-slate-950 rounded-full px-2 py-0.5">Your team</span>' : ''}
+                ${admin && live ? `<button data-action="caps-change-captain" data-event-id="${event.id}" data-team-index="${i}" class="text-[10px] font-black text-amber-300 bg-amber-400/10 border border-amber-400/40 rounded-full px-2 py-0.5 flex items-center gap-1">${CAP_ICON('w-3 h-3')} Change</button>` : ''}</div>
             <div class="space-y-1.5">${players.map(p => `<div class="flex items-center gap-2 bg-black/40 rounded-xl px-2 py-1.5">${avatar(p)}
                 <span class="text-xs font-bold text-white flex-1 min-w-0 truncate">${escapeHtml(p.name || 'Player')} ${String(p.uid) === captainOf(event, i) ? CAP_BADGE : ''}</span>
                 ${Number.isInteger(p.slot) && labels[p.slot] ? `<span class="text-[9px] font-black text-[#00F296] bg-[#00F296]/10 border border-[#00F296]/30 rounded px-1.5 py-0.5">${labels[p.slot]}</span>` : ''}
@@ -1441,6 +1446,11 @@ function renderCapsTab(event) {
         <div class="flex flex-wrap gap-2">${pool.map(p => `<div class="flex items-center gap-1.5 bg-black/60 border border-white/10 rounded-full pl-1 pr-2.5 py-1">${avatar(p).replace('w-8 h-8', 'w-6 h-6')}<span class="text-[11px] font-bold text-white">${escapeHtml(p.name)}</span></div>`).join('')}</div></div>` : '';
 
     const canFinish = live && (admin || myTeam !== undefined);
+    const capAlert = live && noCap.length ? noCap.map(i => admin
+        ? `<div class="bg-red-500/15 border border-red-500/50 rounded-2xl p-3 flex items-center gap-2"><span class="text-lg">⚠️</span>
+            <div class="flex-1 text-[11px] text-white"><b>${escapeHtml(names[i])} has no captain</b> (the captain cancelled). Pick a new one.</div>
+            <button data-action="caps-change-captain" data-event-id="${event.id}" data-team-index="${i}" class="shrink-0 bg-amber-400 text-slate-950 font-black text-[11px] px-3 py-2 rounded-xl">Pick captain</button></div>`
+        : `<div class="bg-black/40 border border-white/10 rounded-2xl p-2.5 text-[11px] text-white/70 text-center">⚠️ ${escapeHtml(names[i])}'s captain cancelled. Waiting for the admin to pick a new one.</div>`).join('') : '';
     const editLimit = admin ? ` <button data-action="caps-edit-deadline" data-event-id="${event.id}" class="ml-1 text-amber-300 font-black underline">Edit</button>` : '';
     const limit = !live ? '' : d.deadlineAt
         ? `<div class="text-[11px] text-center text-white/70 bg-black/40 border border-white/10 rounded-xl py-2 px-3">⏱️ Time limit: <b class="text-white">${new Date(d.deadlineAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>. Anyone not picked by then goes on a team at random.${editLimit}</div>`
@@ -1450,9 +1460,9 @@ function renderCapsTab(event) {
     const log = (d.log || []).slice(-8).reverse();
     const logHtml = log.length ? `<div class="bg-black/30 border border-white/10 rounded-2xl p-3 space-y-1">
         <div class="text-[10px] font-black uppercase tracking-wider text-white/50">Admin changes</div>
-        ${log.map(l => `<div class="text-[10px] text-white/60">${new Date(l.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · <b class="text-white/80">${escapeHtml(l.byName || 'Admin')}</b> ${l.type === 'skip' ? `skipped ${escapeHtml(l.captain || 'a captain')}'s turn` : `took ${escapeHtml(l.name || 'a player')} off ${escapeHtml(names[l.team] || 'a team')}`}</div>`).join('')}</div>` : '';
+        ${log.map(l => `<div class="text-[10px] text-white/60">${new Date(l.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · <b class="text-white/80">${escapeHtml(l.byName || 'Admin')}</b> ${l.type === 'skip' ? `skipped ${escapeHtml(l.captain || 'a captain')}'s turn` : l.type === 'captain' ? `made ${escapeHtml(l.name || 'a player')} captain of ${escapeHtml(names[l.team] || 'a team')}${l.oldName ? ` (was ${escapeHtml(l.oldName)})` : ''}` : `took ${escapeHtml(l.name || 'a player')} off ${escapeHtml(names[l.team] || 'a team')}`}</div>`).join('')}</div>` : '';
     return `<div class="space-y-4 pb-12">
-        ${banner}${orderStrip}${skipBtn}${limit}
+        ${capAlert}${banner}${orderStrip}${skipBtn}${limit}
         ${live && canPick ? `<button data-action="caps-open-picker" data-event-id="${event.id}" class="w-full bg-[#00F296] text-slate-950 font-black py-3.5 rounded-2xl text-sm shadow-[0_0_15px_rgba(0,242,150,0.4)] flex items-center justify-center gap-2"><i class="fa-solid fa-user-plus pointer-events-none"></i> Add a player</button>` : ''}
         ${teamsHtml}
         ${poolHtml}
@@ -1464,6 +1474,7 @@ function renderCapsTab(event) {
         ${logHtml}
         ${canFinish ? `<button data-action="caps-build-lineup" data-event-id="${event.id}" class="w-full ${pool.length ? 'bg-black/60 text-white border border-white/20' : 'bg-amber-400 text-slate-950'} font-black py-3 rounded-2xl text-xs flex items-center justify-center gap-2"><i class="fa-solid fa-shirt pointer-events-none"></i> Build line up${pool.length && admin ? ' now' : ''}</button>` : ''}
         ${admin && live ? `<button data-action="caps-cancel" data-event-id="${event.id}" class="w-full text-white/40 hover:text-red-300 text-[11px] py-1">Stop Caps mode (keeps the teams)</button>` : ''}
+        ${admin ? `<button data-action="caps-delete" data-event-id="${event.id}" class="w-full bg-red-500/10 border border-red-500/40 text-red-300 font-black py-2.5 rounded-xl text-[11px]"><i class="fa-solid fa-trash-can mr-1 pointer-events-none"></i> Delete Caps mode and clear all teams</button>` : ''}
     </div>`;
 }
 
@@ -1675,11 +1686,79 @@ window.capsRemovePick = async function(eventId, team, uid) {
     if (res.ok && !res.aborted) { toast(`${p0.name || 'Player'} is available again.`); window.openTeamMakingModal(eventId); }
 };
 
+/** Admin: pick a new captain for a team (someone on that team, or someone not picked yet). The old captain stays on the team. */
+window.openCapsCaptainPicker = function(eventId, team) {
+    const event = findEvent(eventId); if (!event || !isTeamAdmin(event)) return;
+    const names = window.getTeamNames(event);
+    const cur = captainOf(event, team);
+    const mates = teamList(event.teamAssignments, team).filter(p => String(p.uid) !== cur && !p.isHostGuest);
+    const pool = draftPool(event, event.teamAssignments).filter(p => !p.isHostGuest);
+    const row = (p, from) => `<button onclick="window.capsSetCaptain('${jsArg(eventId)}', ${team}, '${jsArg(String(p.uid))}')" class="w-full flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl text-left">
+        <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-8 h-8 rounded-full object-cover" onerror="this.src='${AV_FALLBACK}'">
+        <span class="text-xs font-bold text-white flex-1 truncate">${escapeHtml(p.name || 'Player')}</span><span class="text-[9px] text-white/50">${from}</span></button>`;
+    let m = document.getElementById('assign-picker-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'assign-picker-modal'; m.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm pointer-events-auto'; document.body.appendChild(m); }
+    m.innerHTML = `<div class="bg-[#040E13] border border-amber-400/50 rounded-3xl max-w-xs w-full p-5 space-y-3 shadow-2xl text-white pointer-events-auto">
+        <div class="flex items-center justify-between border-b border-white/10 pb-3"><h4 class="text-xs font-black uppercase">New captain for ${escapeHtml(names[team])}</h4>
+            <button onclick="document.getElementById('assign-picker-modal').remove()" class="text-white/50 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+        <p class="text-[10px] text-white/50">The current captain stays on the team as a player.</p>
+        <div class="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+            ${mates.map(p => row(p, 'On this team')).join('')}
+            ${pool.map(p => row(p, 'Not picked yet')).join('')}
+            ${!mates.length && !pool.length ? '<p class="text-xs text-white/50 text-center py-3">No one else to choose.</p>' : ''}
+        </div></div>`;
+};
+
+window.capsSetCaptain = async function(eventId, team, uid) {
+    document.getElementById('assign-picker-modal')?.remove();
+    const event = findEvent(eventId); if (!event || !isTeamAdmin(event)) return;
+    let newName = '', oldName = '';
+    const res = await mutateEvent(eventId, (draft) => {
+        const d = draft.capsDraft;
+        if (!d || d.status !== 'live') return false;
+        const ta = draft.teamAssignments || {};
+        const ev = { ...draft, id: eventId };
+        const list = teamList(ta, team);
+        const curUid = String(((draft.teamCaptains || {})[team] ?? (draft.teamCaptains || {})[String(team)]) || '');
+        oldName = (list.find(p => String(p.uid) === curUid) || {}).name || '';
+        let p = list.find(x => String(x.uid) === String(uid));
+        if (!p) {
+            const free = draftPool(ev, ta).find(x => String(x.uid) === String(uid));
+            if (!free) return false;   // picked by another team meanwhile
+            p = playerRecord(free);
+            ta[team] = [...list, p];
+            draft.teamAssignments = ta;
+        }
+        newName = p.name || 'Player';
+        draft.teamCaptains = { ...(draft.teamCaptains || {}), [team]: String(uid) };
+        d.log = [...(d.log || []), { type: 'captain', team, uid: String(uid), name: newName, oldName, by: meUid(), byName: myName(), at: Date.now() }];
+    });
+    if (res.ok && res.aborted) toast("That player isn't available anymore.", 'error');
+    else if (res.ok) {
+        window.teamCaptains[eventId] = res.event.teamCaptains;
+        window.teamAssignments[eventId] = res.event.teamAssignments;
+        toast(`${newName} is the new captain.`);
+        window.openTeamMakingModal(eventId);
+    }
+};
+
 window.capsCancel = async function(eventId) {
     const event = findEvent(eventId); if (!event || !isTeamAdmin(event)) return;
     if (!confirm('Stop Caps mode? The players already picked stay on their teams.')) return;
     const res = await mutateEvent(eventId, (draft) => { draft.capsDraft = null; });
     if (res.ok) { window.activeTeamTab = 0; window.openTeamMakingModal(eventId); }
+};
+
+/** Admin: end Caps mode and empty every team (captains, picks, positions). Start over with Build Teams. */
+window.capsDelete = async function(eventId) {
+    const event = findEvent(eventId); if (!event || !isTeamAdmin(event)) return;
+    if (!confirm('Delete Caps mode? This clears ALL teams: captains, picks and positions. Everyone goes back to Free Agents.')) return;
+    const res = await mutateEvent(eventId, (draft) => { draft.capsDraft = null; draft.teamAssignments = {}; draft.teamCaptains = {}; });
+    if (res.ok && !res.aborted) {
+        window.teamAssignments[eventId] = {}; window.teamCaptains[eventId] = {};
+        window.activeTeamTab = 0; window.openTeamMakingModal(eventId);
+        toast('Caps mode deleted. Teams are empty.');
+    }
 };
 
 document.addEventListener('click', (e) => {
@@ -1690,8 +1769,10 @@ document.addEventListener('click', (e) => {
     if (a === 'caps-open-picker') window.openCapsPicker(id);
     else if (a === 'caps-build-lineup') window.capsBuildLineup(id);
     else if (a === 'caps-cancel') window.capsCancel(id);
+    else if (a === 'caps-delete') window.capsDelete(id);
     else if (a === 'caps-edit-deadline') window.openCapsDeadline(id);
     else if (a === 'caps-skip') window.capsSkipTurn(id);
+    else if (a === 'caps-change-captain') window.openCapsCaptainPicker(id, parseInt(btn.getAttribute('data-team-index'), 10));
     else if (a === 'caps-remove') window.capsRemovePick(id, parseInt(btn.getAttribute('data-team-index'), 10), btn.getAttribute('data-uid'));
     else if (a === 'caps-copy-link') {
         const link = capsLink(id);
