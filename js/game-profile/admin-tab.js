@@ -4,7 +4,7 @@ import { doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebase
 import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
 import { adminStatusHtml } from '../game-status.js';
 import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
-import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry } from '../money-rules.js';
+import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry, unpaidList } from '../money-rules.js';
 
 window.activeGameProfileTab = window.activeGameProfileTab || 'manage-event';
 
@@ -136,7 +136,7 @@ export function renderAdminTab(event) {
     const liveBannerHtml = liveActive ? `
         <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 space-y-3 shadow-xl">
             <div class="flex items-center justify-between">
-                <span class="bg-[#00F296] text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">🔴 LIVE MATCH</span>
+                <span class="bg-[#00F296] text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">🔴 LIVE · Match ${matches.length + 1}</span>
                 <span id="live-match-timer-display" class="text-xs font-mono font-black text-[#00F296]" data-start="${liveActive.startTime || Date.now()}">
                     ${liveTimerText}
                 </span>
@@ -155,7 +155,8 @@ export function renderAdminTab(event) {
 
     const matchesListHtml = matches.length === 0 
         ? '<div class="text-center text-xs text-white/40 py-3">No match results recorded yet.</div>'
-        : matches.map((m, mIdx) => {
+        // Newest match on top, numbered by when it was played (Match 3, Match 2, Match 1).
+        : matches.map((m, mIdx) => ({ m, mIdx })).reverse().map(({ m, mIdx }) => {
             const teamA = m.teamA || "Team 1";
             const teamB = m.teamB || "Team 2";
             const t1Goals = Array.isArray(m.team1Goals) ? m.team1Goals : [];
@@ -186,6 +187,7 @@ export function renderAdminTab(event) {
 
             return `
                 <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 shadow-md">
+                    <div class="text-[11px] font-black uppercase tracking-wider text-[#00F296]">Match ${mIdx + 1}</div>
                     <div class="flex items-center justify-between text-xs font-black">
                         <span class="text-white">${teamA}</span>
                         <div class="flex items-center gap-2">
@@ -300,6 +302,7 @@ export function renderAdminTab(event) {
 
     return `
         <div class="space-y-4">
+            ${unpaidBoxHtml(event)}
             ${pillsNavHtml}
             <div>
                 ${activeTabContentHtml}
@@ -307,6 +310,90 @@ export function renderAdminTab(event) {
         </div>
     `;
 }
+
+// ---- "Didn't pay" box: once the game has started, who still owes money (5 hours after the game the
+// server also sends the admins this list). Ignore / Mark as paid / Ask to pay (the server sends the push).
+function unpaidBoxHtml(event) {
+    const start = startMsOf(event);
+    if (!start || Date.now() < start) return '';
+    const list = unpaidList(event);
+    const ignored = (event.unpaidIgnored || []).length;
+    if (!list.length && !ignored) return '';
+    const asks = event.paymentAsks || {};
+    const total = list.reduce((n, x) => n + x.cents, 0);
+    const gs = (n) => `${n} guest${n === 1 ? '' : 's'}`;
+    const rows = list.map(x => {
+        const att = (event.attendees || []).find(a => String(a.uid) === x.uid) || { name: x.name };
+        const pic = window.resolvePlayerAvatar ? window.resolvePlayerAvatar(att) : (att.avatar || '');
+        const what = !x.guests ? 'Game fee' : x.self ? `Game fee + ${gs(x.guests)}` : gs(x.guests);
+        const asked = Number(asks[x.uid]) || 0;
+        const canAsk = !x.uid.startsWith('usr_') && !x.uid.includes('_guest_');
+        return `
+            <div class="bg-black/40 border border-white/10 rounded-xl p-2.5 space-y-2">
+                <div class="flex items-center gap-2.5">
+                    <img src="${escapeHtml(pic)}" class="w-8 h-8 rounded-full object-cover bg-black/50 shrink-0" onerror="this.style.visibility='hidden'">
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-bold text-white truncate">${escapeHtml(x.name)}</div>
+                        <div class="text-[10px] text-white/50">${what}${asked ? ` · asked ${new Date(asked).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</div>
+                    </div>
+                    <div class="text-sm font-black text-amber-300 shrink-0">${dollars(x.cents)}</div>
+                </div>
+                <div class="grid grid-cols-3 gap-1.5">
+                    <button onclick="unpaidIgnore('${event.id}','${x.uid}')" class="bg-white/5 border border-white/15 text-white/70 font-bold py-1.5 rounded-lg text-[11px]">Ignore</button>
+                    <button onclick="unpaidMarkPaid('${event.id}','${x.uid}')" class="bg-[#00F296] text-slate-950 font-black py-1.5 rounded-lg text-[11px]">Mark as paid</button>
+                    ${canAsk ? `<button onclick="unpaidAsk('${event.id}','${x.uid}')" class="bg-amber-500/20 border border-amber-500/50 text-amber-200 font-bold py-1.5 rounded-lg text-[11px]">${asked ? 'Ask again' : 'Ask to pay'}</button>`
+                        : '<span class="text-[10px] text-white/40 self-center text-center">No account</span>'}
+                </div>
+            </div>`;
+    }).join('');
+    return `
+        <div class="bg-amber-500/10 border border-amber-500/40 rounded-[22px] p-3 space-y-2.5">
+            <div class="flex items-center justify-between">
+                <div class="text-[11px] font-black uppercase tracking-wider text-amber-300">💸 Didn't pay${list.length ? ` (${list.length})` : ''}</div>
+                ${list.length ? `<div class="text-xs font-black text-amber-200">${dollars(total)} owed</div>` : ''}
+            </div>
+            ${list.length ? rows : '<div class="text-[11px] text-white/60">Everyone is paid up.</div>'}
+            ${ignored ? `<button onclick="unpaidUndoIgnore('${event.id}')" class="text-[10px] text-white/50 underline">${ignored} ignored · show them again</button>` : ''}
+        </div>`;
+}
+
+window.unpaidIgnore = async function(eventId, uid) {
+    const res = await mutateEvent(eventId, (draft) => {
+        const l = (draft.unpaidIgnored || []).map(String);
+        if (l.includes(String(uid))) return false;
+        draft.unpaidIgnored = [...l, String(uid)];
+    });
+    if (res.ok) window.showToast('Ignored. They won\'t show on this list.');
+};
+
+window.unpaidUndoIgnore = async function(eventId) {
+    const res = await mutateEvent(eventId, (draft) => { draft.unpaidIgnored = []; });
+    if (res.ok) window.showToast('Showing everyone again.');
+};
+
+window.unpaidMarkPaid = async function(eventId, uid) {
+    let name = '';
+    const done = (p) => p === 'Paid' || p === 'Credit' || p === 'Free';
+    const res = await mutateEvent(eventId, (draft) => {
+        const a = (draft.attendees || []).find(x => String(x.uid) === String(uid));
+        if (!a) return false;
+        name = a.name || 'Player';
+        if (!(Number(a.creditPaidCents) > 0) && !done(a.paid)) a.paid = 'Paid';
+        a.guests = (a.guests || []).map(g => (g && !done(g.paid) && !(Number(a.creditPaidCents) > 0 && !g.paid)) ? { ...g, paid: 'Paid' } : g);
+    });
+    if (res.ok && !res.aborted) window.showToast(`${name} marked as paid.`);
+};
+
+window.unpaidAsk = async function(eventId, uid) {
+    let name = '';
+    const res = await mutateEvent(eventId, (draft) => {
+        const a = (draft.attendees || []).find(x => String(x.uid) === String(uid));
+        if (!a) return false;
+        name = a.name || 'Player';
+        draft.paymentAsks = { ...(draft.paymentAsks || {}), [String(uid)]: Date.now() };
+    });
+    if (res.ok && !res.aborted) window.showToast(`Reminder sent to ${name}.`);
+};
 
 if (!window._liveTimerInterval) {
     window._liveTimerInterval = setInterval(() => {
@@ -1205,14 +1292,14 @@ window.adminMoveToRoster = async function(eventId, uid) {
     const w = ev && (ev.waitingList || []).find(x => String(x.uid) === String(uid));
     if (!w) return;
     const full = freeSpotsOf(ev) < 1 + (Array.isArray(w.guests) ? w.guests.length : 0);
-    if (!confirm(`Move ${w.name || 'this player'} to the roster?${full ? ' The game is full, so this goes over the limit.' : ''}${creditGame(ev) ? ' No credit is taken: mark them Paid if they paid you.' : ''}`)) return;
+    if (!confirm(`Move ${w.name || 'this player'} to the roster?${full ? ' The game is full, so this goes over the limit.' : ''}${creditGame(ev) ? ' The game fee comes out of their credit (if they don\'t have enough, they show as Unpaid).' : ''}`)) return;
     const res = await mutateEvent(eventId, (draft) => {
         const entry = (draft.waitingList || []).find(x => String(x.uid) === String(uid));
         if (!entry) return;
         draft.waitingList = (draft.waitingList || []).filter(x => String(x.uid) !== String(uid));
         draft.attendees = (draft.attendees || []).filter(a => String(a.uid) !== String(uid));
         const { autoJoin, waitingSince, ...rest } = entry;
-        draft.attendees.push({ ...rest, status: 'confirmed', addedByAdmin: true, paid: rest.paid && rest.paid !== 'Unpaid' ? rest.paid : 'Unpaid' });
+        draft.attendees.push({ ...rest, status: 'confirmed', addedByAdmin: true, addedBy: String(window.currentUser?.uid || ''), addedByName: String(window.userProfile?.name || [window.userProfile?.firstName, window.userProfile?.lastName].filter(Boolean).join(' ') || 'An admin'), paid: rest.paid && rest.paid !== 'Unpaid' ? rest.paid : 'Unpaid' });
     });
     if (res.ok) window.showToast(`${w.name || 'Player'} moved to the roster.`);
 };

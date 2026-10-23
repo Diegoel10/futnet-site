@@ -132,7 +132,7 @@ export function joinHooks(ev, uid) {
             const after = ctx.balance - ctx.charge;
             tx.set(credRef(cid, uid), { uid: String(uid), name: ctx.name || window.userProfile?.name || 'Member', balanceCents: after, updatedAt: serverTimestamp() }, { merge: true });
             await writeLedger(tx, cid, {
-                uid: String(uid), name: ctx.name || 'Member', amountCents: -ctx.charge, type: 'game', note: 'Game fee',
+                uid: String(uid), name: ctx.name || 'Member', amountCents: -ctx.charge, type: 'game', note: ctx.chargeNote || 'Game fee',
                 eventId: ev.id, eventTitle: ev.title || 'Game', by: String(uid), byName: ctx.name || 'Member', balanceAfterCents: after
             });
         }

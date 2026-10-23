@@ -330,10 +330,22 @@ window.saveManagedGuests = async function(eventId) {
     });
 
     const myUid = String(window.currentUser.uid);
+    const mine0 = (event.attendees || []).find(a => String(a.uid) === myUid) || {};
+    const isOrg = String(event.organizerId) === myUid;
+    // Paid outside the app (cash / Zelle): the server takes only the new guests from their credit.
+    const cashPlayer = !isOrg && mine0.paid === 'Paid' && !(mine0.creditPaidCents > 0);
     // Must-pay games: added guests are paid from credit, removed guests follow the refund policy.
-    const credit = creditGame(event) && String(event.organizerId) !== myUid;
+    const credit = creditGame(event) && !isOrg && !cashPlayer;
+    // The organizer plays free: ask if their new guests come out of their credit (Cancel = guests free).
+    const perGuest = costCents(event, 1) - costCents(event, 0);
+    const addingNow = newGuests.length - (mine0.guests || []).length;
+    let orgPays = false;
+    if (creditGame(event) && isOrg && addingNow > 0) {
+        orgPays = confirm(`Pay ${dollars(addingNow * perGuest)} for your guest${addingNow === 1 ? '' : 's'} from your credit?\n\nOK = take it from my credit\nCancel = my guest${addingNow === 1 ? ' plays' : 's play'} free`);
+    }
+    const orgMode = creditGame(event) && isOrg && (orgPays || (addingNow < 0 && (mine0.guestCreditCents || 0) > 0));
     let short = 0, have = 0, need = 0, noRoom = 0, charged = 0, refunded = 0;
-    const hooks = credit ? (() => {
+    const hooks = (credit || orgMode) ? (() => {
         const j = joinHooks(event, myUid), r = refundHooks(event, myUid);
         return {
             read: async (tx) => ({ ...(await j.read(tx)), refund: 0 }),
@@ -351,6 +363,22 @@ window.saveManagedGuests = async function(eventId) {
         if (added > 0) {
             const free = capacityOfDraft(draft) - (draft.attendees || []).reduce((n, a) => n + 1 + ((a.guests || []).length), 0);
             if (added > free) { noRoom = Math.max(0, free); return false; }
+        }
+        if (orgMode && ctx) {
+            const gc = me.guestCreditCents || 0;
+            if (added > 0 && orgPays) {
+                const cost = added * perGuest;
+                if (ctx.balance < cost) { short = cost; have = ctx.balance; need = cost; return false; }
+                ctx.charge = cost; ctx.chargeNote = 'Guest fee'; charged = cost;
+                me.guestCreditCents = gc + cost;
+                next.forEach((g, i) => { if (i >= old.length) g.paid = 'Credit'; });
+            } else if (added < 0 && gc > 0) {
+                const back = myLeaveRefund(draft, Math.min(gc, -added * perGuest)).now;
+                if (back > 0) { ctx.refund = back; ctx.note = 'Guest removed'; refunded = back; }
+                me.guestCreditCents = gc - back;
+            }
+        } else if (creditGame(draft) && isOrg && added > 0) {
+            next.forEach((g, i) => { if (i >= old.length) g.paid = 'Free'; });
         }
         if (credit && ctx) {
             const paid = me.creditPaidCents || 0;
@@ -375,7 +403,8 @@ window.saveManagedGuests = async function(eventId) {
         return;
     }
     if (res.ok && !res.aborted) {
-        window.showToast(charged ? `Guests updated! ${dollars(charged)} was taken from your credit.` : refunded ? `Guests updated! ${dollars(refunded)} was returned to your credit.` : "Guests updated successfully!");
+        window.showToast(charged ? `Guests updated! ${dollars(charged)} was taken from your credit.` : refunded ? `Guests updated! ${dollars(refunded)} was returned to your credit.`
+            : (cashPlayer && creditGame(event) && addingNow > 0) ? `Guests updated! ${dollars(addingNow * perGuest)} will be taken from your credit.` : "Guests updated successfully!");
         document.getElementById('manage-guests-modal')?.remove();
         window.renderEventDetailModalContent();
     } else if (res.ok) {

@@ -41,7 +41,7 @@ export function renderStatsTab(event) {
                     ${liveActive ? `
                         <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 space-y-3 shadow-xl animate-pulse">
                             <div class="flex items-center justify-between">
-                                <span class="bg-[#00F296] text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">🔴 LIVE MATCH</span>
+                                <span class="bg-[#00F296] text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">🔴 LIVE · Match ${(event.matches || []).length + 1}</span>
                                 <span class="text-[10px] text-[#00F296] font-bold">In Progress</span>
                             </div>
                             <div class="bg-black/60 border border-emerald-500/40 text-white rounded-2xl py-3 px-6 flex items-center justify-around text-center shadow-inner font-mono">
@@ -74,7 +74,7 @@ export function renderStatsTab(event) {
 
                     ${(event.matches || []).length === 0 && !liveActive ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
                     
-                    ${(event.matches || []).map((m, idx) => {
+                    ${(event.matches || []).map((m, idx) => ({ m, idx })).reverse().map(({ m, idx }) => {
                         window.teamNames[event.id] = window.teamNames[event.id] || {};
                         const teamA = m.teamA || window.teamNames[event.id][0] || "Team 1";
                         const teamB = m.teamB || window.teamNames[event.id][1] || "Team 2";
@@ -101,7 +101,7 @@ export function renderStatsTab(event) {
                         return `
                             <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 shadow-md">
                                 <div class="flex items-center justify-between text-xs font-bold text-white/60 uppercase">
-                                    <span>Game #${idx + 1}</span>
+                                    <span class="text-[#00F296] font-black">Match ${idx + 1}</span>
                                     <span class="px-2 py-0.5 rounded-full text-[10px] ${isFinished ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">${isFinished ? 'Finished' : 'In Progress'}</span>
                                 </div>
                                 <div class="bg-black/80 text-white rounded-2xl py-3 px-6 flex items-center justify-around text-center shadow-inner border border-white/10">
@@ -120,15 +120,17 @@ export function renderStatsTab(event) {
             ` : ''}
 
             ${subTab === 'leaderboard' ? `
-                <div class="bg-black/40 border border-emerald-500/30 rounded-2xl overflow-hidden shadow-xl backdrop-blur-md">
-                    <table class="w-full text-left border-collapse text-xs">
+                <div class="bg-[#141821] border border-white/10 rounded-2xl overflow-hidden shadow-xl">
+                    <table class="w-full text-left border-collapse text-sm">
                         <thead>
-                            <tr class="bg-black/60 border-b border-white/10 text-white/70 uppercase font-black text-[10px]">
-                                <th class="p-3">Team</th>
-                                <th class="p-3 text-center">Played</th>
-                                <th class="p-3 text-center">W / T / L</th>
-                                <th class="p-3 text-center">GF / GA / GD</th>
-                                <th class="p-3 text-right">Points</th>
+                            <tr class="border-b border-white/10 text-white/50 font-bold text-xs">
+                                <th class="py-3 pl-4 pr-2">Club</th>
+                                <th class="py-3 px-1.5 text-center w-9">MP</th>
+                                <th class="py-3 px-1.5 text-center w-9">W</th>
+                                <th class="py-3 px-1.5 text-center w-9">D</th>
+                                <th class="py-3 px-1.5 text-center w-9">L</th>
+                                <th class="py-3 px-1.5 text-center w-10">GD</th>
+                                <th class="py-3 pl-1.5 pr-4 text-center w-11 text-[#00F296]">Pts</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-white/10">
@@ -212,18 +214,29 @@ export function renderStatsTab(event) {
                                     const ta = event.teamAssignments || {};
                                     const teamPlayers = ((ta[st.index] ?? ta[String(st.index)]) || []).filter(p => p && p.name);
 
+                                    const shirt = (window.getTeamColors ? window.getTeamColors(event)[st.index] : null) || '#9ca3af';
+                                    const shirtStyle = String(shirt).toLowerCase() === '#000000' ? 'color:#000;-webkit-text-stroke:1px #9ca3af' : `color:${shirt}`;
                                     return `
-                                        <tr class="hover:bg-white/5 transition border-b border-white/5">
-                                            <td class="p-3 font-bold text-white">
-                                                <div class="flex items-center gap-2">
-                                                    ${st.isLive ? '<span class="w-2.5 h-2.5 rounded-full bg-[#00F296] inline-block animate-ping shrink-0" title="Team currently playing live"></span>' : ''}
-                                                    <span>#${idx + 1} ${escapeHtml(st.name)}</span>
-                                                    <button onclick="toggleLeaderboardTeamRoster('${teamKey}')" class="text-white/40 hover:text-white p-1 transition" title="View Team Players">
-                                                        <i class="fa-solid fa-chevron-${isExpanded ? 'up' : 'down'} text-[10px]"></i>
-                                                    </button>
+                                        <tr class="hover:bg-white/5 transition ${isExpanded ? '' : 'border-b border-white/5'} cursor-pointer" onclick="toggleLeaderboardTeamRoster('${teamKey}')" title="Show players">
+                                            <td class="py-3 pl-4 pr-2 text-white">
+                                                <div class="flex items-center gap-2.5 min-w-0">
+                                                    <span class="text-white/50 font-semibold w-4 text-right shrink-0">${idx + 1}</span>
+                                                    <i class="fa-solid fa-shirt text-base shrink-0" style="${shirtStyle}"></i>
+                                                    <span class="font-bold truncate">${escapeHtml(st.name)}</span>
+                                                    ${st.isLive ? '<span class="w-2 h-2 rounded-full bg-[#00F296] inline-block animate-ping shrink-0" title="Playing live now"></span>' : ''}
+                                                    <i class="fa-solid fa-chevron-${isExpanded ? 'up' : 'down'} text-[9px] text-white/30 shrink-0"></i>
                                                 </div>
-                                                ${isExpanded ? `
-                                                    <div class="flex flex-wrap gap-1.5 pt-2 pb-1">
+                                            </td>
+                                            <td class="py-3 px-1.5 text-center text-white/80">${st.played + (st.isLive ? 1 : 0)}</td>
+                                            <td class="py-3 px-1.5 text-center text-white/80">${st.wins}</td>
+                                            <td class="py-3 px-1.5 text-center text-white/80">${st.ties}</td>
+                                            <td class="py-3 px-1.5 text-center text-white/80">${st.losses}</td>
+                                            <td class="py-3 px-1.5 text-center text-white/80">${gd >= 0 ? `+${gd}` : gd}</td>
+                                            <td class="py-3 pl-1.5 pr-4 text-center font-black text-[#00F296]">${st.points}</td>
+                                        </tr>
+                                        ${isExpanded ? `<tr class="border-b border-white/5"><td colspan="7">
+                                                
+                                                    <div class="flex flex-wrap gap-1.5 pb-3 pl-[46px] pr-4">
                                                         ${teamPlayers.length === 0 ? '<span class="text-[10px] text-white/40 italic">No players assigned</span>' : teamPlayers.map(p => `
                                                             <div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full">
                                                                 <img src="${escapeHtml(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : (p.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'))}" class="w-5 h-5 rounded-full object-cover">
@@ -231,13 +244,7 @@ export function renderStatsTab(event) {
                                                             </div>
                                                         `).join('')}
                                                     </div>
-                                                ` : ''}
-                                            </td>
-                                            <td class="p-3 text-center text-white/70">${st.played + (st.isLive ? 1 : 0)}</td>
-                                            <td class="p-3 text-center text-white/70">${st.wins} / ${st.ties} / ${st.losses}</td>
-                                            <td class="p-3 text-center font-semibold text-white/80">${st.gf} / ${st.ga} / <span class="${gd > 0 ? 'text-[#00F296] font-bold' : gd < 0 ? 'text-red-400 font-bold' : ''}">${gdFormatted}</span></td>
-                                            <td class="p-3 text-right font-black text-[#00F296]">${st.points} pts ${st.isLive ? '<span class="text-[9px] text-amber-400 font-normal">(Live)</span>' : ''}</td>
-                                        </tr>
+                                                </td></tr>` : ''}
                                     `;
                                 }).join('');
                             })()}

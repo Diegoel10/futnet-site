@@ -157,10 +157,39 @@ function mayTakeSpot(ev, uid, now, startMs) {
     return offerEligible(ev, now, startMs).includes(String(uid));
 }
 
+/** The "Didn't pay" list goes to the admins this long after the game (5 hours after it ends;
+ *  with no End Event, the game is taken to last 2 hours). */
+const UNPAID_AFTER_MS = 5 * 3600000;
+const ASSUMED_GAME_MS = 2 * 3600000;
+function unpaidDueAt(ev, startMs) {
+    if (ev && Number(ev.sessionEndedAt) > 0) return Number(ev.sessionEndedAt) + UNPAID_AFTER_MS;
+    return startMs ? startMs + ASSUMED_GAME_MS + UNPAID_AFTER_MS : 0;
+}
+/** Who still owes money for a paid game: [{ uid, name, cents, guests }] (guests = how many unpaid guests).
+ *  Skips the organizer, anyone Paid / Credit / Free, and players the admin chose to ignore. */
+function unpaidList(ev) {
+    const fee = feeCentsOf(ev);
+    if (!ev || fee <= 0) return [];
+    const per = fee + plusOneExtraOf(ev);
+    const ignored = new Set((ev.unpaidIgnored || []).map(String));
+    const done = (p) => p === 'Paid' || p === 'Credit' || p === 'Free';
+    const out = [];
+    (ev.attendees || []).forEach(a => {
+        const uid = String(a.uid || a.id || '');
+        if (!uid || ignored.has(uid) || uid === String(ev.organizerId) || a.role === 'Organizer') return;
+        const selfOwes = !(Number(a.creditPaidCents) > 0) && !done(a.paid);
+        // A guest owes when not marked paid (guests of a credit payer with no mark are covered by the credit).
+        const guests = (a.guests || []).filter(g => g && !done(g.paid) && !(Number(a.creditPaidCents) > 0 && !g.paid)).length;
+        const cents = (selfOwes ? fee : 0) + guests * per;
+        if (cents > 0) out.push({ uid, name: a.name || 'Player', cents, guests, self: selfOwes });
+    });
+    return out;
+}
+
 /** When the current offer should move on to the next person (never past the last-call moment). */
 function offerExpiry(ev, now, startMs) {
     const t = now + claimMinutesOf(ev) * 60000;
     return startMs ? Math.min(t, startMs - LAST_CALL_MS) : t;
 }
 
-module.exports = { CLAIM_MINUTES, DEFAULT_CLAIM_MINUTES, LAST_CALL_MS, feeCentsOf, isCreditGame, plusOneExtraOf, costFor, capacityOf, headsOf, freeSpotsOf, startMsOf, fullRefundAllowed, partialPctOf, refundsOnCancel, claimMinutesOf, leaveRefund, policyLines, isLastCall, waitingUids, offerEligible, mayTakeSpot, offerExpiry };
+module.exports = { CLAIM_MINUTES, DEFAULT_CLAIM_MINUTES, LAST_CALL_MS, feeCentsOf, isCreditGame, plusOneExtraOf, costFor, capacityOf, headsOf, freeSpotsOf, startMsOf, fullRefundAllowed, partialPctOf, refundsOnCancel, claimMinutesOf, leaveRefund, policyLines, isLastCall, waitingUids, offerEligible, mayTakeSpot, offerExpiry, UNPAID_AFTER_MS, ASSUMED_GAME_MS, unpaidDueAt, unpaidList };

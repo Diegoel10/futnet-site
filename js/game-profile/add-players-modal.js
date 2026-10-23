@@ -2,6 +2,7 @@
 import { mutateEvent, escapeHtml, safeAvatar } from './event-store.js';
 import { db, appId } from '../firebase-config.js';
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { creditGame } from '../credits.js';
 
 // Best name we have for a person, whatever app created their profile.
 const nameOf = (p) => String((p && (p.name || p.displayName || p.fullName ||
@@ -220,7 +221,7 @@ window.submitBatchAddPlayers = async function(eventId) {
         draft.attendees = Array.isArray(draft.attendees) ? draft.attendees : [];
         picked.forEach(pl => {
             if (draft.attendees.some(a => String(a.uid) === String(pl.uid))) return;
-            const entry = { uid: pl.uid, name: pl.name, position: pl.position, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [], addedByAdmin: true };
+            const entry = { uid: pl.uid, name: pl.name, position: pl.position, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [], addedByAdmin: true, addedBy: String(window.currentUser?.uid || ''), addedByName: String(window.userProfile?.name || [window.userProfile?.firstName, window.userProfile?.lastName].filter(Boolean).join(' ') || 'An admin') };
             if (pl.avatar) entry.avatar = pl.avatar;
             draft.attendees.push(entry);
             draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(pl.uid));
@@ -228,7 +229,8 @@ window.submitBatchAddPlayers = async function(eventId) {
         });
     });
     if (res.ok) {
-        window.showToast("Players added successfully!");
+        const ev = (window.eventsList || []).find(e => e.id === eventId);
+        window.showToast(ev && creditGame(ev) ? "Players added! Their credit is charged; anyone without enough shows as Unpaid." : "Players added successfully!");
         const modal = document.getElementById('add-players-screen-modal');
         if (modal) modal.remove();
     }

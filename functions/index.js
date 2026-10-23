@@ -1212,9 +1212,12 @@ async function settleGuestChanges(eventId, before, after) {
   const todo = arr(after.attendees).filter((a) => {
     const u = uidOf(a);
     const b = prev.get(u);
-    return b && isRealPlayer(u) && Number(b.creditPaidCents) > 0 && a.addedByAdmin !== true && a.role !== "Organizer" &&
+    // Paid with credit, or marked Paid by the admin (cash / Zelle: only their new guests are charged).
+    const payer = !!b && (Number(b.creditPaidCents) > 0 || b.paid === "Paid");
+    return b && isRealPlayer(u) && payer && a.role !== "Organizer" && u !== after.organizerId &&
       arr(a.guests).length !== arr(b.guests).length &&
-      (Number(a.creditPaidCents) || 0) === (Number(b.creditPaidCents) || 0);
+      (Number(a.creditPaidCents) || 0) === (Number(b.creditPaidCents) || 0) &&
+      (Number(a.guestCreditCents) || 0) === (Number(b.guestCreditCents) || 0);
   }).map((a) => ({ uid: uidOf(a), beforeGuests: arr(prev.get(uidOf(a)).guests) }));
   if (!todo.length) return false;
 
@@ -1237,6 +1240,34 @@ async function settleGuestChanges(eventId, before, after) {
     const attendees = arr(g.attendees).map((a) => {
       const t = todo.find((x) => x.uid === uidOf(a));
       if (!t) return a;
+      if (!(Number(a.creditPaidCents) > 0)) {
+        // Cash player: they paid for themselves outside the app; guests come out of their credit.
+        const per = rules.costFor(g, 1) - rules.costFor(g, 0);
+        const diff = arr(a.guests).length - t.beforeGuests.length;
+        const gc = Number(a.guestCreditCents) || 0;
+        if (diff > 0) {
+          const need = diff * per;
+          const keep = t.beforeGuests.length;
+          changed = true;
+          if (bal[t.uid] >= need) {
+            writeCredit(tx, cid, t.uid, a.name, bal[t.uid], -need, "game", "Guest fee", g, eventId);
+            done.push({ uid: t.uid, kind: "charged", cents: need });
+            return { ...a, guestCreditCents: gc + need, guests: arr(a.guests).map((x, i) => (i >= keep ? { ...x, paid: "Credit" } : x)) };
+          }
+          done.push({ uid: t.uid, kind: "owed", cents: need, have: bal[t.uid] });
+          return { ...a, guestCreditCents: gc, guests: arr(a.guests).map((x, i) => (i >= keep ? { ...x, paid: "Unpaid" } : x)) };
+        }
+        if (diff < 0 && gc > 0) {
+          const back = rules.leaveRefund(g, Math.min(gc, -diff * per), now, start).now;
+          changed = true;
+          if (back > 0) {
+            writeCredit(tx, cid, t.uid, a.name, bal[t.uid], back, "refund", "Guest removed", g, eventId);
+            done.push({ uid: t.uid, kind: "refunded", cents: back });
+          }
+          return { ...a, guestCreditCents: gc - back };
+        }
+        return a;
+      }
       const paid = Number(a.creditPaidCents) || 0;
       const cost = rules.costFor(g, arr(a.guests).length);
       if (cost > paid) {
@@ -1270,12 +1301,74 @@ async function settleGuestChanges(eventId, before, after) {
       ? { title: "Guest added 💳", body: `${money(d.cents)} was taken from your credit for your guest(s) in ${title}.` }
       : d.kind === "refunded"
         ? { title: `${money(d.cents)} refunded 💰`, body: `You removed a guest from ${title}, so ${money(d.cents)} is back in your credit.`, sound: "cha_ching" }
-        : { title: "Add credit for your guest 💳", body: `Your guest(s) in ${title} cost ${money(d.cents)} and you have ${money(d.have)} credit, so they weren't added. Send the money to your admin, then add them again.` };
+        : d.kind === "owed"
+          ? { title: "Pay for your guest 💳", body: `Your guest(s) in ${title} cost ${money(d.cents)} and you have ${money(d.have)} credit. They're in, so please pay your admin.` }
+          : { title: "Add credit for your guest 💳", body: `Your guest(s) in ${title} cost ${money(d.cents)} and you have ${money(d.have)} credit, so they weren't added. Send the money to your admin, then add them again.` };
     await notify([d.uid], { type: d.kind === "refunded" ? "community_credit" : "game_payment_needed", eventId, communityId: after.communityId || "", ...msg },
       { key: `guests_${eventId}_${d.uid}_${d.kind}_${tenMinuteBucket()}_${d.cents}` });
   }
   if (done.length) logger.info(`Guest money ${eventId}:`, done.map((d) => `${d.uid} ${d.kind} ${d.cents}`).join(", "));
   return done.length > 0;
+}
+
+// ---- a3) a player an admin added: charge their credit and tell them ---------------
+// Admins add players with "Add players" / "Move to roster" (marked addedByAdmin, paid "Unpaid").
+// In a credit game the fee (with their guests) now comes out of the player's credit, and they get
+// "{Admin} added you to {game}. $X was taken from your credit." Not enough credit: they stay in
+// the game as Unpaid (they show on the admin's "Didn't pay" list after the game) and get told.
+// Marked Paid / Free by the admin = nothing is charged.
+async function chargeAdminAdds(eventId, before, after) {
+  if (!rules.isCreditGame(after)) return false;
+  const beforeIn = new Set(arr(before.attendees).map(uidOf));
+  const fresh = arr(after.attendees).filter((a) => {
+    const u = uidOf(a);
+    return isRealPlayer(u) && !beforeIn.has(u) && a.addedByAdmin === true && u !== after.organizerId && a.role !== "Organizer" &&
+      !(Number(a.creditPaidCents) > 0) && (!a.paid || a.paid === "Unpaid") && !a.adminChargeTried;
+  }).map(uidOf);
+  if (!fresh.length) return false;
+
+  const ref = col("eventsList").doc(eventId);
+  const out = [];
+  await db.runTransaction(async (tx) => {
+    out.length = 0;
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const g = snap.data();
+    const cid = g.communityId;
+    const todo = arr(g.attendees).filter((a) => fresh.includes(uidOf(a)) && !(Number(a.creditPaidCents) > 0) && (!a.paid || a.paid === "Unpaid") && !a.adminChargeTried);
+    if (!todo.length) return;
+    const bal = {};
+    for (const a of todo) {
+      const s = await tx.get(credRef(cid, uidOf(a)));
+      bal[uidOf(a)] = s.exists ? (Number(s.data().balanceCents) || 0) : 0;
+    }
+    const attendees = arr(g.attendees).map((a) => {
+      const u = uidOf(a);
+      if (!todo.find((t) => uidOf(t) === u)) return a;
+      const cost = rules.costFor(g, arr(a.guests).length);
+      const by = a.addedByName || "An admin";
+      if (bal[u] >= cost) {
+        writeCredit(tx, cid, u, a.name, bal[u], -cost, "game", `Game fee (added by ${by})`, g, eventId);
+        out.push({ uid: u, ok: true, cost, by });
+        return { ...a, paid: "Credit", creditPaidCents: cost, creditCommunityId: cid, adminChargeTried: true,
+          guests: arr(a.guests).map((x) => ({ ...x, paid: "Credit" })) };
+      }
+      out.push({ uid: u, ok: false, cost, have: bal[u], by });
+      return { ...a, adminChargeTried: true };      // stays Unpaid; never tried twice
+    });
+    tx.update(ref, { attendees });
+  });
+  const title = after.title || "the game";
+  for (const o of out) {
+    await notify([o.uid], o.ok
+      ? { type: "game_added", eventId, communityId: after.communityId || "", title: "You're in! ⚽",
+        body: `${o.by} added you to ${title}. ${money(o.cost)} was taken from your credit.` }
+      : { type: "game_payment_needed", eventId, communityId: after.communityId || "", title: "You're in! Payment needed 💳",
+        body: `${o.by} added you to ${title}. It costs ${money(o.cost)} and you have ${money(o.have)} credit, so please pay your admin.` },
+    { key: `adminadd_${eventId}_${o.uid}` });
+  }
+  if (out.length) logger.info(`Admin adds ${eventId}:`, out.map((o) => `${o.uid} ${o.ok ? "charged" : "short"} ${o.cost}`).join(", "));
+  return out.length > 0;
 }
 
 // ---- b) refund late cancels once someone takes the spot ------------------------
@@ -1506,8 +1599,12 @@ exports.onGameMoney = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (e
   if (!after) return;
   const prev = before || {};
   try {
+    await sendPaymentAsks(eventId, prev, after);
     // A fix writes the game again, and that write runs this function again for the next step.
-    if (await enforcePayment(eventId, prev, after)) return;
+    // Both look at who is new in this save, so both run now (each in its own transaction).
+    const paidCheck = await enforcePayment(eventId, prev, after);
+    const adminAdds = await chargeAdminAdds(eventId, prev, after);
+    if (paidCheck || adminAdds) return;
     if (await settleGuestChanges(eventId, prev, after)) return;
     await refundFilledSpots(eventId, prev, after);
     if (await autoPlace(eventId, after)) return;      // the roster changed: the next run handles the offer
@@ -1515,6 +1612,54 @@ exports.onGameMoney = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (e
   } catch (e) {
     logger.error("onGameMoney failed", eventId, e.message);
   }
+});
+
+// ---- "Didn't pay" list -----------------------------------------------------------
+// The admin taps "Ask to pay" on the list: the website / app saves paymentAsks.{uid} = time,
+// and this sends that player the reminder.
+async function sendPaymentAsks(eventId, before, after) {
+  const was = (before && before.paymentAsks) || {};
+  const now = (after && after.paymentAsks) || {};
+  const fresh = Object.keys(now).filter((u) => Number(now[u]) > (Number(was[u]) || 0) && Date.now() - Number(now[u]) < 3600000);
+  if (!fresh.length) return;
+  const owed = new Map(rules.unpaidList({ ...after, unpaidIgnored: [] }).map((x) => [x.uid, x]));
+  const gs = (n) => `${n} guest${n === 1 ? "" : "s"}`;
+  const what = (o) => (!o.guests ? "" : o.self ? ` (you + ${gs(o.guests)})` : ` (your ${gs(o.guests)})`);
+  for (const u of fresh) {
+    const o = owed.get(u);
+    if (!o || !isRealPlayer(u)) continue;
+    await notify([u], {
+      type: "game_payment_needed", eventId, communityId: after.communityId || "",
+      title: "Payment reminder 💳",
+      body: `You still owe ${money(o.cents)} for ${after.title || "the game"}${what(o)}. Please pay your admin.`,
+    }, { key: `payask_${eventId}_${u}_${now[u]}` });
+  }
+}
+
+// Every 30 minutes: 5 hours after a paid game, the admins get who still owes money.
+exports.unpaidReports = onSchedule({ schedule: "every 30 minutes", timeZone: DEFAULT_TZ, timeoutSeconds: 120 }, async () => {
+  const now = Date.now();
+  const dayOf = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date(t));
+  const snap = await col("eventsList").where("date", ">=", dayOf(now - 3 * 86400000)).where("date", "<=", dayOf(now) + "~").get();
+  let sent = 0;
+  for (const d of snap.docs) {
+    const g = d.data() || {};
+    if (g.isCancelled === true || rules.feeCentsOf(g) <= 0) continue;
+    const due = rules.unpaidDueAt(g, startOf(g));
+    if (!due || now < due || now - due > 2 * 86400000) continue;
+    try { await col("unpaidReports").doc(d.id).create({ eventId: d.id, at: now }); } catch (e) { continue; }   // once per game
+    const list = rules.unpaidList(g);
+    if (!list.length) continue;
+    const total = list.reduce((n, x) => n + x.cents, 0);
+    const names = list.slice(0, 3).map((x) => String(x.name).split(" ")[0]).join(", ") + (list.length > 3 ? ` +${list.length - 3} more` : "");
+    await notify(await gameBosses(g), {
+      type: "game_unpaid", eventId: d.id, communityId: g.communityId || "",
+      title: `💸 ${list.length} didn't pay for ${g.title || "the game"}`,
+      body: `${names} still owe ${money(total)} in total. Open the game's Admin tab to mark them paid or ask them to pay.`,
+    }, { key: `unpaid_${d.id}` });
+    sent++;
+  }
+  if (sent) logger.info(`unpaid reports: ${sent} games`);
 });
 
 // Every minute: offers whose timer ran out move on to the next player (or to "last call").
