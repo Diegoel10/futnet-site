@@ -2294,7 +2294,13 @@ function playerGame(g, uid) {
   };
   const pick = (idx, name, fb) => (Number.isInteger(idx) && idx >= 0 && idx < n) ? idx : (names.indexOf(name) !== -1 ? names.indexOf(name) : fb);
   const table = names.map((nm, i) => ({ i, pts: 0, gf: 0, ga: 0 }));
-  let goals = 0, w = 0, dr = 0, l = 0, gf = 0, ga = 0;
+  let goals = 0, w = 0, dr = 0, l = 0, gf = 0, ga = 0, ownGoals = 0;
+  // "Own goal (Name)": the name is the player who put it in their own net.
+  const ogBy = (goal) => {
+    const t = typeof goal === "object" && goal ? (goal.name || goal.scorer || "") : String(goal || "");
+    const mm = String(t).match(/^own goal \((.+)\)\s*$/i);
+    return mm ? mm[1].trim().toLowerCase() : "";
+  };
   for (const m of arr(g.matches)) {
     if (!m || m.isFinished === false) continue;
     const a = pick(m.teamAIndex, m.teamA, 0), b = pick(m.teamBIndex, m.teamB, 1);
@@ -2304,6 +2310,7 @@ function playerGame(g, uid) {
     table[a].gf += s1; table[a].ga += s2; table[b].gf += s2; table[b].ga += s1;
     if (s1 > s2) table[a].pts += 3; else if (s2 > s1) table[b].pts += 3; else { table[a].pts++; table[b].pts++; }
     goals += [...g1, ...g2].filter(isMine).length;
+    ownGoals += [...g1, ...g2].filter((x) => { const o = ogBy(x); return o && myNames.has(o); }).length;
     if (myTeam === a || myTeam === b) {
       const mine = myTeam === a ? s1 : s2, theirs = myTeam === a ? s2 : s1;
       gf += mine; ga += theirs;
@@ -2314,7 +2321,7 @@ function playerGame(g, uid) {
   const place = myTeam >= 0 && (w + dr + l) > 0 ? order.findIndex((t) => t.i === myTeam) + 1 : 0;
   return {
     eventId: g.id, title: g.title || "Game", date: String(g.date || "").slice(0, 10), communityId: g.communityId || "",
-    goals, w, d: dr, l, gf, ga, place, champion: place === 1, team: myTeam >= 0 ? names[myTeam] : "",
+    goals, ownGoals, w, d: dr, l, gf, ga, place, champion: place === 1, lastPlace: place > 1 && place === n, team: myTeam >= 0 ? names[myTeam] : "",
     attendance: (att && att.attendance) || "", signedUp: !!att,
   };
 }
@@ -2493,8 +2500,33 @@ exports.communityTop = onCall(async (request) => {
   const positions = await Promise.all(candidates.map((r) => positionOf(r.uid)));
   const players = candidates.map((r, i) => ({ ...r, skill: skillRating(r.list, pop, positions[i]) }))
     .sort((a, b) => (b.skill.score - a.skill.score) || (b.games - a.games)).slice(0, 5);
+  // Wall of shame: most losses and most own goals (matches lost, all time in this community).
+  const sum = (list, k) => list.reduce((n, r) => n + (Number(r[k]) || 0), 0);
+  rows.forEach((r) => { r.losses = sum(r.list, "l"); r.ogs = sum(r.list, "ownGoals"); });
+  const losers = rows.filter((r) => r.losses > 0).sort((a, b) => (b.losses - a.losses) || (a.games - b.games)).slice(0, 5);
+  const ogs = rows.filter((r) => r.ogs > 0).sort((a, b) => (b.ogs - a.ogs) || (a.games - b.games)).slice(0, 5);
+  // Sessions (whole game days): won = your team finished 1st, lost = your team finished last.
+  rows.forEach((r) => { r.sWon = r.list.filter((x) => x.champion).length; r.sLost = r.list.filter((x) => x.lastPlace).length; });
+  const sessionKings = rows.filter((r) => r.sWon > 0).sort((a, b) => (b.sWon - a.sWon) || (a.games - b.games)).slice(0, 5);
+  const sessionLosers = rows.filter((r) => r.sLost > 0).sort((a, b) => (b.sLost - a.sLost) || (a.games - b.games)).slice(0, 5);
+  // This week (Monday to today): best and worst, only when there was a finished game this week.
+  const dayOf = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date(t));
+  const today = dayOf(Date.now());
+  const dow = (new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7;            // 0 = Monday
+  const monday = dayOf(Date.parse(today + "T12:00:00Z") - dow * 86400000);
+  const weekRows = rows.map((r) => {
+    const wk = r.list.filter((x) => x.date >= monday && x.date <= today);
+    const w = sum(wk, "w"), d = sum(wk, "d"), l = sum(wk, "l");
+    return { uid: r.uid, n: w + d + l, w, d, l, pts: w * 3 + d, gd: sum(wk, "gf") - sum(wk, "ga"), goals: sum(wk, "goals") };
+  }).filter((r) => r.n > 0);
+  let best = [], worst = [];
+  if (weekRows.length) {
+    best = weekRows.slice().sort((a, b) => (b.pts - a.pts) || (b.gd - a.gd) || (b.goals - a.goals)).slice(0, 3);
+    const top = new Set(best.map((r) => r.uid));
+    worst = weekRows.filter((r) => !top.has(r.uid)).sort((a, b) => (a.pts - b.pts) || (a.gd - b.gd) || (b.l - a.l)).slice(0, 3);
+  }
   // Names + photos from the directory
-  const uids = uniq([...players, ...scorers].map((r) => r.uid));
+  const uids = uniq([...players, ...scorers, ...losers, ...ogs, ...sessionKings, ...sessionLosers, ...best, ...worst].map((r) => r.uid));
   const dir = {};
   await Promise.all(uids.map((u) => col("directory").doc(u).get().then((d) => { dir[u] = d.data() || {}; }).catch(() => { dir[u] = {}; })));
   const who = (u) => {
@@ -2504,6 +2536,15 @@ exports.communityTop = onCall(async (request) => {
   return {
     players: players.map((r) => ({ ...who(r.uid), stars: r.skill.stars, score: r.skill.score, games: r.games })),
     scorers: scorers.map((r) => ({ ...who(r.uid), goals: r.goals, games: r.games })),
+    losses: losers.map((r) => ({ ...who(r.uid), losses: r.losses, games: r.games })),
+    ownGoals: ogs.map((r) => ({ ...who(r.uid), ownGoals: r.ogs, games: r.games })),
+    sessionsWon: sessionKings.map((r) => ({ ...who(r.uid), sessions: r.sWon, games: r.games })),
+    sessionsLost: sessionLosers.map((r) => ({ ...who(r.uid), sessions: r.sLost, games: r.games })),
+    week: weekRows.length ? {
+      from: monday, to: today,
+      best: best.map((r) => ({ ...who(r.uid), w: r.w, d: r.d, l: r.l, pts: r.pts, gd: r.gd, goals: r.goals })),
+      worst: worst.map((r) => ({ ...who(r.uid), w: r.w, d: r.d, l: r.l, pts: r.pts, gd: r.gd, goals: r.goals })),
+    } : null,
   };
 });
 

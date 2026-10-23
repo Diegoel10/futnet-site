@@ -296,8 +296,8 @@ function modalShell(id, title, subtitle, bodyHtml) {
     if (!m) { m = document.createElement('div'); m.id = id; document.body.appendChild(m); }
     m.className = 'fixed inset-0 z-[140] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-md sm:p-4';
     m.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[92vh] overflow-y-auto shadow-2xl text-white">
-            <div class="flex items-center justify-between p-5 pb-2 sticky top-0 bg-[#040E13] z-10">
+        <div class="bg-[#040E13] border border-emerald-500/40 rounded-t-3xl sm:rounded-3xl w-full max-w-md overflow-y-auto shadow-2xl text-white" style="max-height:88vh;max-height:88dvh">
+            <div class="flex items-center justify-between px-5 pt-6 pb-2 sticky top-0 bg-[#040E13] z-10">
                 <div><div class="text-sm font-black">${title}</div><div class="text-[10px] text-white/60">${subtitle || ''}</div></div>
                 <button onclick="closeCommunityModal('${id}')" class="w-8 h-8 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark text-xs"></i></button>
             </div>
@@ -847,40 +847,141 @@ window.leaveCommunity = async function(id) {
 // ------------------------------------------------------------------ INFO TAB
 // ---- Info: Top players (skill stars) and Top scorers, 5 each (server: communityTop)
 const TOP = {};   // communityId -> { at, data }
-function topListHtml(title, icon, rows, right, cid) {
-    return `<div class="bg-black/40 border border-white/10 rounded-2xl p-3">
-        <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">${icon} ${title}</div>
-        ${rows.length ? rows.map((r, i) => `
+// One list (title + up to 5 players). `empty` = text when nobody is on it yet.
+function topRowsHtml(rows, right, cid, empty, first = '#FCD34D') {
+    return rows.length ? rows.map((r, i) => `
             <button onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(cid)}')" class="w-full flex items-center gap-2.5 py-1.5 text-left">
-                <span class="w-5 text-center text-xs font-black ${i === 0 ? 'text-[#FCD34D]' : 'text-white/50'}">${i + 1}</span>
+                <span class="w-5 text-center text-xs font-black" style="color:${i === 0 ? first : 'rgba(255,255,255,.5)'}">${i + 1}</span>
                 <img src="${esc(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(r) : (r.avatar || DEFAULT_AVATAR))}" onerror="this.src='${DEFAULT_AVATAR}'" class="w-8 h-8 rounded-full object-cover border border-white/15 shrink-0">
                 <span class="flex-1 min-w-0 text-xs font-bold text-white truncate">${esc(r.name)}</span>
                 ${right(r)}
-            </button>`).join('') : '<p class="text-[11px] text-white/45 py-2">Shows up after a few finished games.</p>'}
+            </button>`).join('') : `<p class="text-[11px] text-white/45 py-2">${empty}</p>`;
+}
+function topListHtml(title, icon, rows, right, cid, color = '#00F296', empty = 'Shows up after a few finished games.', shareKey = '') {
+    return `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 h-full">
+        <div class="flex items-center justify-between mb-2"><div class="text-[10px] font-black uppercase tracking-wider" style="color:${color}">${icon} ${title}</div>${(shareKey ? `<button onclick="shareTopList('${jsArg(cid)}','${shareKey}')" class="text-white/60 hover:text-white px-1" aria-label="Share"><i class="fa-solid fa-arrow-up-from-bracket text-[11px]"></i></button>` : '')}</div>
+        ${topRowsHtml(rows, right, cid, empty, color === '#93C5FD' ? color : '#FCD34D')}
     </div>`;
 }
+// Info tab: Top players + Top scorers (5 each), and an underlined "More stats" link under them.
 function topHtml(cid) {
     const t = TOP[cid];
     if (!t || Date.now() - t.at > 180000) loadTop(cid);
     if (!t) return `<div id="comm-top-box" class="text-[11px] text-white/45"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading top players…</div>`;
     const d = t.data || { players: [], scorers: [] };
     const stars = (v) => window.starsHtml ? window.starsHtml(v, '#FCD34D', 'text-[10px]') : `⭐ ${v}`;
-    return `<div id="comm-top-box" class="grid sm:grid-cols-2 gap-3">
-        ${topListHtml('Top players', '<i class="fa-solid fa-star"></i>', d.players, r => stars(r.stars), cid)}
-        ${topListHtml('Top scorers', '<i class="fa-solid fa-futbol"></i>', d.scorers, r => `<span class="text-xs font-black text-[#00F296] shrink-0">${r.goals} ⚽</span>`, cid)}
+    return `<div id="comm-top-box" class="space-y-2">
+        <div class="grid sm:grid-cols-2 gap-3">
+            ${topListHtml('Top players', '<i class="fa-solid fa-star"></i>', d.players || [], r => stars(r.stars), cid, undefined, undefined, 'rated')}
+            ${topListHtml('Top scorers', '<i class="fa-solid fa-futbol"></i>', d.scorers || [], r => `<span class="text-xs font-black text-[#00F296] shrink-0">${r.goals} ⚽</span>`, cid, undefined, undefined, 'goals')}
+        </div>
+        <div class="text-center"><button onclick="openCommunityMoreStats('${jsArg(cid)}')" class="text-xs font-bold text-white/70 underline underline-offset-4 hover:text-white">More stats</button></div>
     </div>`;
 }
-let topLoading = {};
-async function loadTop(cid) {
-    if (topLoading[cid]) return;
-    topLoading[cid] = true;
+
+// ---- "More stats" page: swipe between 2 pages. Page 1 (green) Top players: most goals, most wins
+// (sessions), best rated. Page 2 (turns red as you swipe) Wall of shame: most lost games, most lost
+// sessions, most own goals. Numbers come from the server (communityTop).
+const MS_THEMES = [
+    { title: 'Top players', icon: '🏆', accent: '#00F296', bg: [4, 19, 13] },
+    { title: 'Wall of shame', icon: '🤡', accent: '#F87171', bg: [30, 6, 8] }
+];
+function moreStatsPages(cid) {
+    if (!TOP[cid]) return [0, 1].map(() => '<div class="text-xs text-white/50 py-10 text-center"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</div>');
+    const d = TOP[cid].data || {};
+    const stars = (v) => window.starsHtml ? window.starsHtml(v, '#FCD34D', 'text-[10px]') : `⭐ ${v}`;
+    const num = (txt, color) => `<span class="text-xs font-black shrink-0" style="color:${color}">${txt}</span>`;
+    const box = (title, rows, right, color, empty, shareKey) => `<div class="bg-black/40 border border-white/10 rounded-2xl p-3">
+        <div class="flex items-center justify-between mb-2"><div class="text-[11px] font-black uppercase tracking-wider" style="color:${color}">${title}</div>${(shareKey ? `<button onclick="shareTopList('${jsArg(cid)}','${shareKey}')" class="text-white/60 hover:text-white px-1" aria-label="Share"><i class="fa-solid fa-arrow-up-from-bracket text-[11px]"></i></button>` : '')}</div>
+        ${topRowsHtml(rows || [], right, cid, empty, color === '#F87171' ? color : '#FCD34D')}</div>`;
+    const G = '#00F296', R = '#F87171';
+    const later = 'Shows up after a few finished games.';
+    return [
+        [box('⚽ Most goals', d.scorers, r => num(`${r.goals} ⚽`, G), G, later, 'goals'),
+         box('🏆 Most wins (sessions)', d.sessionsWon, r => num(`${r.sessions} 🏆`, G), G, later, 'sessionsWon'),
+         box('⭐ Best rated', d.players, r => stars(r.stars), G, later, 'rated')].join(''),
+        [box('Most lost games', d.losses, r => num(`${r.losses} L`, R), R, 'Nobody has lost yet.', 'losses'),
+         box('Most lost sessions (finished last)', d.sessionsLost, r => num(`${r.sessions}`, R), R, 'Nobody finished last yet.', 'sessionsLost'),
+         box('Most own goals', d.ownGoals, r => num(`${r.ownGoals} 🙈`, R), R, 'No own goals yet. 👏', 'ownGoals')].join('')
+    ];
+}
+window.openCommunityMoreStats = async (cid) => {
+    const c = window.communitiesCache[cid];
+    let m = document.getElementById('comm-more-stats');
+    if (!m) { m = document.createElement('div'); m.id = 'comm-more-stats'; document.body.appendChild(m); }
+    m.className = 'fixed inset-0 z-[140] flex flex-col text-white transition-colors';
+    m.style.background = 'rgb(4,19,13)';
+    const draw = () => {
+        const pages = moreStatsPages(cid);
+        m.innerHTML = `
+        <div class="flex items-center gap-3 px-4 pt-4 pb-2 shrink-0">
+            <button onclick="closeCommunityModal('comm-more-stats')" class="w-9 h-9 rounded-full bg-black/50 border border-white/15 flex items-center justify-center shrink-0" aria-label="Close"><i class="fa-solid fa-xmark text-sm"></i></button>
+            <div class="min-w-0">
+                <div data-ms-title class="text-2xl font-black truncate" style="color:${MS_THEMES[0].accent}">${MS_THEMES[0].icon} ${MS_THEMES[0].title}</div>
+                <div class="text-[11px] text-white/60 truncate">${esc((c && c.name) || 'Community')}</div>
+            </div>
+        </div>
+        <div class="flex justify-center gap-1.5 pb-2 shrink-0" data-ms-dots>
+            ${pages.map((_, i) => `<button onclick="moreStatsGo(${i})" aria-label="Page ${i + 1}" class="w-2 h-2 rounded-full" style="background:${i === 0 ? '#3B82F6' : 'rgba(255,255,255,.3)'}"></button>`).join('')}
+        </div>
+        <div data-ms-row class="flex-1 flex overflow-x-auto snap-x snap-mandatory" style="scrollbar-width:none" onscroll="moreStatsScroll(this)">
+            ${pages.map(h => `<div class="snap-center shrink-0 w-full h-full overflow-y-auto"><div class="max-w-2xl mx-auto p-4 space-y-3">${h}</div></div>`).join('')}
+        </div>`;
+    };
+    draw();
+    if (!TOP[cid] || Date.now() - TOP[cid].at > 180000) { await loadTop(cid); if (document.getElementById('comm-more-stats') === m) draw(); }
+};
+// ---- Share one list (phone share menu: WhatsApp, Messages...; on a computer it's copied).
+const SHARE_LISTS = {
+    goals:        ['⚽ Top scorers', 'scorers', r => `${r.goals} goal${r.goals === 1 ? '' : 's'}`],
+    sessionsWon:  ['🏆 Most wins (sessions)', 'sessionsWon', r => `${r.sessions} session${r.sessions === 1 ? '' : 's'} won`],
+    rated:        ['⭐ Top players (best rated)', 'players', r => `${r.stars} ★`],
+    losses:       ['🤡 Wall of shame: most lost games', 'losses', r => `${r.losses} lost`],
+    sessionsLost: ['🤡 Wall of shame: most lost sessions', 'sessionsLost', r => `finished last ${r.sessions}x`],
+    ownGoals:     ['🤡 Wall of shame: most own goals', 'ownGoals', r => `${r.ownGoals} own goal${r.ownGoals === 1 ? '' : 's'} 🙈`]
+};
+window.shareTopList = async (cid, key) => {
+    const def = SHARE_LISTS[key]; const d = (TOP[cid] && TOP[cid].data) || {};
+    const rows = (d[def && def[1]] || []);
+    if (!def || !rows.length) { toast('Nothing to share yet.', 'error'); return; }
+    const c = window.communitiesCache[cid] || {};
+    const medal = (i) => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+    const text = `${def[0]} · ${c.name || 'FutNet'}\n` + rows.map((r, i) => `${medal(i)} ${r.name}: ${def[2](r)}`).join('\n') + `\n\nSee more on FutNet ⚽`;
     try {
-        const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'communityTop')({ communityId: cid });
-        TOP[cid] = { at: Date.now(), data: r.data };
-    } catch (e) { TOP[cid] = { at: Date.now(), data: { players: [], scorers: [] } }; }
-    topLoading[cid] = false;
-    const box = document.getElementById('comm-top-box');
-    if (box && S.activeId === cid && S.tab === 'info') box.outerHTML = topHtml(cid);
+        if (navigator.share) { await navigator.share({ title: def[0], text, url: 'https://futnet.site' }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(text + ' https://futnet.site'); toast('Copied! Paste it in WhatsApp or anywhere.'); }
+    catch (e) { prompt('Copy this:', text); }
+};
+
+// As you swipe, the page fades from green to red, and the title switches halfway.
+window.moreStatsScroll = (row) => {
+    const m = document.getElementById('comm-more-stats'); if (!m) return;
+    const f = Math.max(0, Math.min(1, row.scrollLeft / Math.max(1, row.clientWidth)));
+    const [a, b] = [MS_THEMES[0].bg, MS_THEMES[1].bg];
+    m.style.background = `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * f)).join(',')})`;
+    const t = MS_THEMES[f > 0.5 ? 1 : 0];
+    const title = m.querySelector('[data-ms-title]');
+    if (title) { title.textContent = `${t.icon} ${t.title}`; title.style.color = t.accent; }
+    m.querySelectorAll('[data-ms-dots] button').forEach((d, i) => { d.style.background = i === (f > 0.5 ? 1 : 0) ? '#3B82F6' : 'rgba(255,255,255,.3)'; });
+};
+window.moreStatsGo = (i) => {
+    const row = document.querySelector('#comm-more-stats [data-ms-row]');
+    if (row) row.scrollTo({ left: i * row.clientWidth, behavior: 'smooth' });
+};
+let topLoading = {};
+function loadTop(cid) {
+    if (topLoading[cid]) return topLoading[cid];      // already loading: wait for the same answer
+    topLoading[cid] = (async () => {
+        try {
+            const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'communityTop')({ communityId: cid });
+            TOP[cid] = { at: Date.now(), data: r.data };
+        } catch (e) { TOP[cid] = { at: Date.now(), data: { players: [], scorers: [] } }; }
+        topLoading[cid] = null;
+        const box = document.getElementById('comm-top-box');
+        if (box && S.activeId === cid && S.tab === 'info') box.outerHTML = topHtml(cid);
+    })();
+    return topLoading[cid];
 }
 
 function infoTab(c, isAdmin) {
