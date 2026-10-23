@@ -270,7 +270,7 @@ window.openManageGuestsModal = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'manage-guests-modal';
-        modal.className = 'fixed inset-0 z-[140] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md';
+        modal.className = 'fixed inset-0 z-[210] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md';
         document.body.appendChild(modal);
     }
 
@@ -435,7 +435,7 @@ async function offerCommunityJoin(ev) {
         const name = escapeHtml(ev.communityName || c.name || 'this community');
         const needsApproval = c.requireApproval !== false;
         let m = document.getElementById('community-offer-modal');
-        if (!m) { m = document.createElement('div'); m.id = 'community-offer-modal'; m.className = 'fixed inset-0 z-[135] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+        if (!m) { m = document.createElement('div'); m.id = 'community-offer-modal'; m.className = 'fixed inset-0 z-[205] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
         m.innerHTML = `
             <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
                 <div class="w-14 h-14 mx-auto rounded-full bg-black/50 border border-emerald-500/30 flex items-center justify-center text-[#00F296] text-xl"><i class="fa-solid fa-people-group"></i></div>
@@ -601,7 +601,7 @@ window.showMustPayModal = async function(ev, needed, have) {
     const who = ev.organizer || ev.hostName || 'your admin';
     const short = Math.max(needed - have, 0);
     let m = document.getElementById('must-pay-modal');
-    if (!m) { m = document.createElement('div'); m.id = 'must-pay-modal'; m.className = 'fixed inset-0 z-[140] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'must-pay-modal'; m.className = 'fixed inset-0 z-[210] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
     const render = (methods) => `
         <div class="bg-[#040E13] border border-amber-400/50 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center border-b border-white/10 pb-3">
@@ -643,7 +643,7 @@ window.showCommunityOnlyModal = function(ev) {
     const name = escapeHtml(ev.communityName || c.name || 'this');
     const needsApproval = c.requireApproval !== false;
     let m = document.getElementById('community-only-modal');
-    if (!m) { m = document.createElement('div'); m.id = 'community-only-modal'; m.className = 'fixed inset-0 z-[135] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'community-only-modal'; m.className = 'fixed inset-0 z-[205] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
     m.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
             <div class="flex justify-end"><button onclick="document.getElementById('community-only-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button></div>
@@ -662,7 +662,7 @@ window.showAcceptRulesModal = function(eventId) {
     const showRules = ev.requireAcceptance === true;
     const showRefund = creditGame(ev);
     let m = document.getElementById('accept-rules-modal');
-    if (!m) { m = document.createElement('div'); m.id = 'accept-rules-modal'; m.className = 'fixed inset-0 z-[145] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'accept-rules-modal'; m.className = 'fixed inset-0 z-[215] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
     m.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center border-b border-white/10 pb-3">
@@ -725,7 +725,7 @@ window.showWaitlistChoice = async function(eventId, guests) {
     const cost = costCents(ev, (guests || []).length);
     const mins = claimMinutesOf(ev);
     let m = document.getElementById('wait-choice-modal');
-    if (!m) { m = document.createElement('div'); m.id = 'wait-choice-modal'; m.className = 'fixed inset-0 z-[146] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'wait-choice-modal'; m.className = 'fixed inset-0 z-[216] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
     window._waitChoiceGuests = guests || [];
     m.innerHTML = `
         <div class="bg-[#040E13] border border-amber-400/50 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
@@ -786,7 +786,28 @@ const nowStart = (ev) => [Date.now(), startMsOf(ev)];
 /** True when joining right now puts this person on the waitlist (game full, or the open spot is offered to the waitlist). */
 const joinsWaitlist = (ev) => { const [n, st] = nowStart(ev); return !mayTakeSpot(ev, String(window.currentUser?.uid || ''), n, st); };
 
-window.openJoinGameModal = async function(eventId) {
+// Join / Join waitlist: clears any half-finished join popups first, shows that it's working, ignores
+// double clicks, and never fails silently (a slow or failed check used to make the button look dead).
+const JOIN_POPUPS = ['join-guests-modal', 'wait-choice-modal', 'request-join-modal', 'accept-rules-modal', 'must-pay-modal'];
+window.openJoinGameModal = async function(eventId, ...rest) {
+    if (window._joinOpening) return;
+    window._joinOpening = true;
+    JOIN_POPUPS.forEach(id => document.getElementById(id)?.remove());
+    const btns = [...document.querySelectorAll(`button[onclick^="openJoinGameModal('${String(eventId).replace(/'/g, "\\'")}')"]`)];
+    const saved = btns.map(b => b.innerHTML);
+    btns.forEach(b => { b.disabled = true; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> One moment…'; });
+    try {
+        await window._openJoinGameModalChecks(eventId, ...rest);
+    } catch (err) {
+        console.error('join failed to open', err);
+        window.showToast("Couldn't open that. Check your connection and try again.", 'error');
+    } finally {
+        window._joinOpening = false;
+        btns.forEach((b, i) => { if (b.isConnected) { b.disabled = false; b.innerHTML = saved[i]; } });
+    }
+};
+
+window._openJoinGameModalChecks = async function(eventId) {
     const _ev = (window.eventsList || []).find(ev => ev.id === eventId);
     // Suspended from joining games in this community? Show why and stop.
     if (_ev && _ev.communityId && window.currentUser && typeof window.communitySuspension === 'function') {
@@ -830,7 +851,7 @@ window.openRequestToJoin = function(eventId) {
     const who = escapeHtml(ev.organizer || ev.hostName || 'The organizer');
     const mustPay = creditGame(ev);
     let m = document.getElementById('request-join-modal');
-    if (!m) { m = document.createElement('div'); m.id = 'request-join-modal'; m.className = 'fixed inset-0 z-[135] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'request-join-modal'; m.className = 'fixed inset-0 z-[205] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
     m.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex justify-between items-center border-b border-white/10 pb-3">
@@ -977,7 +998,7 @@ window._openJoinGameModalCore = function(eventId) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'join-guests-modal';
-        modal.className = 'fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md';
+        modal.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md';
         document.body.appendChild(modal);
     }
 

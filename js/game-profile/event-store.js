@@ -139,4 +139,6 @@ export function jsArg(value) {
 // Own goals: saved in the scoring team's goal list as "Own goal (Name)". The score counts them;
 // player stats (top scorers, leaderboard) skip them. Same text on the website, iPhone and Android.
 export const ownGoalLabel = (name) => `Own goal (${String(name || 'Player').trim()})`;
-export const isOwnGoal = (g) => /^own goal\b/i.test(String((g && typeof g === 'object') ? (g.name || g.scorer || '') : (g || '')).trim());
+// "Unknown scorer" = Don't recall / someone else: counts for the team, for no player (same as an own goal).
+export const UNKNOWN_SCORER = 'Unknown scorer';
+export const isOwnGoal = (g) => /^(own goal|unknown scorer)\b/i.test(String((g && typeof g === 'object') ? (g.name || g.scorer || '') : (g || '')).trim());

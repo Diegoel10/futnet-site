@@ -108,7 +108,7 @@ async function updateTeamToolFirestore(event) {
     // Only the team fields are written, on top of the freshest copy of the game, so joins,
     // goals and comments made by other people in the meantime are never overwritten.
     const teamFields = {};
-    ['teamAssignments', 'teamNames', 'teamColors', 'teamCaptains', 'teamFormations'].forEach(k => {
+    ['teamAssignments', 'teamNames', 'teamColors', 'teamCaptains', 'teamFormations', 'teamSlots', 'teamSlotsSig'].forEach(k => {
         teamFields[k] = JSON.parse(JSON.stringify(event[k] || {}));
     });
     // Players are stored without photos (the avatar is looked up from the directory when drawn).
@@ -128,6 +128,49 @@ function pitchSlotCount(event, teamIndex) {
     if (parts.length) return parts.reduce((a, b) => a + b, 0) + 1;   // + goalkeeper
     return parseInt(event.format, 10) || 8;
 }
+
+// ---- Pitch spots, the same way the iPhone and Android apps save them:
+//   teamSlots { "0": { "<spot>": "<uid>" } } + teamSlotsSig { "0": "<uid>,<uid>,..." } (the team's order when saved).
+// Spots can be empty (a defender with no forward in front of him). If the team's order changed since
+// (someone else edited it), the saved spots don't apply and the first players simply fill the pitch.
+const idxGet = (o, i) => (o || {})[i] ?? (o || {})[String(i)];
+function savedSpots(event, team, uids) {
+    const sig = idxGet(event.teamSlotsSig, team);
+    if (typeof sig !== 'string' || sig !== uids.join(',')) return null;
+    const raw = idxGet(event.teamSlots, team);
+    if (!raw || typeof raw !== 'object') return null;
+    const out = {};
+    Object.entries(raw).forEach(([k, u]) => { if (uids.includes(String(u)) && !Object.values(out).includes(String(u))) out[parseInt(k, 10)] = String(u); });
+    return out;
+}
+/** { roster: [players], spots: { spot: uid } } for one team as it is now. */
+function teamLineup(event, team) {
+    const roster = ((window.teamAssignments[event.id] || event.teamAssignments || {})[team] || []).filter(p => p && p.uid);
+    const uids = roster.map(p => String(p.uid));
+    const total = pitchSlotCount(event, team);
+    const spots = {};
+    const saved = savedSpots(event, team, uids);
+    if (saved) Object.entries(saved).forEach(([k, u]) => { if (+k < total) spots[+k] = u; });
+    else uids.slice(0, total).forEach((u, i) => { spots[i] = u; });
+    return { roster, spots, total };
+}
+/** Saves a team: players with a spot first (spot order), then the bench; plus the spots, like the apps. */
+function saveLineup(event, team, roster, spots) {
+    const byUid = new Map(roster.map(p => [String(p.uid), p]));
+    const ordered = [];
+    const clean = {};
+    Object.keys(spots).map(Number).sort((a, b) => a - b).forEach(k => {
+        const u = String(spots[k]);
+        if (byUid.has(u) && !ordered.includes(byUid.get(u))) { ordered.push(byUid.get(u)); clean[k] = u; }
+    });
+    roster.forEach(p => { if (!ordered.includes(p)) ordered.push(p); });
+    window.teamAssignments[event.id] = window.teamAssignments[event.id] || {};
+    window.teamAssignments[event.id][team] = ordered;
+    event.teamAssignments = window.teamAssignments[event.id];
+    event.teamSlots = { ...(event.teamSlots || {}), [team]: clean };
+    event.teamSlotsSig = { ...(event.teamSlotsSig || {}), [team]: ordered.map(p => String(p.uid)).join(',') };
+}
+window.teamPitchSpots = (event, team) => teamLineup(event, team).spots;   // used by the squad cards
 
 // The captain stops being captain when he leaves that team.
 function dropCaptainIfGone(eventId, teamIndex) {
@@ -189,7 +232,10 @@ function availablePlayers(event) {
     });
     return list;
 }
-const subTag = (p) => (p && p.isSub) ? '<span class="text-[8px] font-black text-amber-300 bg-amber-400/15 border border-amber-400/40 rounded px-1 py-0.5 ml-1">SUB</span>' : '';
+const WAIT_TAG = '<span class="text-[9px] font-bold text-amber-300 ml-1">(waitlist)</span>';
+const subTag = (p) => (p && p.isSub) ? WAIT_TAG : '';
+/** "(waitlist)" for a player who is on the game's waitlist right now (also once they're put on a team). */
+const waitTag = (event, uid) => (event.waitingList || []).some(w => String(w && (w.uid || w.userId)) === String(uid)) ? WAIT_TAG : '';
 
 // ------------------------------------------------------------------ who may change what
 // Admins (organizer / community admins): everything, including Build Teams.
@@ -259,7 +305,7 @@ window.openTeamMakingModal = function(eventId) {
     window.teamNames[event.id] = event.teamNames || {};
     window.teamColors[event.id] = event.teamColors || {};
     window.teamCaptains[event.id] = event.teamCaptains || {};
-    if (event.teamFormations) window.teamFormations[event.id] = { ...event.teamFormations, ...(window.teamFormations[event.id] || {}) };
+    window.teamFormations[event.id] = { ...(window.teamFormations[event.id] || {}), ...(event.teamFormations || {}) };
 
     let modal = document.getElementById('standalone-team-builder-modal');
     if (!modal) {
@@ -277,6 +323,8 @@ window.openTeamMakingModal = function(eventId) {
 };
 
 window.switchTeamTab = function(teamIndex) {
+    const evLock = window.currentTeamBuildingEvent || (window.eventsList || []).find(ev => ev.id === window.activeModalEventId);
+    if (evLock && evLock.capsDraft && evLock.capsDraft.status === 'live' && teamIndex !== -1) { toast('Locked while Caps mode is running.'); return; }
     window.activeTeamTab = teamIndex;
     const event = window.currentTeamBuildingEvent || (window.eventsList || []).find(ev => ev.id === window.activeModalEventId);
     if (event) {
@@ -538,6 +586,10 @@ export function renderTeamToolTab(event) {
     window.teamCaptains[event.id] = window.teamCaptains[event.id] || {};
     let activeTab = window.activeTeamTab || 0;
     if (activeTab === -1 && !caps) activeTab = 0;
+    // While captains are picking, the other tabs are locked (everything happens in Caps mode).
+    const locked = !!(caps && caps.status === 'live');
+    if (locked) { activeTab = -1; window.activeTeamTab = -1; }
+    const lockAttr = (on) => on ? 'disabled title="Locked while Caps mode is running" aria-disabled="true"' : '';
 
     window.teamAssignments[event.id] = window.teamAssignments[event.id] || {};
     for (let i = 0; i < teamsCount; i++) {
@@ -563,8 +615,8 @@ export function renderTeamToolTab(event) {
             ${CAP_ICON('w-4 h-4')} Caps mode${caps.status === 'live' ? ' <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>' : ''}
         </button>` : '';
     tabsHtml += `
-        <button data-action="switch-team-tab" data-team-index="0" class="px-4 py-2.5 rounded-2xl text-xs font-black transition shrink-0 ${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/80 border border-white/10'}">
-            📋 Summary
+        <button ${locked ? lockAttr(true) : 'data-action="switch-team-tab"'} data-team-index="0" class="px-4 py-2.5 rounded-2xl text-xs font-black transition shrink-0 ${locked ? 'opacity-40 cursor-not-allowed ' : ''}${activeTab === 0 ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/80 border border-white/10'}">
+            ${locked ? '🔒' : '📋'} Summary
         </button>
     `;
     for (let i = 0; i < teamsCount; i++) {
@@ -574,8 +626,8 @@ export function renderTeamToolTab(event) {
         const rawColor = resolvedColors[i];
         const tColor = window.teamAccent(rawColor);
         tabsHtml += `
-            <button data-action="switch-team-tab" data-team-index="${tIdx}" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
-                <span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle border border-white/40" style="background-color: ${rawColor};"></span> ${escapeHtml(tName)}
+            <button ${locked ? lockAttr(true) : 'data-action="switch-team-tab"'} data-team-index="${tIdx}" style="border-color: ${tColor} !important;" class="px-4 py-2.5 rounded-2xl text-xs font-black transition border shrink-0 ${locked ? 'opacity-40 cursor-not-allowed ' : ''}${isActive ? 'bg-[#00F296] text-slate-950 shadow-md' : 'bg-black/60 text-white/90'}">
+                ${locked ? '🔒 ' : ''}<span class="inline-block w-3 h-3 rounded-full mr-1.5 align-middle border border-white/40" style="background-color: ${rawColor};"></span> ${escapeHtml(tName)}
             </button>
         `;
     }
@@ -603,7 +655,7 @@ export function renderTeamToolTab(event) {
                     return `
                         <div class="flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl border text-xs shadow-md" style="border-color: ${tColor};">
                             <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                            <span class="font-bold text-white">${escapeHtml(pName)} ${isCap ? CAP_BADGE : ''}</span>
+                            <span class="font-bold text-white">${escapeHtml(pName)}${waitTag(event, pUid)} ${isCap ? CAP_BADGE : ''}</span>
                             ${canEditTeam(event, i) ? `<button data-action="unassign-team-slot" data-event-id="${event.id}" data-team-index="${i}" data-uid="${pUid}" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>` : ''}
                         </div>
                     `;
@@ -649,7 +701,7 @@ export function renderTeamToolTab(event) {
                 <button onclick="window.openTeamCard('${jsArg(event.id)}')" class="w-full bg-black/60 border border-white/20 hover:border-[#00F296]/60 text-white font-black py-3 rounded-2xl text-xs flex items-center justify-center gap-2"><i class="fa-solid fa-camera pointer-events-none"></i> Share the teams (team card)</button>
                 <div class="bg-[#040E13]/95 border border-amber-500/40 rounded-3xl p-5 space-y-3 shadow-xl">
                     <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider">⏳ Free Agents (${freeAgents.length})</h4>
-                    ${(event.waitingList || []).length ? '<p class="text-[10px] text-white/50">Players marked SUB are on the waitlist: add them to a team to sub in. Their goals count.</p>' : ''}
+                    ${(event.waitingList || []).length ? '<p class="text-[10px] text-white/50">Players marked (waitlist) are on the waitlist: add them to a team to sub in. Their goals count.</p>' : ''}
                     <div class="flex flex-wrap gap-2.5">
                         ${freeAgentsPillsHtml}
                     </div>
@@ -667,6 +719,8 @@ export function renderTeamToolTab(event) {
         const canEdit = canEditTeam(event, teamIdx);
         
         window.teamFormations[event.id][teamIdx] = window.teamFormations[event.id][teamIdx] || defaultFormatKey;
+        const lineupNow = teamLineup(event, teamIdx);
+        const playerAt = (spot) => lineupNow.spots[spot] ? currentTeamPlayers.find(p => String(p.uid) === String(lineupNow.spots[spot])) : null;
         const currentFormationKey = window.teamFormations[event.id][teamIdx];
         const rowCounts = availableFormations[currentFormationKey] || [3, 3, 1];
 
@@ -678,7 +732,7 @@ export function renderTeamToolTab(event) {
             let rowSlots = '';
             for (let c = 0; c < count; c++) {
                 const slotIdx = playerIndex++;
-                const p = currentTeamPlayers[slotIdx];
+                const p = playerAt(slotIdx);
                 const positionName = rIdx === 0 ? "FWD" : (rIdx === displayRows.length - 1 ? "DEF" : "MID");
                 
                 if (p && p.name) {
@@ -705,7 +759,7 @@ export function renderTeamToolTab(event) {
         });
 
         const goalieSlotIdx = playerIndex++;
-        const goaliePlayer = currentTeamPlayers[goalieSlotIdx];
+        const goaliePlayer = playerAt(goalieSlotIdx);
         if (goaliePlayer && goaliePlayer.name) {
             const gAvatar = resolvePlayerAvatar(goaliePlayer, event.attendees);
             rowsHtml += `
@@ -930,14 +984,12 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
     const allPlayers = availablePlayers(event);
 
     if (slotIndex !== null && slotIndex !== 'null') {
-        // Players on the pitch = the first N of the team (N = spots in the formation); the rest are on the bench.
-        const slots = pitchSlotCount(event, teamIndex);
-        const assignedPitchUIDs = new Set();
-        teamRoster.slice(0, slots).forEach((player, i) => {
-            if (i !== slotIndex) assignedPitchUIDs.add(String(player.uid));
-        });
+        // Who is on the pitch comes from the saved spots (same as the apps); everyone else is on the bench.
+        const { spots } = teamLineup(event, teamIndex);
+        const here = spots[slotIndex] ? String(spots[slotIndex]) : '';
+        const assignedPitchUIDs = new Set(Object.entries(spots).filter(([k]) => +k !== slotIndex).map(([, u]) => String(u)));
 
-        const unplacedPitchPlayers = teamRoster.filter((p, i) => !assignedPitchUIDs.has(String(p.uid)) && i !== slotIndex);
+        const unplacedPitchPlayers = teamRoster.filter(p => !assignedPitchUIDs.has(String(p.uid)) && String(p.uid) !== here);
         
         let picker = document.getElementById('assign-picker-modal');
         if (!picker) {
@@ -1078,34 +1130,39 @@ window.assignPlayerToSlot = async function(eventId, teamIndex, slotIndex, uid) {
     window.teamAssignments[event.id] = event.teamAssignments || {};
     const all = window.teamAssignments[event.id];
     const same = (p) => p && String(p.uid) === String(uid);
-    let arr = (all[teamIndex] || []).filter(p => p && p.uid);
-    const oldIdx = arr.findIndex(same);
 
-    // A player is only ever on one team, once (before, moving someone could add him twice).
+    // A player is only ever on one team, once.
     Object.keys(all).forEach(k => {
         if (String(k) !== String(teamIndex) && Array.isArray(all[k]) && all[k].some(same)) {
-            all[k] = all[k].filter(p => p && p.uid && !same(p));
+            const lu = teamLineup(event, k);
+            Object.keys(lu.spots).forEach(sp => { if (String(lu.spots[sp]) === String(uid)) delete lu.spots[sp]; });
+            saveLineup(event, k, lu.roster.filter(p => !same(p)), lu.spots);
             dropCaptainIfGone(event.id, k);
         }
     });
 
-    if (slotIndex !== null && slotIndex !== 'null') {
-        if (oldIdx !== -1) {
-            if (slotIndex < arr.length) { const t = arr[slotIndex]; arr[slotIndex] = arr[oldIdx]; arr[oldIdx] = t; }   // swap spots
-            else { arr.splice(oldIdx, 1); arr.push(player); }
-        } else if (slotIndex < arr.length) {
-            const displaced = arr[slotIndex];
-            arr[slotIndex] = player;
-            arr.push(displaced);   // the player who had that spot goes to the bench
-        } else {
-            arr.push(player);
-        }
-    } else if (oldIdx === -1) {
-        arr.push(player);
-    }
-    all[teamIndex] = arr;
+    const lu = teamLineup(event, teamIndex);
+    let roster = lu.roster.slice();
+    const spots = { ...lu.spots };
+    if (!roster.some(same)) roster.push(player);
+    const mySpot = Object.keys(spots).map(Number).find(k => String(spots[k]) === String(uid));
 
-    event.teamAssignments = window.teamAssignments[event.id];
+    if (slotIndex !== null && slotIndex !== 'null') {
+        const target = Number(slotIndex);
+        const occupant = spots[target];
+        spots[target] = String(uid);
+        if (mySpot !== undefined && mySpot !== target) {
+            if (occupant && String(occupant) !== String(uid)) spots[mySpot] = occupant;   // swap spots
+            else delete spots[mySpot];                                                     // moved to an empty spot
+        }
+        // (if he came from the bench, whoever had that spot goes to the bench)
+    } else if (mySpot === undefined) {
+        // Added to the team: first empty spot on the pitch, or the bench if it's full.
+        const free = Array.from({ length: lu.total }, (_, i) => i).find(i => !spots[i]);
+        if (free !== undefined) spots[free] = String(uid);
+    }
+    saveLineup(event, teamIndex, roster, spots);
+
     try {
         await updateTeamToolFirestore(event);
         window.openTeamMakingModal(event.id);
@@ -1118,12 +1175,12 @@ window.unassignPlayerFromSlot = async function(eventId, teamIndex, slotIndex) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
     if (!canEditTeam(event, teamIndex)) { noPermission(); return; }
-    if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
-
-    window.teamAssignments[event.id][teamIndex][slotIndex] = null;
-    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && p.uid);
+    const lu = teamLineup(event, teamIndex);
+    const uid = lu.spots[slotIndex];
+    if (!uid) return;
+    const spots = { ...lu.spots }; delete spots[slotIndex];
+    saveLineup(event, teamIndex, lu.roster.filter(p => String(p.uid) !== String(uid)), spots);
     dropCaptainIfGone(event.id, teamIndex);
-    event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
         window.openTeamMakingModal(event.id);
@@ -1136,11 +1193,11 @@ window.unassignPlayerFromTeamSlot = async function(eventId, teamIndex, uid) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId) || window.currentTeamBuildingEvent;
     if (!event) return;
     if (!canEditTeam(event, teamIndex)) { noPermission(); return; }
-    if (!window.teamAssignments[event.id] || !window.teamAssignments[event.id][teamIndex]) return;
-
-    window.teamAssignments[event.id][teamIndex] = window.teamAssignments[event.id][teamIndex].filter(p => p && p.uid && String(p.uid) !== String(uid));
+    const lu = teamLineup(event, teamIndex);
+    const spots = { ...lu.spots };
+    Object.keys(spots).forEach(k => { if (String(spots[k]) === String(uid)) delete spots[k]; });
+    saveLineup(event, teamIndex, lu.roster.filter(p => String(p.uid) !== String(uid)), spots);
     dropCaptainIfGone(event.id, teamIndex);
-    event.teamAssignments = window.teamAssignments[event.id];
     try {
         await updateTeamToolFirestore(event);
         window.openTeamMakingModal(event.id);
@@ -1307,8 +1364,12 @@ function renderCapsSetup() {
     const event = findEvent(st.eventId); if (!event) return;
     const count = event.teamsCount || 3;
     const names = window.getTeamNames(event), colors = window.getTeamColors(event);
-    const players = getFlattenedPlayersList(event.attendees).filter(p => !p.isHostGuest);
+    const vols = new Set((event.captainVolunteers || []).map(String));
+    const players = getFlattenedPlayersList(event.attendees).filter(p => !p.isHostGuest)
+        .sort((a, b) => (vols.has(String(b.uid)) ? 1 : 0) - (vols.has(String(a.uid)) ? 1 : 0));   // volunteers first
+    const volCount = players.filter(p => vols.has(String(p.uid))).length;
     const hasTeams = Object.values(event.teamAssignments || {}).some(a => (a || []).some(p => p && p.uid));
+    const call = event.captainCall && event.captainCall.open;
     const chip = (on, label, onclick) => `<button onclick="${onclick}" class="flex-1 py-2 px-2 rounded-xl text-[11px] font-black transition ${on ? 'bg-[#00F296] text-slate-950' : 'bg-black/60 text-white/70 border border-white/15'}">${label}</button>`;
     const label = (t) => `<div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] text-left">${t}</div>`;
     const dot = (i) => `<span class="w-3 h-3 rounded-full border border-white/40 shrink-0" style="background:${colors[i]}"></span>`;
@@ -1323,8 +1384,13 @@ function renderCapsSetup() {
                 ${st.capWho === 'me' ? Array.from({ length: count }, (_, i) => `
                     <label class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2">${dot(i)}<span class="text-[11px] font-bold w-20 truncate">${escapeHtml(names[i])}</span>
                         <select onchange="window._capsSetup.caps[${i}]=this.value" class="flex-1 min-w-0 bg-black/70 border border-white/20 rounded-lg px-2 py-1.5 text-base sm:text-xs text-white">
-                            <option value="">Pick a captain</option>${players.map(p => `<option value="${escapeHtml(p.uid)}" ${String(st.caps[i] || '') === String(p.uid) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
-                        </select></label>`).join('') : '<p class="text-[10px] text-white/50 text-left">Captains and their team colors are picked at random.</p>'}
+                            <option value="">Pick a captain</option>${players.map(p => `<option value="${escapeHtml(p.uid)}" ${String(st.caps[i] || '') === String(p.uid) ? 'selected' : ''}>${vols.has(String(p.uid)) ? '🙋 ' : ''}${escapeHtml(p.name)}</option>`).join('')}
+                        </select></label>`).join('') : `<p class="text-[10px] text-white/50 text-left">Captains and their team colors are picked at random${volCount ? ', from the players who raised their hand first' : ''}.</p>`}
+                <div class="bg-black/40 border border-white/10 rounded-xl p-2.5 text-left space-y-1.5">
+                    <div class="text-[11px] text-white"><b>🙋 ${volCount} ${volCount === 1 ? 'player wants' : 'players want'} to be captain</b>${volCount ? ': ' + escapeHtml(players.filter(p => vols.has(String(p.uid))).map(p => p.name).join(', ')) : ''}</div>
+                    ${call ? '<div class="text-[10px] text-[#00F296]">Asked the players. Their answers show up here.</div>'
+                        : `<button onclick="window.askCaptainVolunteers('${jsArg(event.id)}')" class="w-full bg-black/60 border border-[#00F296]/50 text-[#00F296] font-black py-2 rounded-lg text-[11px]">Ask who wants to be captain</button>`}
+                </div>
             </div>
             <div class="space-y-2">${label('How do they pick?')}
                 <div class="flex gap-2">${chip(st.mode === 'turns', 'One captain at a time', "window._capsSetup.mode='turns';window.renderCapsSetupUI()")}${chip(st.mode === 'open', 'Open pick', "window._capsSetup.mode='open';window.renderCapsSetupUI()")}</div>
@@ -1344,6 +1410,32 @@ function renderCapsSetup() {
 }
 window.renderCapsSetupUI = renderCapsSetup;
 
+/** Admin: ask everyone going "who wants to be captain?" (they get a notification and a Yes/No box on the game). */
+window.askCaptainVolunteers = async function(eventId) {
+    const event = findEvent(eventId); if (!event || !isTeamAdmin(event)) return;
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.captainCall = { open: true, at: Date.now(), by: meUid() };
+        draft.captainVolunteers = draft.captainVolunteers || [];
+        draft.captainNo = [];
+    });
+    if (res.ok && !res.aborted) { toast('Asked! Players got a notification.'); renderCapsSetup(); }
+};
+
+/** Player: "I want to be captain" (yes) or "No thanks". Tapping again changes the answer. */
+window.answerCaptainCall = async function(eventId, yes) {
+    const u = meUid(); if (!u) return;
+    const res = await mutateEvent(eventId, (draft) => {
+        if (!(draft.attendees || []).some(a => String(a.uid) === u)) return false;
+        const v = new Set((draft.captainVolunteers || []).map(String)), no = new Set((draft.captainNo || []).map(String));
+        if (yes) { v.add(u); no.delete(u); } else { v.delete(u); no.add(u); }
+        draft.captainVolunteers = [...v]; draft.captainNo = [...no];
+    });
+    if (res.ok && !res.aborted) {
+        toast(yes ? "You raised your hand 🙋 The admin will pick the captains." : 'Got it. Not this time.');
+        if (typeof window.renderEventDetailModalContent === 'function') window.renderEventDetailModalContent();
+    }
+};
+
 window.startCapsDraft = async function() {
     const st = window._capsSetup; if (!st) return;
     const event = findEvent(st.eventId); if (!event || !isTeamAdmin(event)) return;
@@ -1357,7 +1449,9 @@ window.startCapsDraft = async function() {
         if (new Set(ids).size !== ids.length) { toast('Each team needs a different captain.', 'error'); return; }
         for (let i = 0; i < count; i++) caps[i] = String(st.caps[i]);
     } else {
-        shuffled(players).slice(0, count).forEach((p, i) => { caps[i] = String(p.uid); });
+        const vols = new Set((event.captainVolunteers || []).map(String));
+        const keen = shuffled(players.filter(p => vols.has(String(p.uid)))), rest = shuffled(players.filter(p => !vols.has(String(p.uid))));
+        [...keen, ...rest].slice(0, count).forEach((p, i) => { caps[i] = String(p.uid); });
     }
     const first = st.mode === 'turns' ? (st.firstWho === 'me' ? (st.first || 0) : Math.floor(Math.random() * count)) : 0;
     const deadlineAt = deadlineFor(event, st.deadline, st.customAt);
@@ -1370,6 +1464,7 @@ window.startCapsDraft = async function() {
         for (let i = 0; i < count; i++) ta[i] = [playerRecord(byUid[caps[i]])];
         draft.teamAssignments = ta;
         draft.teamCaptains = caps;
+        if (draft.captainCall) draft.captainCall = { ...draft.captainCall, open: false };
         draft.capsDraft = { mode: st.mode, status: 'live', order, turnIdx: 0, turnTeam: st.mode === 'turns' ? order[0] : null, picks: [], startedAt: Date.now(), startedBy: meUid(), deadline: st.deadline || 'none', deadlineAt };
     });
     document.getElementById('randomize-options-modal')?.remove();
@@ -1619,8 +1714,13 @@ window.capsBuildLineup = async function(eventId) {
             const rest = [];
             list.forEach(p => { if (Number.isInteger(p.slot) && p.slot < total && !spots[p.slot]) spots[p.slot] = p; else rest.push(p); });
             shuffled(rest).forEach(p => { const k = spots.indexOf(null); if (k !== -1) spots[k] = p; else spots.push(p); });
-            // Spots nobody filled are dropped (the pitch fills from the front); extra players go to the bench.
-            ta[i] = spots.filter(Boolean).map(p => { const c = { ...p }; delete c.slot; return c; });
+            // Saved like the apps: chosen spots stay where they are (empty spots stay empty), extras on the bench.
+            const ordered = spots.filter(Boolean).map(p => { const c = { ...p }; delete c.slot; return c; });
+            const spotMap = {};
+            spots.forEach((p, k) => { if (p && k < total) spotMap[k] = String(p.uid); });
+            ta[i] = ordered;
+            draft.teamSlots = { ...(draft.teamSlots || {}), [i]: spotMap };
+            draft.teamSlotsSig = { ...(draft.teamSlotsSig || {}), [i]: ordered.map(p => String(p.uid)).join(',') };
         }
         draft.teamAssignments = ta;
         if (draft.capsDraft) { draft.capsDraft.status = 'done'; draft.capsDraft.turnTeam = null; draft.capsDraft.doneAt = Date.now(); }
@@ -1796,7 +1896,7 @@ window.refreshTeamBuilderLive = function() {
     if (modal.contains(document.activeElement) && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;   // don't wipe what they're typing
     const ev = (window.eventsList || []).find(x => x.id === id);
     if (!ev) return;
-    const key = JSON.stringify([ev.teamAssignments, ev.teamCaptains, ev.capsDraft, ev.teamNames, ev.teamColors, ev.teamFormations]);
+    const key = JSON.stringify([ev.teamAssignments, ev.teamCaptains, ev.capsDraft, ev.teamNames, ev.teamColors, ev.teamFormations, ev.teamSlots, ev.teamSlotsSig, ev.waitingList, ev.captainCall, ev.captainVolunteers]);
     if (key === window._teamBuilderKey) return;
     window._teamBuilderKey = key;
     const y = modal.scrollTop;

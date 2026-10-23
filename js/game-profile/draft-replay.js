@@ -3,6 +3,7 @@
 //    can also be saved / shared as a video (MediaRecorder; mp4 on iPhone/Safari, webm elsewhere).
 // 2) "Team card": one image with every team (captain first, gold C), like the celebration cards.
 import { cardKit, loadFonts } from './celebration-cards.js';
+import { mountShareBar } from './card-share.js';
 
 const { W, H, GREEN, GOLD, BLOCK, BODY, loadImage, background, rr, text, fitFont, avatar, header, footer, toBlob } = cardKit;
 const AV_FALLBACK = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -237,7 +238,14 @@ async function drawSquad(ctx, d, t, ti, pitch) {
     const rowsDef = (window.teamFormationRows ? window.teamFormationRows(ev, ti) : [3, 2, 1]) || [3, 2, 1];
     const rows = [...rowsDef].reverse();               // forwards on top, keeper at the bottom
     const slots = rows.reduce((a, b) => a + b, 0) + 1;
-    const onPitch = t.players.slice(0, slots), bench = t.players.slice(slots);
+    // Each player in their saved spot (empty spots stay empty), everyone else on the bench.
+    const spotMap = window.teamPitchSpots ? window.teamPitchSpots(ev, ti) : null;
+    let onPitch, bench;
+    if (spotMap && Object.keys(spotMap).length) {
+        const byUid = new Map(t.players.map(p => [String(p.uid), p]));
+        onPitch = Array.from({ length: slots }, (_, k) => byUid.get(String(spotMap[k] || '')) || null);
+        bench = t.players.filter(p => !onPitch.includes(p));
+    } else { onPitch = t.players.slice(0, slots); bench = t.players.slice(slots); }
 
     // the pitch (our half: middle line at the top, our goal at the bottom)
     const px = 60, py = 175, pw = 860, ph = H - 190 - py - 10;
@@ -336,18 +344,10 @@ window.openTeamCard = async function(eventId) {
     const body = m.querySelector('[data-body]');
     body.innerHTML = '<p class="text-[11px] text-white/60">Send them one by one so each one pops in the chat.</p>';
     if (files.some(f => !f)) body.innerHTML += '<p class="text-xs text-amber-300">Some photos couldn\'t be added. Take a screenshot instead.</p>';
-    if (ev.communityId && window.postToCommunityFeed && files.every(Boolean) && (window.myCommunityRoles || {})[ev.communityId]) {
-        const post = document.createElement('button');
-        post.className = 'w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm';
-        post.innerHTML = '<i class="fa-solid fa-users mr-1"></i> Post all to the community feed';
-        post.onclick = async () => {
-            post.disabled = true; post.textContent = 'Posting…';
-            const ok = await window.postToCommunityFeed(ev.communityId, `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + ev.date : ''}`, files);
-            post.textContent = ok ? 'Posted to the feed ✓' : "Couldn't post. Try again";
-            if (!ok) post.disabled = false;
-        };
-        body.appendChild(post);
-    }
+    const bar = document.createElement('div');
+    body.appendChild(bar);
+    mountShareBar(bar, cards.map((c, i) => ({ title: c.title, file: files[i] })),
+        { eventId: ev.id, communityId: ev.communityId || '', caption: `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + ev.date : ''}` });
     cards.forEach((c, i) => {
         const box = document.createElement('div');
         box.className = 'space-y-2 pt-2';

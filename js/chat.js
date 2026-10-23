@@ -1,7 +1,7 @@
 // js/chat.js: Handles WhatsApp-style messaging threads, directory user search, real-time chat sync, read receipts, and typing indicators
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc, getDoc, collection, getDocs, addDoc, serverTimestamp, onSnapshot, query as fsQuery, orderBy, limit, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, addPollButton, POLL_PREFIX, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
+import { renderWhatsApp, typingBubbleHtml, msOf, nameColor, reportTyping, stopTyping, uploadMedia, addAttachButton, addPollButton, POLL_PREFIX, takeReply, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL } from './wa-chat.js';
 
 const STOCK = 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';   // old placeholder: never shown or saved
 // A player's real profile photo: live player list first (always current), then what the chat saved.
@@ -453,7 +453,7 @@ window.renderActiveChatMessages = function() {
         const ms = real || prevMs;
         if (ms) prevMs = ms;
         return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms, time: m.time, timeText: real ? '' : (m.time || ''), isRead: m.isRead === true, media: m.media,
-            deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions, _i: i };
+            deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions, replyTo: m.replyTo, _i: i };
     }).sort((a, b) => (a.ms - b.ms) || (a._i - b._i));
     const atBottom = isNearBottom();
     container.classList.add('wa-wall');
@@ -566,6 +566,8 @@ async function sendToActiveChat(text, media) {
         isRead: false
     };
     if (media) newMessage.media = media;
+    const replyTo = takeReply('dm', th.id);
+    if (replyTo) newMessage.replyTo = replyTo;
 
     th.messages.push(newMessage);
     

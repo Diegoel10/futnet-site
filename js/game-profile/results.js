@@ -304,7 +304,7 @@ window.shareCelebrationCards = function(eventId) {
         location: ev.locationName || ev.location || ev.venue || '',
         format: ev.format || ev.gameFormat || '',
     };
-    openCelebrationCards(results, info, { accent, logo: 'img/celebration_logo.png', communityId: ev.communityId || '' });
+    openCelebrationCards(results, info, { accent, logo: 'img/celebration_logo.png', communityId: ev.communityId || '', eventId: ev.id });
 };
 
 window.computeSessionResults = computeSessionResults;

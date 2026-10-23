@@ -74,6 +74,15 @@ export function nameColor(key) {
     .wa-menu .item { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px 10px; border-radius: 10px; font-size: 15px; }
     .wa-menu .item:hover { background: rgba(255,255,255,.06); }
     .wa-menu .item.danger { color: #F15C6D; }
+    .wa-quote { display: block; text-align: left; background: rgba(0,0,0,.22); border-left: 4px solid #06CF9C; border-radius: 6px; padding: 4px 8px; margin: 0 -2px 5px; font-size: 12.5px; line-height: 1.3; cursor: pointer; max-width: 100%; }
+    .wa-quote b { display: block; color: #06CF9C; font-size: 12px; }
+    .wa-quote span { color: #D1D7DB; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+    .wa-row.wa-flash .wa-bubble { box-shadow: 0 0 0 3px rgba(6,207,156,.7); transition: box-shadow .3s; }
+    #wa-reply-bar { display: flex; align-items: center; gap: 8px; background: #1F2C34; padding: 6px 10px; border-top: 1px solid rgba(255,255,255,.06); }
+    #wa-reply-bar .q { flex: 1; min-width: 0; border-left: 4px solid #06CF9C; background: rgba(0,0,0,.25); border-radius: 6px; padding: 4px 8px; font-size: 12.5px; }
+    #wa-reply-bar .q b { display: block; color: #06CF9C; font-size: 12px; }
+    #wa-reply-bar .q span { display: block; color: #D1D7DB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #wa-reply-bar button { width: 30px; height: 30px; border-radius: 9999px; color: #8696A0; font-size: 16px; }
     .wa-poll { min-width: min(250px, 62vw); padding: 2px 0 4px; }
     .wa-poll-q { font-weight: 700; font-size: 15px; margin: 0 0 2px; white-space: pre-wrap; word-break: break-word; }
     .wa-poll-sub { font-size: 11px; color: #8696A0; margin-bottom: 6px; }
@@ -163,10 +172,12 @@ window.waMsgMenu = function(key) {
     if (!m) return;
     const w = openSheet(`
         <div class="emojis">${REACTIONS.map(e => `<button type="button" data-e="${e}" class="${m.myReaction === e ? 'on' : ''}">${e}</button>`).join('')}</div>
+        <button type="button" class="item" data-a="reply"><i class="fa-solid fa-reply w-5"></i> Reply</button>
         ${m.text ? '<button type="button" class="item" data-a="copy"><i class="fa-regular fa-copy w-5"></i> Copy</button>' : ''}
         ${m.mine && m.text ? '<button type="button" class="item" data-a="edit"><i class="fa-solid fa-pen w-5"></i> Edit</button>' : ''}
         ${m.mine || m.canModerate ? '<button type="button" class="item danger" data-a="delete"><i class="fa-regular fa-trash-can w-5"></i> Delete</button>' : ''}`);
     w.querySelectorAll('[data-e]').forEach(b => b.onclick = () => runAction(key, 'react', b.dataset.e));
+    w.querySelector('[data-a="reply"]')?.addEventListener('click', () => window.waReply(key));
     w.querySelector('[data-a="copy"]')?.addEventListener('click', () => {
         try { navigator.clipboard.writeText(m.text); if (window.showToast) window.showToast('Copied'); } catch (e) { /* ignore */ }
         closeMenu();
@@ -203,14 +214,74 @@ window.waMsgMenu = function(key) {
         const k = keyOf(e.target);
         if (k && !e.target.closest('a,video')) { e.preventDefault(); window.waMsgMenu(k); }
     });
+    // Swipe a message to the right to reply (like WhatsApp); hold it for the menu.
+    let swipe = null;
     document.addEventListener('touchstart', (e) => {
         const k = keyOf(e.target);
         if (!k) return;
+        const t = e.touches[0];
+        swipe = { k, x: t.clientX, y: t.clientY, el: e.target.closest('.wa-bubble'), done: false, dx: 0 };
         timer = setTimeout(() => { timer = null; window.waMsgMenu(k); }, 480);
     }, { passive: true });
     const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-    document.addEventListener('touchend', cancel); document.addEventListener('touchmove', cancel, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+        cancel();
+        if (!swipe) return;
+        const t = e.touches[0];
+        const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+        if (Math.abs(dy) > 30 && Math.abs(dy) > Math.abs(dx)) { if (swipe.el) swipe.el.style.transform = ''; swipe = null; return; }
+        if (dx > 0 && swipe.el) { swipe.dx = dx; swipe.el.style.transition = 'none'; swipe.el.style.transform = `translateX(${Math.min(dx, 80)}px)`; }
+        if (dx > 60 && !swipe.done) { swipe.done = true; try { navigator.vibrate && navigator.vibrate(15); } catch (er) { /* ignore */ } }
+    }, { passive: true });
+    document.addEventListener('touchend', () => {
+        cancel();
+        if (!swipe) return;
+        if (swipe.el) { swipe.el.style.transition = 'transform .2s'; swipe.el.style.transform = ''; }
+        if (swipe.done) window.waReply(swipe.k);
+        swipe = null;
+    });
 })();
+
+// ---- replies: the message you answer is quoted above yours (tap the quote to jump to it)
+// Saved on the message: replyTo: { id, uid, name, text } (older apps simply don't show the quote).
+let replyState = null;   // { scope: "kind|id", data, inputId }
+const inputFor = (kind) => kind === 'game' ? 'game-comment-input' : 'active-chat-input';
+function clearReplyBar() { document.getElementById('wa-reply-bar')?.remove(); }
+window.waReply = function(key) {
+    const m = msgRegistry[key];
+    if (!m) return;
+    const [kind, id, msgId] = key.split('|');
+    const text = (m.poll ? '📊 ' + (m.poll.question || 'Poll') : (m.text || (m.hasMedia ? (m.isVideo ? '🎥 Video' : '📷 Photo') : ''))).slice(0, 140);
+    const p = window.userProfile || {};
+    const myName = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim() || window.currentUser?.displayName || 'Player';
+    const realName = m.mine ? myName : (m.realName && m.realName !== 'You' ? m.realName : 'Player');
+    replyState = { scope: `${kind}|${id}`, data: { id: msgId, uid: m.mine ? String(window.currentUser?.uid || m.uid) : m.uid, name: realName, text }, inputId: inputFor(kind) };
+    closeMenu();
+    const input = document.getElementById(replyState.inputId);
+    if (!input) return;
+    clearReplyBar();
+    const bar = document.createElement('div');
+    bar.id = 'wa-reply-bar';
+    bar.innerHTML = `<div class="q"><b>${esc(m.name)}</b><span>${esc(text)}</span></div><button type="button" aria-label="Cancel reply"><i class="fa-solid fa-xmark"></i></button>`;
+    bar.querySelector('button').onclick = () => { replyState = null; clearReplyBar(); };
+    const row = input.closest('form') || input.parentNode;
+    row.parentNode.insertBefore(bar, row);
+    input.focus();
+};
+/** The reply waiting for this chat (and clears it). kind: 'dm' | 'community' | 'game'. */
+export function takeReply(kind, id) {
+    if (!replyState || replyState.scope !== `${kind}|${id}`) return null;
+    const d = replyState.data;
+    replyState = null; clearReplyBar();
+    return d;
+}
+window.waJumpTo = function(mid) {
+    if (!mid) return;
+    const row = document.querySelector(`.wa-row[data-mid="${CSS.escape(String(mid))}"]`);
+    if (!row) { window.showToast && window.showToast("That message is too old to show here.", 'info'); return; }
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    row.classList.add('wa-flash'); setTimeout(() => row.classList.remove('wa-flash'), 1400);
+};
 
 // ---- polls (community chats and game comments)
 // Saved on the message: poll: { question, options: [text, ...], votes: { uid: optionIndex } }.
@@ -347,18 +418,21 @@ export function renderWhatsApp(messages, opts = {}) {
         const key = sc && sc.kind && sc.id && msgKey && !deleted && !String(msgKey).startsWith('app_') ? `${sc.kind}|${sc.id}|${msgKey}` : '';
         if (key) {
             const reacts = m.reactions && typeof m.reactions === 'object' ? m.reactions : {};
-            msgRegistry[key] = { text: m.poll ? '' : (caption || ''), mine, canModerate: !!sc.canModerate, myReaction: reacts[myUid] || '', poll: m.poll || null };
+            msgRegistry[key] = { text: m.poll ? '' : (caption || ''), mine, canModerate: !!sc.canModerate, myReaction: reacts[myUid] || '', poll: m.poll || null,
+                uid: String(m.uid || ''), name: mine ? 'You' : (m.name || 'Player'), realName: m.name || 'Player', hasMedia: !!(m.media && m.media.url), isVideo: !!(m.media && m.media.type === 'video') };
         }
         const body = deleted
             ? `<span class="wa-text wa-deleted"><i class="fa-solid fa-ban" style="margin-right:5px"></i>${DELETED_TEXT}</span>`
             : (m.poll && Array.isArray(m.poll.options) ? pollHtml(m.poll, myUid, key) : `${media}<span class="wa-text">${esc(caption)}</span>`);
+        const quote = !deleted && m.replyTo && typeof m.replyTo === 'object'
+            ? `<span class="wa-quote" onclick="event.stopPropagation(); waJumpTo('${esc(String(m.replyTo.id || ''))}')"><b>${String(m.replyTo.uid) === myUid ? 'You' : esc(m.replyTo.name || 'Player')}</b><span>${esc(m.replyTo.text || '')}</span></span>` : '';
         const edited = m.edited && !deleted ? '<span class="wa-edited">Edited</span>' : '';
         html += `
-            <div class="wa-row ${mine ? 'me' : ''} ${startsRun ? 'wa-gap-l' : 'wa-gap-s'}">
+            <div class="wa-row ${mine ? 'me' : ''} ${startsRun ? 'wa-gap-l' : 'wa-gap-s'}" ${msgKey ? `data-mid="${esc(String(msgKey))}"` : ''}>
                 ${photo}
                 <div class="wa-col">
                     <div class="wa-bubble ${mine ? 'me' : 'them'} ${startsRun ? 'tail' : ''}" ${key ? `data-k="${esc(key)}"` : ''}>
-                        ${name}${body}<span class="wa-meta">${edited}${esc(time)}${ticks}</span>
+                        ${name}${quote}${body}<span class="wa-meta">${edited}${esc(time)}${ticks}</span>
                         ${key ? `<button type="button" class="wa-more" aria-label="Message options" onclick="waMsgMenu('${esc(key)}')"><i class="fa-solid fa-chevron-down"></i></button>` : ''}
                     </div>
                     ${!deleted ? reactionsHtml(m.reactions, myUid, key) : ''}
@@ -549,8 +623,14 @@ export function addAttachButton(inputEl, onFile) {
     if (!inputEl || inputEl.dataset.waAttach === '1') return;
     inputEl.dataset.waAttach = '1';
     const picker = document.createElement('input');
-    picker.type = 'file'; picker.accept = 'image/*,video/*'; picker.style.display = 'none';
-    picker.addEventListener('change', () => { const f = picker.files && picker.files[0]; picker.value = ''; if (f) onFile(f); });
+    picker.type = 'file'; picker.accept = 'image/*,video/*'; picker.multiple = true; picker.style.display = 'none';
+    // Several photos/videos at once (up to 10): sent one after the other, the caption goes with the first.
+    picker.addEventListener('change', async () => {
+        const files = [...(picker.files || [])].slice(0, 10);
+        if ((picker.files || []).length > 10 && window.showToast) window.showToast('Sending the first 10. You can send more after.', 'info');
+        picker.value = '';
+        for (const f of files) { try { await onFile(f); } catch (e) { /* each upload shows its own error */ } }
+    });
     const btn = document.createElement('button');
     btn.type = 'button'; btn.title = 'Send a photo or video'; btn.setAttribute('aria-label', 'Send a photo or video');
     btn.innerHTML = '<i class="fa-solid fa-paperclip"></i>';
@@ -595,4 +675,4 @@ window.waOpenMedia = function(type, url) {
     document.body.appendChild(el);
 };
 
-Object.assign(window.waChat, { openPollComposer, addPollButton, messageAction, uploadMedia, mediaHtml, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL });
+Object.assign(window.waChat, { takeReply, openPollComposer, addPollButton, messageAction, uploadMedia, mediaHtml, addAttachButton, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL });

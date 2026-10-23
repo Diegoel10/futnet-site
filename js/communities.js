@@ -1986,7 +1986,7 @@ function renderCommunityChatMessages() {
     const uid = me().uid;
     const list = S.chatMessages.map(m => ({
         id: m.id, uid: m.senderUid || m.senderId || '', name: m.sender || m.senderName || 'Player',
-        avatar: m.avatar, text: m.text, ms: msOf(m), media: m.media, poll: m.poll,
+        avatar: m.avatar, text: m.text, ms: msOf(m), media: m.media, poll: m.poll, replyTo: m.replyTo,
         deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions
     }));
     if (window.refreshChatPollButton) window.refreshChatPollButton();
@@ -2008,6 +2008,7 @@ window.stopCommunityChat = function() {
 window.sendCommunityChatMessage = async function(text, media, poll) {
     const cid = S.activeChatCommunity; if (!cid || !me() || !text) return;
     const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const replyTo = window.waChat && window.waChat.takeReply ? window.waChat.takeReply('community', cid) : null;
     try {
         // blocked while suspended
         const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', cid, 'members', me().uid));
@@ -2015,7 +2016,7 @@ window.sendCommunityChatMessage = async function(text, media, poll) {
         if (_sc && _sc.chat) { toast(`You are suspended from chat until ${fmtDate(tsMs(ms.data().suspendedUntil))}.${ms.data().suspendReason ? ' Reason: ' + esc(ms.data().suspendReason) : ''}`, 'error'); return; }
         await setDoc(doc(db, 'artifacts', appId, 'communities', cid, 'messages', msgId), {
             id: msgId, senderUid: me().uid, sender: myName(), avatar: /^https?:\/\//i.test(myAvatar()) && myAvatar().length < 400 ? myAvatar() : '',
-            text, ...(media ? { media } : {}), ...(poll ? { poll } : {}), createdAt: serverTimestamp()
+            text, ...(media ? { media } : {}), ...(poll ? { poll } : {}), ...(replyTo ? { replyTo } : {}), createdAt: serverTimestamp()
         });
     } catch (e) { console.error(e); toast('Message failed to send', 'error'); }
 };

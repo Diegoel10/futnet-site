@@ -1,5 +1,5 @@
 // js/game-profile/match-management.js: Live match tracker with direct team builder roster lookups and custom team color styling
-import { mutateEvent, escapeHtml, ownGoalLabel } from './event-store.js';
+import { mutateEvent, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
 
 // Team names/colors come from team-tool.js (single source of truth). Fallbacks only if it isn't loaded yet.
 const MM_FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
@@ -469,6 +469,10 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
             <div class="space-y-2">
                 ${assignedPlayers.length ? assignedPlayers.map(p => row(p, p.name || 'Player')).join('')
                     : '<p class="text-xs text-white/60">Nobody is on this team yet. Add players in Team Builder first.</p>'}
+            </div>
+            <div data-goal="${UNKNOWN_SCORER}" onclick="recordLiveGoal('${eventId}', '${teamKey}', this.dataset.goal)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-dashed border-white/25">
+                <span class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-sm">🤷</span>
+                <span class="text-xs font-bold text-white/90">Don't recall / someone else</span>
             </div>
             ${otherPlayers.length ? `
             <div class="space-y-2 pt-2 border-t border-white/10">

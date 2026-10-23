@@ -65,6 +65,18 @@ async function communityMembers(communityId) {
 }
 
 /**
+ * Who runs a game: its organizer, plus (community games) the community's creator and every admin.
+ * The creator always gets every game alert, even when another admin made the game.
+ */
+async function gameBosses(game) {
+  const out = [game && game.organizerId];
+  if (game && game.communityId) {
+    try { const { admins } = await communityMembers(game.communityId); out.push(...admins); } catch (e) { /* organizer only */ }
+  }
+  return uniq(out);
+}
+
+/**
  * Writes one notification record per recipient. The sender function pushes each one.
  * `key` makes the record id stable, so the same event never pushes twice
  * (writing to an existing id is an update, which does not trigger a push).
@@ -427,13 +439,13 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
   const joined = arr(after.attendees).map(uidOf).filter((u) => u && !beforeIn.has(u) && u !== organizer);
   if (joined.length) {
     const first = await nameOf(joined[0]);
-    await notify([organizer], {
+    await notify(await gameBosses(after), {
       type: "game_join",
       senderUid: joined[0],
       eventId,
       title: "New player joined 🙌",
       body: joined.length === 1 ? `${first} joined ${title}.` : `${first} and ${joined.length - 1} more joined ${title}.`,
-    });
+    }, { exclude: joined, key: `join_${eventId}_${joined.sort().join("_")}` });
   }
 
   // a2) Players who cancelled (left on their own, not removed by the organizer) -> tell the organizer
@@ -447,19 +459,20 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
     const when = hours < 0 ? " (cancelled after kickoff)" : hours < 2 ? ` (cancelled ${Math.max(1, Math.round(hours * 60))} min before kickoff: late cancel)` : "";
     const first = await nameOf(cancelled[0]);
     const spots = arr(after.waitingList).length ? " The waitlist was told about the open spot." : "";
-    await notify([organizer], {
+    await notify(await gameBosses(after), {
       type: "game_player_cancelled",
       senderUid: cancelled[0],
       eventId,
       title: hours < 2 ? "Late cancel ⚠️" : "Player cancelled",
       body: (cancelled.length === 1 ? `${first} can't make it to ${title}${when}.` : `${first} and ${cancelled.length - 1} more cancelled ${title}${when}.`) + spots,
-    }, { key: `left_${eventId}_${cancelled.sort().join("_")}_${Math.floor(Date.now() / 60000)}` });
+    }, { exclude: cancelled, key: `left_${eventId}_${cancelled.sort().join("_")}_${Math.floor(Date.now() / 60000)}` });
   }
 
   // b) Non-members asking to join a community game -> tell the organizer
   const beforeReq = new Set(arr(before.joinRequests).map(uidOf));
+  const bosses = await gameBosses(after);
   for (const r of arr(after.joinRequests).filter((x) => uidOf(x) && !beforeReq.has(uidOf(x)))) {
-    await notify([organizer], {
+    await notify(bosses, {
       type: "game_join_request",
       senderUid: uidOf(r),
       eventId,
@@ -509,6 +522,17 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
       title: after.capsDraft && after.capsDraft.status === "live" ? "You've been picked! 🧢" : "You've been assigned to a team 👕",
       body: `You're on ${teamName(after, idx)} for ${title}.`,
     }, { key: `team_${eventId}_${uid}_${idx}` });
+  }
+
+  // e1) Admin asked "who wants to be captain?": tell everyone going.
+  if (after.captainCall && after.captainCall.open && (!before.captainCall || before.captainCall.at !== after.captainCall.at)) {
+    await notify(arr(after.attendees).map(uidOf), {
+      type: "caps_volunteer",
+      senderUid: after.captainCall.by || organizer,
+      eventId,
+      title: "Who wants to be captain? 🧢",
+      body: `Captains will pick the teams for ${title}. Open the game and tap "Yes, me!" if you want to be one.`,
+    }, { exclude: [after.captainCall.by], key: `caps_call_${eventId}_${after.captainCall.at}` });
   }
 
   // e2) Caps mode (captains draft): tell the captains, tell whoever is on the clock, and when a picked
@@ -1993,7 +2017,7 @@ exports.refreshGameWeather = onSchedule({ schedule: "every 3 hours", timeZone: D
       const hoursAway = (kick.getTime() - Date.now()) / 3600000;   // rough (server time zone); fine for a heads-up
       const watching = !!(g.gameStatus && g.gameStatus.stormWatch === true);
       if (f.weather.storm && !watching && hoursAway > -2 && hoursAway < 30 && g.organizerId) {
-        await notify([g.organizerId], {
+        await notify(await gameBosses(g), {
           type: "game_weather",
           eventId: d.id,
           title: `Storms forecast for ${g.title || "your game"} ⛈️`,
@@ -2095,7 +2119,7 @@ async function endedGames() {
   return endedCache.games;
 }
 
-const ownGoal = (g) => /^own goal\b/i.test(String((g && typeof g === "object") ? (g.name || g.scorer || "") : (g || "")).trim());
+const ownGoal = (g) => /^(own goal|unknown scorer)\b/i.test(String((g && typeof g === "object") ? (g.name || g.scorer || "") : (g || "")).trim());
 const teamCount = (g) => {
   if (typeof g.teamsCount === "number") return g.teamsCount;
   const n = parseInt((String(g.teamsCount || "").match(/(\d+)/) || [])[1], 10);

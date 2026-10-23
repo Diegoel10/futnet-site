@@ -1,6 +1,6 @@
 // js/game-profile/comments-tab.js
 import { mutateEvent, safeAvatar, escapeHtml } from './event-store.js';
-import { renderWhatsApp, typingBubbleHtml, watchTyping, reportTyping, stopTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL, openPollComposer, POLL_PREFIX } from '../wa-chat.js';
+import { renderWhatsApp, typingBubbleHtml, watchTyping, reportTyping, stopTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText, MEDIA_LABEL, openPollComposer, POLL_PREFIX, takeReply } from '../wa-chat.js';
 
 export function renderCommentsTab(event) {
     const activeEvent = event || window.currentSelectedEvent || {};
@@ -13,7 +13,7 @@ export function renderCommentsTab(event) {
         const uid = c.uid || c.userId || c.authorId || '';
         return {
             id: 'c' + i, uid, name: c.name || c.userName || 'Player',
-            avatar: c.avatar || c.userAvatar, text: c.text || '', ms: msOf(c), time: c.timestamp, media: c.media, poll: c.poll,
+            avatar: c.avatar || c.userAvatar, text: c.text || '', ms: msOf(c), time: c.timestamp, media: c.media, poll: c.poll, replyTo: c.replyTo,
             // how the server finds this comment: its id, or "<uid>:<createdAt>" for older ones
             key: c.id || (uid && c.createdAt ? `${uid}:${c.createdAt}` : ''),
             deleted: c.deleted === true, edited: c.edited === true, reactions: c.reactions
@@ -46,7 +46,7 @@ export function renderCommentsTab(event) {
                 <div id="game-typing-bubble">${typingBubbleHtml(_commentsTyping.names)}</div>
             </div>
             <div class="bg-[#202C33] px-2 py-2 flex gap-2 items-center">
-                <input type="file" id="game-comment-file" accept="image/*,video/*" class="hidden"
+                <input type="file" id="game-comment-file" accept="image/*,video/*" multiple class="hidden"
                     onchange="handleGameCommentFile('${escapeHtml(String(eventId))}', this)">
                 <button type="button" onclick="document.getElementById('game-comment-file').click()" aria-label="Send a photo or video" title="Send a photo or video"
                     class="w-10 h-10 rounded-full text-[#8696A0] hover:text-white flex items-center justify-center shrink-0 text-lg">
@@ -111,8 +111,14 @@ window.handleGameCommentPoll = function(eventId) {
 
 // 📎 A photo or video was picked for the game's comments.
 window.handleGameCommentFile = async function(eventId, picker) {
-    const file = picker && picker.files && picker.files[0];
+    // Several at once (up to 10): one message each, the caption goes with the first.
+    const files = [...((picker && picker.files) || [])].slice(0, 10);
+    if (picker && picker.files && picker.files.length > 10) window.showToast('Sending the first 10. You can send more after.', 'info');
     if (picker) picker.value = '';
+    for (const f of files) await sendGameCommentFile(eventId, f);
+};
+
+async function sendGameCommentFile(eventId, file) {
     const targetEventId = eventId || window.activeModalEventId;
     if (!file || !targetEventId) return;
     const kind = String(file.type).startsWith('video/') ? 'video' : 'image';
@@ -131,7 +137,7 @@ window.handleGameCommentFile = async function(eventId, picker) {
     } finally {
         hideUploadProgress();
     }
-};
+}
 
 // Adds one comment. Only the comments list is changed, on top of the freshest copy of the game
 // (the old version re-saved the whole game, which failed on big games and could undo other people's changes).
@@ -151,6 +157,8 @@ async function postComment(targetEventId, text, media, poll) {
     };
     if (media) newComment.media = media;
     if (poll) newComment.poll = poll;
+    const replyTo = takeReply('game', targetEventId);
+    if (replyTo) newComment.replyTo = replyTo;
     const av = safeAvatar(profile.avatar || user.photoURL || '');   // web links only; photos come from the profile
     if (av) newComment.avatar = av;
 
@@ -169,6 +177,9 @@ async function postComment(targetEventId, text, media, poll) {
     }, 50);
     return true;
 }
+
+// Used by "Share to FutNet" (team cards / celebration cards).
+window.postGameComment = (eventId, text, media) => postComment(eventId, text, media);
 
 // ⌨️ "is typing…": shared typing rooms (nothing is written to the game itself).
 window.handleGameCommentTyping = function(eventId) {

@@ -122,6 +122,23 @@ export function renderRosterTab(event) {
 
     return `
         <div class="space-y-4 font-sans text-white">
+            ${(() => {
+                // "Who wants to be captain?" (the admin asked; shown to players going until Caps mode starts)
+                const me = String(window.currentUser?.uid || '');
+                const call = event.captainCall && event.captainCall.open && !(event.capsDraft && event.capsDraft.status === 'live');
+                if (!call || !me || !(event.attendees || []).some(a => String(a.uid) === me)) return '';
+                const yes = (event.captainVolunteers || []).map(String).includes(me);
+                const no = (event.captainNo || []).map(String).includes(me);
+                const n = (event.captainVolunteers || []).length;
+                return `<div class="bg-amber-400/10 border border-amber-400/60 rounded-[22px] p-4 space-y-3">
+                    <div class="text-sm font-black text-white">🧢 Want to be a captain?</div>
+                    <p class="text-[11px] text-white/70">Captains pick their teams before the game. ${n ? `${n} ${n === 1 ? 'player has' : 'players have'} raised their hand so far.` : 'Be the first to raise your hand!'}</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="answerCaptainCall('${event.id}', true)" class="py-2.5 rounded-xl text-xs font-black ${yes ? 'bg-amber-400 text-slate-950' : 'bg-black/50 text-white border border-white/20'}">🙋 ${yes ? "I'm in!" : 'Yes, me!'}</button>
+                        <button onclick="answerCaptainCall('${event.id}', false)" class="py-2.5 rounded-xl text-xs font-black ${no ? 'bg-white/20 text-white' : 'bg-black/50 text-white/70 border border-white/20'}">No thanks</button>
+                    </div>
+                </div>`;
+            })()}
             <!-- Team Building Tool Banner -->
             <div class="bg-[#040E13]/95 border border-[#00B4AE]/60 rounded-[22px] p-4 flex items-center justify-between shadow-[0_0_20px_rgba(0,180,174,0.2)]">
                 <div class="flex items-center gap-3">

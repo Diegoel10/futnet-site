@@ -1,7 +1,7 @@
 // js/game-profile/admin-tab.js: Complete admin panel with roster management, match tracker, and correct Firestore paths
 import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml, ownGoalLabel } from './event-store.js';
+import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
 import { adminStatusHtml } from '../game-status.js';
 import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
 import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry } from '../money-rules.js';
@@ -851,6 +851,7 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                     <select id="edit-match-add-scorer-A" class="bg-black text-white text-xs px-2.5 py-1 rounded-xl border border-white/20 font-bold">
                         <option value="">+ Add Goal Scorer</option>
                         ${t1Players.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+                        <option value="${UNKNOWN_SCORER}">🤷 Don't recall / someone else</option>
                         ${t2Players.length ? `<optgroup label="Own goal by ${escapeHtml(teamB)}">${t2Players.map(p => `<option value="${escapeHtml(ownGoalLabel(p.name))}">${escapeHtml(ownGoalLabel(p.name))}</option>`).join('')}</optgroup>` : ''}
                     </select>
                 </div>
@@ -873,6 +874,7 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                     <select id="edit-match-add-scorer-B" class="bg-black text-white text-xs px-2.5 py-1 rounded-xl border border-white/20 font-bold">
                         <option value="">+ Add Goal Scorer</option>
                         ${t2Players.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+                        <option value="${UNKNOWN_SCORER}">🤷 Don't recall / someone else</option>
                         ${t1Players.length ? `<optgroup label="Own goal by ${escapeHtml(teamA)}">${t1Players.map(p => `<option value="${escapeHtml(ownGoalLabel(p.name))}">${escapeHtml(ownGoalLabel(p.name))}</option>`).join('')}</optgroup>` : ''}
                     </select>
                 </div>
