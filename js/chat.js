@@ -195,6 +195,78 @@ function updateChatsBadge() {
     if (window.setNavBadge) window.setNavBadge('chats', n);
 }
 
+// ---- Phones: WhatsApp layout. The chat list fills the page; tapping a chat opens it full screen
+// (over the top bar and the bottom menu) with a back arrow. The phone's Back button closes it too.
+// Computers keep the side-by-side layout. Only CSS + this code: nothing else changes.
+const isPhone = () => window.matchMedia('(max-width: 767px)').matches;
+(function chatMobileCss() {
+    if (document.getElementById('chat-mobile-css')) return;
+    const st = document.createElement('style');
+    st.id = 'chat-mobile-css';
+    st.textContent = `
+    @media (max-width: 767px) {
+        #tab-chat > div:first-child { height: calc(100dvh - 215px) !important; min-height: 380px; }
+        #tab-chat:not(.chat-open) #active-chat-pane { display: none !important; }
+        #tab-chat.chat-open > div:first-child {
+            position: fixed !important; left: 0; right: 0; top: var(--chat-top, 0px); z-index: 60;
+            height: var(--chat-vh, 100dvh) !important; min-height: 0; border: 0 !important; border-radius: 0 !important;
+            display: flex !important; background: #0B141A !important; backdrop-filter: none !important;
+        }
+        #tab-chat.chat-open > div:first-child > div:first-child { display: none !important; }
+        #tab-chat.chat-open #active-chat-pane { flex: 1 1 auto; width: 100%; height: 100%; background: #0B141A; }
+        #tab-chat.chat-open #active-chat-box > div:first-child { background: #202C33; padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+        #tab-chat.chat-open #active-chat-box > form { background: #0B141A; border-top: 0; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+        #tab-chat.chat-open #active-chat-name { font-size: 16px; }
+        #tab-chat.chat-open #active-chat-input { border-radius: 9999px; background: #2A3942 !important; border: 0 !important; padding: 10px 16px; }
+        #tab-chat.chat-open #active-chat-box > form button[type=submit] { width: 46px; height: 46px; padding: 0; border-radius: 9999px; background: #00A884; color: #fff; }
+        #active-chat-input { min-width: 0; }
+        #active-chat-box > form button { flex-shrink: 0; }
+    }
+    @media (min-width: 768px) { #chat-back-btn { display: none !important; } }
+    `;
+    document.head.appendChild(st);
+})();
+function addBackButton() {
+    const head = document.querySelector('#active-chat-box > div:first-child');
+    if (!head || document.getElementById('chat-back-btn')) return;
+    const b = document.createElement('button');
+    b.id = 'chat-back-btn'; b.type = 'button'; b.setAttribute('aria-label', 'Back');
+    b.className = 'w-9 h-9 -ml-1 rounded-full flex items-center justify-center text-[#E9EDEF] shrink-0';
+    b.innerHTML = '<i class="fa-solid fa-arrow-left text-lg"></i>';
+    b.onclick = () => window.closeChatPaneMobile();
+    head.prepend(b);
+}
+// Keeps the open chat exactly the size of what you can see (so the keyboard never covers the typing box).
+function fitChat() {
+    const t = document.getElementById('tab-chat'); if (!t) return;
+    const vv = window.visualViewport;
+    t.style.setProperty('--chat-vh', vv ? `${Math.round(vv.height)}px` : '100dvh');
+    t.style.setProperty('--chat-top', vv ? `${Math.round(vv.offsetTop)}px` : '0px');
+    if (window.isChatNearBottom && window.scrollChatToBottom && window.isChatNearBottom()) window.scrollChatToBottom();
+}
+if (window.visualViewport) { window.visualViewport.addEventListener('resize', fitChat); window.visualViewport.addEventListener('scroll', fitChat); }
+window.showChatPaneMobile = function () {
+    const t = document.getElementById('tab-chat'); if (!t) return;
+    addBackButton();
+    t.classList.add('chat-open');
+    if (isPhone() && !(history.state && history.state.chatOpen)) history.pushState({ tab: 'chat', chatOpen: true }, '', '#chat');
+    fitChat();
+};
+window.closeChatPaneMobile = function (fromBackButton = false) {
+    const t = document.getElementById('tab-chat');
+    if (!t || !t.classList.contains('chat-open')) return;
+    t.classList.remove('chat-open');
+    if (window.stopCommunityChat) window.stopCommunityChat();
+    window.activeChatThreadId = null;
+    document.getElementById('active-chat-box')?.classList.add('hidden');
+    document.getElementById('no-chat-selected')?.classList.remove('hidden');
+    if (window.renderChatsList) window.renderChatsList();
+    if (!fromBackButton && history.state && history.state.chatOpen) history.back();
+};
+window.addEventListener('popstate', (e) => {
+    if (!(e.state && e.state.chatOpen)) window.closeChatPaneMobile(true);
+});
+
 window.renderChatsList = async function() {
     const query = (document.getElementById('chats-search-input')?.value || '').toLowerCase().trim();
     const container = document.getElementById('chats-threads-container');
@@ -312,6 +384,7 @@ window.openChatThread = function(id) {
     window._forceChatBottom = true;
     window.renderActiveChatMessages();
     window.renderChatsList();
+    window.showChatPaneMobile();
 };
 
 window.markThreadAsReadLocally = async function(th) {

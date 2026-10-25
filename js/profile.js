@@ -55,7 +55,7 @@ window.renderProfileTab = function() {
                         </div>
                         <div>
                             <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Favorite Position</div>
-                            <div class="text-xs font-bold text-white truncate">${position}</div>
+                            <div class="text-xs font-bold text-white truncate">${(window.positionLabelOf && window.positionLabelOf(p.positionSpot)) || position}</div>
                         </div>
                     </div>
 
@@ -271,7 +271,7 @@ window.openEditProfileModal = function() {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'edit-profile-modal';
-        modal.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto';
+        modal.className = 'fixed inset-0 z-[200] flex items-start sm:items-center justify-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto';
         document.body.appendChild(modal);
     }
 
@@ -308,19 +308,15 @@ window.openEditProfileModal = function() {
                     <input type="text" id="edit-nickname" value="${p.nickname || ''}" placeholder="Optional, leave blank if none" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Position</label>
-                        <select id="edit-position" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
-                            <option value="Forward" ${p.position === 'Forward' ? 'selected' : ''}>Forward</option>
-                            <option value="Midfielder" ${p.position === 'Midfielder' ? 'selected' : ''}>Midfielder</option>
-                            <option value="Defender" ${p.position === 'Defender' ? 'selected' : ''}>Defender</option>
-                            <option value="Goalkeeper" ${p.position === 'Goalkeeper' ? 'selected' : ''}>Goalkeeper</option>
-                        </select>
-                    </div>
+                <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-2 text-center">Favorite position</label>
+                    ${window.positionPickerHtml ? window.positionPickerHtml('ep', p.positionSpot || '', p.position2Spot || '') : ''}
+                </div>
+
+                <div class="grid grid-cols-1 gap-3">
                     <div>
                         <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Birthday</label>
-                        <input type="date" id="edit-dob" value="${p.dob || ''}" required class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
+                        <input type="date" id="edit-dob" value="${p.dob || ''}" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
                     </div>
                 </div>
 
@@ -388,7 +384,13 @@ window.handleSaveProfile = async function(e) {
     window.userProfile.lastName = document.getElementById('edit-lastname').value;
     window.userProfile.nickname = document.getElementById('edit-nickname').value.trim();
     window.userProfile.avatar = document.getElementById('edit-avatar').value;
-    window.userProfile.position = document.getElementById('edit-position').value;
+    // Favorite position from the soccer field (keeps the old value when nothing was tapped).
+    const pick = window.readPositionPicker ? window.readPositionPicker('ep') : { spot: '', spot2: '', group: '' };
+    if (pick.spot) {
+        window.userProfile.positionSpot = pick.spot;
+        window.userProfile.position2Spot = pick.spot2;
+        window.userProfile.position = pick.group;
+    }
     window.userProfile.dob = document.getElementById('edit-dob').value;
     window.userProfile.gender = document.getElementById('edit-gender').value;
 
@@ -401,7 +403,9 @@ window.handleSaveProfile = async function(e) {
             name: fullName,
             nickname: window.userProfile.nickname || '',
             avatar: window.userProfile.avatar || '',
-            position: window.userProfile.position || 'Player'
+            position: window.userProfile.position || 'Player',
+            positionSpot: window.userProfile.positionSpot || '',
+            position2Spot: window.userProfile.position2Spot || ''
         }, { merge: true });
 
         if (typeof window.showToast === 'function') window.showToast("Profile updated successfully!");

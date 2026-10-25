@@ -2,6 +2,7 @@
 import './profile.js';
 import './home.js';
 import './legal-modal.js';
+import { positionPickerHtml, readPositionPicker } from './position-picker.js';
 import { auth, db, appId } from './firebase-config.js';
 import { 
     signInWithEmailAndPassword, 
@@ -567,6 +568,7 @@ window.saveMyName = async function() {
         if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) d.name = full; });
         document.getElementById('name-prompt-modal')?.remove();
         if (window.showToast) window.showToast(`Nice to meet you, ${first}!`);
+        setTimeout(() => window.promptFinishProfileIfNeeded && window.promptFinishProfileIfNeeded(), 800);
     } catch (e) {
         console.error(e);
         if (btn) btn.disabled = false;
@@ -630,19 +632,13 @@ window.promptProfileSetupIfNeeded = function() {
             <div><label class="${lab}">Nickname (optional)</label><input id="ps-nick" placeholder="Optional, leave blank if none" value="${esc(p.nickname || '')}" class="${inp}"></div>
             <div><label class="${lab}">Email ${isApple ? '(optional)' : ''}</label><input id="ps-email" type="email" autocomplete="email" value="${esc(email)}" placeholder="${isApple ? 'Optional' : ''}" class="${inp}"></div>
             <div class="grid grid-cols-2 gap-3">
-                <div><label class="${lab}">Birthday *</label><input id="ps-dob" type="date" class="${inp}" style="background-color:#000 !important;color:#fff !important;"></div>
+                <div><label class="${lab}">Birthday (optional)</label><input id="ps-dob" type="date" class="${inp}" style="background-color:#000 !important;color:#fff !important;"></div>
                 <div><label class="${lab}">Gender</label>
                     <select id="ps-gender" class="${inp}" style="background-color:#000 !important;color:#fff !important;">
                         <option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
                     </select></div>
             </div>
-            <div><label class="${lab}">Favorite position</label>
-                <select id="ps-position" class="${inp}" style="background-color:#000 !important;color:#fff !important;">
-                    <option value="Forward">Forward (ST / LW / RW)</option>
-                    <option value="Midfielder">Midfielder (CM / CAM / CDM)</option>
-                    <option value="Defender">Defender (CB / LB / RB)</option>
-                    <option value="Goalkeeper">Goalkeeper (GK)</option>
-                </select></div>
+            <div><label class="${lab} text-center">Favorite position *</label>${positionPickerHtml('ps', p.positionSpot || '', p.position2Spot || '')}</div>
             ${canAddPassword ? `<div><label class="${lab}">Password (optional)</label>
                 <input id="ps-pass" type="password" autocomplete="new-password" placeholder="At least 6 characters" class="${inp}">
                 <p class="text-[10px] text-white/50 mt-1">Lets you also sign in with ${esc(authEmail)} and a password. Leave empty to only use ${isApple ? 'Apple' : 'Google'}.</p></div>` : ''}
@@ -671,9 +667,10 @@ window.saveProfileSetup = async function() {
     const v = (id) => (document.getElementById(id)?.value || '').trim();
     const err = (msg) => { const b = document.getElementById('ps-error'); if (b) { b.textContent = msg; b.classList.remove('hidden'); } };
     const firstName = v('ps-first'), lastName = v('ps-last'), nickname = v('ps-nick'), email = v('ps-email');
-    const dob = v('ps-dob'), gender = v('ps-gender') || 'Male', position = v('ps-position') || 'Forward';
+    const pick = readPositionPicker('ps');
+    const dob = v('ps-dob'), gender = v('ps-gender') || 'Male', position = pick.group || 'Forward';
     if (!firstName) return err('Please enter your first name.');
-    if (!dob) return err('Please pick your birthday.');
+    if (!pick.spot) return err('Tap your favorite position on the field.');
     if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right. Fix it or leave it empty.');
     const avatar = window._profileSetupAvatar || (window.userProfile && window.userProfile.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     const pass = document.getElementById('ps-pass')?.value || '';
@@ -689,9 +686,9 @@ window.saveProfileSetup = async function() {
         }
     }
     try {
-        const fields = { uid: user.uid, firstName, lastName, nickname, email, dob, gender, position, avatar, name: full, profileComplete: true };
+        const fields = { uid: user.uid, firstName, lastName, nickname, email, dob, gender, position, positionSpot: pick.spot, position2Spot: pick.spot2, avatar, name: full, profileComplete: true };
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), fields, { merge: true });
-        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full, nickname, avatar, position }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full, nickname, avatar, position, positionSpot: pick.spot, position2Spot: pick.spot2 }, { merge: true });
         window.userProfile = { ...(window.userProfile || {}), ...fields };
         if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) { d.name = full; d.avatar = avatar; d.position = position; } });
         ['nav-avatar-icon', 'mob-nav-avatar-icon'].forEach(id => { const el = document.getElementById(id); if (el) el.src = avatar; });
@@ -699,6 +696,7 @@ window.saveProfileSetup = async function() {
         document.getElementById('name-prompt-modal')?.remove();
         if (window.showToast) window.showToast(`Welcome, ${firstName}! Your profile is ready.`);
         if (typeof window.renderProfileTab === 'function') { try { window.renderProfileTab(); } catch (e) { /* not on that screen */ } }
+        setTimeout(() => window.promptFinishProfileIfNeeded && window.promptFinishProfileIfNeeded(), 800);   // still no photo: ask for it
     } catch (e) {
         console.error('Profile setup save failed:', e);
         if (btn) { btn.disabled = false; btn.textContent = 'Save & continue'; }
@@ -713,7 +711,12 @@ onAuthStateChanged(auth, async (user) => {
             const profile = await window.ensureUserProfile(user);
             if (profile) window.userProfile = profile;
             window.shrinkMySavedAvatarIfNeeded(user);
-            setTimeout(() => { if (!window.promptProfileSetupIfNeeded()) window.promptForNameIfNeeded(); }, 1200);
+            setTimeout(() => {
+                if (window.promptProfileSetupIfNeeded()) return;
+                window.promptForNameIfNeeded();
+                // Missing a favorite position or a real photo: "Finish your profile" (waits for the name / terms screens).
+                if (window.promptFinishProfileIfNeeded) window.promptFinishProfileIfNeeded();
+            }, 1200);
         } catch (e) {
             console.warn("Profile fetch deferred or offline:", e.message);
         }

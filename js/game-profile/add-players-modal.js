@@ -97,25 +97,28 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         ...(window.friendsList || []),
         ...(window.directoryList || [])
     ];
-    const onGame = new Set([...existingUids, ...(event?.waitingList || []).map(w => w.uid)].map(String));
+    // People already in this game are still listed (grayed out, can't be picked) so nobody wonders where they went.
+    const inGame = new Set(attendees.map(a => String(a.uid)));
+    const onWaitlist = new Set((event?.waitingList || []).map(w => String(w.uid)));
 
     // One entry per person; fill in a missing name/photo from any other copy of them.
     const uniquePoolMap = new Map();
     pool.forEach(p => {
-        if (!p || !p.uid || onGame.has(String(p.uid))) return;
+        if (!p || !p.uid) return;
         const key = String(p.uid);
         const prev = uniquePoolMap.get(key);
         const merged = { ...(prev || {}), ...p };
         merged.name = nameOf(p) || (prev && prev.name) || '';
         merged.avatar = (prev && prev.avatar) || p.avatar || p.photoURL || '';
+        merged._already = inGame.has(key) ? 'in' : (onWaitlist.has(key) ? 'wait' : '');
         uniquePoolMap.set(key, merged);
     });
 
     let poolArray = Array.from(uniquePoolMap.values());
 
     poolArray.sort((a, b) => {
-        let scoreA = 0;
-        let scoreB = 0;
+        let scoreA = a._already ? -100000 : 0;   // already in the game: at the bottom
+        let scoreB = b._already ? -100000 : 0;
 
         if (friendUids.has(a.uid)) scoreA += 50;
         if (friendUids.has(b.uid)) scoreB += 50;
@@ -144,6 +147,17 @@ window.renderAddPlayersList = function(eventId, queryStr) {
 
     container.innerHTML = filtered.map(u => {
         const name = u.name;
+        if (u._already) {
+            const av = safeAvatar(u.avatar || u.photoURL || '') || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+            return `
+            <div class="flex items-center justify-between py-2.5 px-3 rounded-xl opacity-45 select-none" title="Already in this game">
+                <div class="flex items-center gap-3">
+                    <img src="${escapeHtml(av)}" class="w-8 h-8 rounded-full object-cover border border-white/20 grayscale" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <div class="text-xs font-bold text-white">${escapeHtml(name)}</div>
+                </div>
+                <span class="text-[9px] font-black px-2 py-0.5 rounded border ${u._already === 'in' ? 'text-[#00F296] border-[#00F296]/40' : 'text-amber-300 border-amber-400/40'}">${u._already === 'in' ? 'Already in' : 'On waitlist'}</span>
+            </div>`;
+        }
         const realAvatar = safeAvatar(u.avatar || u.photoURL || '');   // only a real photo is saved on the roster
         const avatar = realAvatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
         const isFriend = friendUids.has(u.uid);

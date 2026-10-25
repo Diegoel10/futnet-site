@@ -345,6 +345,18 @@ function communityFormBody(c, isEdit) {
         <div>${lbl('Group description')}<textarea id="cf-desc" rows="3" class="${INPUT}" placeholder="What's your group about?">${esc(c.description || '')}</textarea></div>
         <div>${lbl('Member requirements')}<textarea id="cf-req" rows="2" class="${INPUT}" placeholder="Any rules to join?">${esc(c.requirements || '')}</textarea></div>
         <div>${lbl('Community rules')}<textarea id="cf-rules" rows="2" class="${INPUT}" placeholder="Community rules...">${esc(c.rules || '')}</textarea></div>
+        ${(() => {
+            // Welcome message: on/off switch, then the text (hidden while off). Old communities with a text count as on.
+            const on = c.welcomeEnabled === true || (c.welcomeEnabled !== false && !!c.welcomeMessage);
+            return `<div class="space-y-2">
+            <label class="flex items-center justify-between gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
+                <span><span class="block text-xs font-bold text-white">Send a welcome message</span><span class="block text-[10px] text-white/50">New members get it as a private chat from the creator, so they can reply</span></span>
+                <input id="cf-welcome-on" type="checkbox" ${on ? 'checked' : ''} onchange="document.getElementById('cf-welcome-box').classList.toggle('hidden', !this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0">
+            </label>
+            <div id="cf-welcome-box" class="${on ? '' : 'hidden'}">${lbl('Welcome message')}<textarea id="cf-welcome" rows="3" maxlength="1000" class="${INPUT}" placeholder="Hey {name}! Welcome to the group ⚽ Games are Tuesdays at 7…">${esc(c.welcomeMessage || '')}</textarea>
+                <p class="text-[10px] text-white/50 mt-1">{name} becomes their first name. Sent once to each new member.</p></div>
+            </div>`;
+        })()}
         ${isEdit ? '' : toggleRow('cf-approval', 'Require approval to join', 'Admins approve every join request', c.requireApproval !== false)}
         <button id="cf-submit" onclick="${isEdit ? `submitEditCommunity('${jsArg(c.id)}')` : 'submitCreateCommunity()'}" class="${BTN_PRIMARY} w-full py-3 text-sm">${isEdit ? 'Save Changes' : 'Create Community'}</button>`;
 }
@@ -382,6 +394,8 @@ window.submitCreateCommunity = async function() {
         description: document.getElementById('cf-desc').value.trim(),
         requirements: document.getElementById('cf-req').value.trim(),
         rules: document.getElementById('cf-rules').value.trim(),
+        welcomeMessage: (document.getElementById('cf-welcome')?.value || '').trim(),
+        welcomeEnabled: !!document.getElementById('cf-welcome-on')?.checked,
         requireApproval: document.getElementById('cf-approval').checked, creditEnabled: true,
         adminOnlyFeed: false, matchesVisibleToNonMembers: true,
         thumbnail: window._cfThumb || DEFAULT_THUMB,
@@ -411,7 +425,9 @@ window.submitEditCommunity = async function(id) {
         state: document.getElementById('cf-state').value.trim() || 'FL',
         description: document.getElementById('cf-desc').value.trim(),
         requirements: document.getElementById('cf-req').value.trim(),
-        rules: document.getElementById('cf-rules').value.trim()
+        rules: document.getElementById('cf-rules').value.trim(),
+        welcomeMessage: (document.getElementById('cf-welcome')?.value || '').trim(),
+        welcomeEnabled: !!document.getElementById('cf-welcome-on')?.checked
     };
     if (window._cfThumb) upd.thumbnail = window._cfThumb;
     try {
@@ -984,6 +1000,58 @@ function loadTop(cid) {
     return topLoading[cid];
 }
 
+// ---- "Creator" card with the admins under it (community Info + every game's info).
+// creator / admins: { uid, name, avatar }. Tapping a person opens their player card.
+const dirName = (uid) => {
+    const d = Array.isArray(window.directoryList) ? window.directoryList.find(u => String(u.uid) === String(uid)) : null;
+    return d ? (d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim() || d.nickname || '') : '';
+};
+window.creatorAdminsHtml = function ({ creator, admins = [], cid = '' }) {
+    if (!creator || (!creator.uid && !creator.name)) return '';
+    const cname = creator.name || dirName(creator.uid) || 'Creator';
+    const list = admins.filter(a => a && a.uid && String(a.uid) !== String(creator.uid));
+    const tap = (p, nm) => p.uid ? `openPlayerStatsSheet('${jsArg(p.uid)}', '${jsArg(nm)}', '', '${jsArg(cid)}')` : '';
+    return `<div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 space-y-3 shadow-xl">
+        <button onclick="${tap(creator, cname)}" class="w-full flex items-center gap-3 text-left">
+            ${avatarImg({ ...creator, name: cname }, 'w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md shrink-0')}
+            <div class="min-w-0 flex-1">
+                <span class="text-[9px] font-black text-[#00F296] uppercase tracking-wider block">Creator</span>
+                <span class="text-sm font-black text-white truncate block">${esc(cname)}</span>
+            </div>
+        </button>
+        ${list.length ? `<div class="border-t border-white/10 pt-3">
+            <div class="text-[9px] font-black text-white/50 uppercase tracking-wider mb-2">Admin${list.length === 1 ? '' : 's'}</div>
+            <div class="flex flex-wrap gap-2">${list.map(a => { const nm = a.name || dirName(a.uid) || 'Admin'; return `
+                <button onclick="${tap(a, nm)}" class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-full pl-1 pr-3 py-1">
+                    ${avatarImg({ ...a, name: nm }, 'w-6 h-6 rounded-full object-cover')}<span class="text-[11px] font-bold text-white">${esc(nm)}</span>
+                </button>`; }).join('')}</div>
+        </div>` : ''}
+    </div>`;
+};
+
+// Admins of a community for the game screens (the community page uses its own member list).
+const ADMINS = {};   // communityId -> { at, list, loading }
+window.communityAdminsList = function (cid) {
+    if (!cid) return [];
+    const e = ADMINS[cid];
+    if (!e || (!e.loading && Date.now() - e.at > 300000)) loadAdmins(cid);
+    return (e && e.list) || [];
+};
+async function loadAdmins(cid) {
+    const old = ADMINS[cid];
+    ADMINS[cid] = { at: Date.now(), list: old ? old.list : [], loading: true };
+    try {
+        const c = window.communitiesCache[cid] || {};
+        const snap = await getDocs(query(collection(db, 'artifacts', appId, 'communities', cid, 'members'), where('role', '==', 'admin')));
+        const list = snap.docs.map(d => normMember({ uid: d.id, ...d.data() })).filter(m => isAdminRole(m, c));
+        const changed = JSON.stringify(list.map(m => m.uid)) !== JSON.stringify((old && old.list || []).map(m => m.uid));
+        ADMINS[cid] = { at: Date.now(), list, loading: false };
+        // Redraw an open game's info once the admins arrive.
+        const ev = (window.eventsList || []).find(e => e.id === window.activeModalEventId);
+        if (changed && ev && ev.communityId === cid && window.activeModalTab === 'info' && (document.getElementById('tab-event-details-screen') || document.getElementById('event-detail-modal'))) window.renderEventDetailModalContent?.();
+    } catch (e) { ADMINS[cid] = { at: Date.now(), list: old ? old.list : [], loading: false }; }
+}
+
 function infoTab(c, isAdmin) {
     const section = (t, v) => v ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">${t}</div><p class="text-xs text-white/80 whitespace-pre-line leading-relaxed">${esc(v)}</p></div>` : '';
     const admins = S.members.filter(m => isAdminRole(m, c));
@@ -992,17 +1060,13 @@ function infoTab(c, isAdmin) {
     return `
         <div class="space-y-4">
             ${topHtml(c.id)}
+            ${window.creatorAdminsHtml({ creator: (() => { const cu = c.creatorId || c.adminId; return S.members.find(m => m.uid === cu) || { uid: cu, name: c.creatorName || '' }; })(), admins, cid: c.id })}
             ${section('About', c.description || (isMember ? '' : 'Join this community to view matches, announcements, and chat.'))}
             ${section('Member requirements', c.requirements)}
             <div class="bg-amber-500/10 border border-amber-400/30 rounded-xl p-3">
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-scroll mr-1"></i> Community rules</div>
                 <p class="text-xs text-white/85 whitespace-pre-line leading-relaxed">${c.rules ? esc(c.rules) : `<span class="italic text-white/50">${isAdmin ? 'No rules yet. Add them with "Edit name, info & thumbnail" in the Admin tab.' : 'The admin has not added rules yet.'}</span>`}</p>
             </div>
-            <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Admins</div>
-                <div class="flex flex-wrap gap-2">${(admins.length ? admins : [{ uid: c.adminId, name: 'Organizer' }]).map(a => `
-                    <div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-full pl-1 pr-3 py-1">
-                        ${avatarImg(a, 'w-6 h-6 rounded-full object-cover')}<span class="text-[11px] font-bold text-white">${esc(a.name || 'Admin')}</span>
-                    </div>`).join('')}</div></div>
             ${isMember ? `${isAdmin || c.adminId === me().uid ? '' : `<button onclick="leaveCommunity('${jsArg(c.id)}')" class="${BTN_DANGER} w-full">Leave Community</button>`}` : ''}
         </div>`;
 }
@@ -1383,16 +1447,63 @@ function postCard(p, c, isAdmin) {
                 return `<button onclick="voteCommunityPoll('${jsArg(p.id)}', ${i})" class="relative w-full text-left rounded-lg overflow-hidden border ${myVote === i ? 'border-[#00F296]' : 'border-white/15'} bg-black/40 px-3 py-2 text-xs text-white">
                     <span class="absolute inset-y-0 left-0 bg-[#00F296]/20" style="width:${pct}%"></span>
                     <span class="relative flex justify-between"><span>${esc(o)}</span><span class="text-white/60">${n} • ${pct}%</span></span></button>`;
-            }).join('')}</div>` : ''}
+            }).join('')}
+            ${totalVotes ? `<button onclick="showPollVoters('${jsArg(p.id)}')" class="text-[11px] font-bold text-white/60 hover:text-white underline underline-offset-2">${totalVotes} vote${totalVotes === 1 ? '' : 's'} · See who voted</button>` : ''}</div>` : ''}
         ${feedMediaHtml(p)}
         <div class="flex items-center gap-4 text-xs">
-            <button onclick="likeCommunityPost('${jsArg(p.id)}')" class="${liked ? 'text-[#00F296]' : 'text-white/60'} font-bold"><i class="fa-${liked ? 'solid' : 'regular'} fa-heart mr-1"></i>${p.likes || 0}</button>
+            <span class="flex items-center gap-1.5">
+                <button onclick="likeCommunityPost('${jsArg(p.id)}')" class="${liked ? 'text-[#00F296]' : 'text-white/60'} font-bold" aria-label="Like"><i class="fa-${liked ? 'solid' : 'regular'} fa-heart"></i></button>
+                ${(p.likedBy || []).length ? `<button onclick="showPostLikes('${jsArg(p.id)}')" class="${liked ? 'text-[#00F296]' : 'text-white/60'} font-bold underline-offset-2 hover:underline">${(p.likedBy || []).length} like${(p.likedBy || []).length === 1 ? '' : 's'}</button>` : `<span class="text-white/60 font-bold">0</span>`}
+            </span>
             <span class="text-white/60"><i class="fa-regular fa-comment mr-1"></i>${(p.comments || []).length}</span>
         </div>
         ${(p.comments || []).map(cm => `<div class="text-[11px] bg-black/30 rounded-lg px-2.5 py-1.5"><span class="font-black text-white">${esc(cm.authorName || 'Player')}</span> <span class="text-white/80">${mentionText(cm.text)}</span></div>`).join('')}
         ${!suspFrom('feed') ? `<div class="flex gap-2"><input id="cmt-${esc(p.id)}" class="${INPUT}" placeholder="Write a comment..." onkeydown="if(event.key==='Enter')addCommunityComment('${jsArg(p.id)}')"><button onclick="addCommunityComment('${jsArg(p.id)}')" class="${BTN_PRIMARY}">Send</button></div>` : ''}
     </div>`;
 }
+
+// Feed poll: who voted for each option (tap a person for their player card).
+window.showPollVoters = (postId) => {
+    const p = (S.feed || []).find(x => x.id === postId); if (!p || !p.poll) return;
+    const cid = S.activeId;
+    const votes = p.poll.votes || {};
+    const person = (u) => {
+        const m = (S.members || []).find(x => String(x.uid) === u);
+        return { uid: u, name: (m && m.name) || dirName(u) || 'Player', avatar: m && m.avatar };
+    };
+    const total = Object.keys(votes).length;
+    const groups = (p.poll.options || []).map((o, i) => {
+        const who = Object.keys(votes).filter(u => votes[u] === i).map(person);
+        return `<div class="py-2">
+            <div class="flex items-center justify-between mb-1.5"><span class="text-xs font-black text-white">${esc(o)}</span><span class="text-[11px] font-bold text-[#00F296]">${who.length} vote${who.length === 1 ? '' : 's'}</span></div>
+            ${who.length ? who.map(x => `
+                <button onclick="closeCommunityModal('poll-voters-modal'); openPlayerStatsSheet('${jsArg(x.uid)}', '${jsArg(x.name)}', '', '${jsArg(cid)}')" class="w-full flex items-center gap-2.5 py-1.5 text-left">
+                    ${avatarImg(x, 'w-8 h-8 rounded-full object-cover shrink-0')}
+                    <span class="text-xs font-bold text-white truncate">${esc(x.name)}${me() && x.uid === me().uid ? ' <span class="text-white/50 font-semibold">(you)</span>' : ''}</span>
+                </button>`).join('') : '<p class="text-[11px] text-white/40">No votes</p>'}
+        </div>`;
+    }).join('');
+    modalShell('poll-voters-modal', 'Who voted', `${esc(p.poll.question || '')} · ${total} vote${total === 1 ? '' : 's'}`, `<div class="divide-y divide-white/10">${groups}</div>`);
+};
+
+// Tap "3 likes" on a post: who liked it (photo + name; tap a person for their player card).
+window.showPostLikes = (postId) => {
+    const p = (S.feed || []).find(x => x.id === postId); if (!p) return;
+    const cid = S.activeId;
+    const uids = (p.likedBy || []).map(String);
+    const person = (u) => {
+        const m = (S.members || []).find(x => String(x.uid) === u);
+        return { uid: u, name: (m && m.name) || dirName(u) || 'Player', avatar: m && m.avatar };
+    };
+    const rows = uids.map(person).map(x => `
+        <button onclick="closeCommunityModal('post-likes-modal'); openPlayerStatsSheet('${jsArg(x.uid)}', '${jsArg(x.name)}', '', '${jsArg(cid)}')" class="w-full flex items-center gap-3 py-2 text-left">
+            ${avatarImg(x, 'w-10 h-10 rounded-full object-cover shrink-0')}
+            <span class="flex-1 min-w-0 text-sm font-bold text-white truncate">${esc(x.name)}${me() && x.uid === me().uid ? ' <span class="text-white/50 font-semibold">(you)</span>' : ''}</span>
+            <i class="fa-solid fa-heart text-[#00F296] text-xs"></i>
+        </button>`).join('');
+    modalShell('post-likes-modal', 'Liked by', `${uids.length} ${uids.length === 1 ? 'person' : 'people'}`,
+        `<div class="divide-y divide-white/10">${rows || '<p class="text-xs text-white/50 py-4 text-center">No likes yet.</p>'}</div>`);
+};
 
 // Photo or video on a post. New posts keep it in Storage (`media`); older posts saved the photo itself (`mediaUrl`).
 function feedMediaHtml(p) {
@@ -2040,6 +2151,7 @@ window.openCommunityChatThread = function(tid) {
     document.getElementById('no-chat-selected')?.classList.add('hidden');
     const box = document.getElementById('active-chat-box');
     if (box) { box.classList.remove('hidden'); box.classList.add('flex', 'flex-col', 'h-full', 'overflow-hidden'); }
+    if (window.showChatPaneMobile) window.showChatPaneMobile();   // phones: open full screen like WhatsApp
     const n = document.getElementById('active-chat-name'); if (n) n.innerText = c.name;
     const a = document.getElementById('active-chat-avatar'); if (a) a.src = safeImg(c.thumbnail, DEFAULT_THUMB);
     const sub = document.getElementById('active-chat-subtitle');

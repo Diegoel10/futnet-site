@@ -1,5 +1,7 @@
 // js/game-profile/roster-tab.js: Roster tab with reliable avatar resolution and directory mapping
 import { escapeHtml, jsArg } from './event-store.js';
+import { creditGame, costCents, dollars, hydrateWaitBalances } from '../credits.js';
+import { waitingUids, offerEligible, startMsOf } from '../money-rules.js';
 export function renderRosterTab(event) {
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
     
@@ -54,6 +56,29 @@ export function renderRosterTab(event) {
     const resolveAvatar = (att) => window.resolvePlayerAvatar(att);
 
     const currentList = window.activeRosterSubTab === 0 ? confirmedList : (window.activeRosterSubTab === 1 ? waitlistList : declinedList);
+
+    // Admins (organizer or community admin) see each waitlist player's choice, credit and spot offer.
+    const viewer = String(window.currentUser?.uid || '');
+    const isAdminViewer = !!viewer && (viewer === String(event.organizerId) || (event.communityId && (window.myCommunityRoles || {})[event.communityId] === 'admin'));
+    const waitOrder = waitingUids(event);
+    const offeredNow = window.activeRosterSubTab === 1 && isAdminViewer ? offerEligible(event, Date.now(), startMsOf(event)) : [];
+    const offerEnds = event.spotOffer && event.spotOffer.expiresAt ? Number(event.spotOffer.expiresAt) : 0;
+    const waitInfoHtml = (att) => {
+        if (window.activeRosterSubTab !== 1 || !isAdminViewer || !att.uid) return '';
+        const uid = String(att.uid);
+        const pos = waitOrder.indexOf(uid) + 1;
+        const bits = [];
+        if (pos) bits.push(`<span class="text-white/70">#${pos} in line</span>`);
+        bits.push(att.autoJoin === true ? '<span class="text-[#00F296]">⚡ Put me in automatically</span>' : '<span class="text-amber-200">🙋 Ask me first</span>');
+        if (creditGame(event) && !uid.startsWith('usr_')) {
+            const need = costCents(event, (att.guests || []).length);
+            bits.push(`<span data-wait-balance="${escapeHtml(event.communityId)}|${escapeHtml(uid)}|${need}" class="text-white/50">💳 checking credit…</span>`);
+        }
+        if (offeredNow.includes(uid)) {
+            bits.push(`<span class="text-[#00F296] font-black">🎟️ Spot offered${offerEnds && !(event.spotOffer && event.spotOffer.lastCall) ? ` · until ${new Date(offerEnds).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ' · first to confirm'}</span>`);
+        }
+        return `<div class="ml-12 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold">${bits.join('')}</div>`;
+    };
 
     const renderAttendeeCard = (att) => {
         const isPaid = att.paid === 'Paid' || att.paid === 'Credit' || att.creditPaidCents > 0;
@@ -110,6 +135,7 @@ export function renderRosterTab(event) {
                         ${statusLabel}
                     </span>
                 </div>
+                ${waitInfoHtml(att)}
                 ${guestsHtml}
             </div>
         `;
@@ -120,6 +146,7 @@ export function renderRosterTab(event) {
         ? `<div class="text-center text-xs text-white/40 py-8">${emptyMessage}</div>`
         : currentList.map(att => renderAttendeeCard(att)).join('');
 
+    if (window.activeRosterSubTab === 1 && isAdminViewer && creditGame(event)) setTimeout(() => { try { hydrateWaitBalances(); } catch (e) {} }, 0);
     return `
         <div class="space-y-4 font-sans text-white">
             ${(() => {

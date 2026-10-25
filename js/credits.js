@@ -235,8 +235,16 @@ export function memberCreditHtml(c, myDoc, myLedger) {
             <p class="text-[11px] text-white/60 mt-2">Pay a community admin and they will add it here. Game fees come out of your credit automatically when you join.</p>
         </div>
         <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">How to add credit</div>${paymentMethodsHtml(c, 0, c.adminName || 'a community admin')}</div>
-        <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">History</div>
-            <div class="space-y-1.5">${myLedger.length ? myLedger.slice(0, 30).map(l => ledgerLine(l, false)).join('') : '<p class="text-xs text-white/50 italic">No credit activity yet.</p>'}</div></div>
+        <div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2">Your full history</div>
+            ${myLedger.length ? (() => {
+                // Same view the admin sees: totals, then every add, game fee, refund and removal (newest first) with the balance after it.
+                const added = myLedger.filter(r => r.amountCents > 0).reduce((t, r) => t + r.amountCents, 0);
+                const used = myLedger.filter(r => r.amountCents < 0).reduce((t, r) => t - r.amountCents, 0);
+                return `<div class="grid grid-cols-2 gap-2 mb-2">
+                    <div class="bg-black/40 border border-white/10 rounded-xl p-2 text-center"><div class="text-[9px] font-black uppercase text-white/50">Added + refunds</div><div class="text-sm font-black text-[#00F296]">${dollars(added)}</div></div>
+                    <div class="bg-black/40 border border-white/10 rounded-xl p-2 text-center"><div class="text-[9px] font-black uppercase text-white/50">Used + removed</div><div class="text-sm font-black text-red-300">${dollars(used)}</div></div>
+                </div><div class="space-y-1.5">${myLedger.map(l => historyLine(l)).join('')}</div>`;
+            })() : '<p class="text-xs text-white/50 italic">No credit activity yet.</p>'}</div>
     </div>`;
 }
 
@@ -546,6 +554,22 @@ export async function hydrateBalances() {
             const s = await getDoc(credRef(el.getAttribute('data-credit-balance'), me.uid));
             el.textContent = dollars(s.exists() ? (s.data().balanceCents || 0) : 0);
         } catch (e) { el.textContent = '$0.00'; }
+    }
+}
+
+/** Admin waitlist view: fills <span data-wait-balance="communityId|uid|costCents"> with that player's credit
+ *  and whether it covers the game. */
+export async function hydrateWaitBalances() {
+    const spans = Array.from(document.querySelectorAll('[data-wait-balance]'));
+    for (const el of spans) {
+        const [cid, uid, need] = el.getAttribute('data-wait-balance').split('|');
+        try {
+            const s = await getDoc(credRef(cid, uid));
+            const bal = s.exists() ? (s.data().balanceCents || 0) : 0;
+            const ok = bal >= Number(need || 0);
+            el.className = ok ? 'text-[#00F296]' : 'text-amber-300';
+            el.textContent = ok ? `💳 ${dollars(bal)} credit · enough` : `💳 ${dollars(bal)} credit · needs ${dollars(Number(need || 0))}`;
+        } catch (e) { el.textContent = '💳 credit: can\'t check'; }
     }
 }
 

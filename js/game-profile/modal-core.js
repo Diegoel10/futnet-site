@@ -104,7 +104,8 @@ window.renderInfoTab = function(event) {
     const organizerId = event.organizerId ? String(event.organizerId) : '';
     const isHost = userId && organizerId && userId === organizerId;
     const isConfirmedAttendee = userId && attendeesArr.some(a => String(a.uid || a.userId || '') === userId);
-    const isConfirmed = isHost || isConfirmedAttendee;
+    // On the roster = in the list. The organizer who left the game sees "Join" again (not Leave / Manage Guests).
+    const isConfirmed = isConfirmedAttendee;
     const allowPlusOnes = event.allowPlusOnes || false;
 
     let rsvpButtonHtml = '';
@@ -173,16 +174,9 @@ window.renderInfoTab = function(event) {
                 ${rsvpButtonHtml}
             </div>
 
-            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 flex items-center justify-between shadow-xl">
-                <div class="flex items-center gap-3">
-                    <img src="${finalHostAvatar}" class="w-11 h-11 rounded-full object-cover border-2 border-[#00F296]/60 shadow-md" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                    <div>
-                        <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">ORGANIZER</span>
-                        <span class="text-sm font-black text-white">${organizerName}</span>
-                    </div>
-                </div>
-                <span class="px-3.5 py-1.5 bg-[#00F296]/15 text-[#00F296] font-black text-[10px] rounded-full border-2 border-[#00F296]/40">Organizer</span>
-            </div>
+            ${window.creatorAdminsHtml
+                ? window.creatorAdminsHtml({ creator: { uid: organizerId, name: organizerName, avatar: finalHostAvatar }, admins: window.communityAdminsList ? window.communityAdminsList(event.communityId) : [], cid: event.communityId || '' })
+                : ''}
 
             <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] px-4 py-3.5 grid grid-cols-2 gap-2 shadow-xl text-left">
                 <div class="space-y-0.5 border-r border-white/15 pr-2">

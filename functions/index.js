@@ -645,7 +645,45 @@ exports.onCommunityMemberAdded = onDocumentCreated(`${BASE}/communities/{communi
       body: `Your request to join ${cName} was accepted.`,
     }, { key: `commaccepted_${communityId}` });
   }
+
+  // Welcome message (set by the admin): a private chat from the community's creator, so they can reply.
+  // Switched off by the admin = nothing is sent (communities saved before the switch existed: on when there's a text).
+  const welcome = community.welcomeEnabled === false ? "" : String(community.welcomeMessage || "").trim();
+  const from = community.creatorId || community.adminId || "";
+  if (welcome && from && from !== uid && isRealPlayer(uid)) {
+    try {
+      await col("welcomeSent").doc(`${communityId}_${uid}`).create({ communityId, uid, at: Date.now() });   // once per person
+    } catch (e) { return; }
+    const first = String(member.name || (await nameOf(uid)) || "").trim().split(/\s+/)[0] || "there";
+    const text = welcome.replace(/\{name\}/gi, first).slice(0, 2000);
+    try { await sendServerDM(from, uid, text); } catch (e) { logger.error("welcome message failed", communityId, uid, e.message); }
+  }
 });
+
+/** A private chat message written by the server, saved exactly like the website / apps do
+ *  (directory/{uid}.chats on both people), so it shows in both Chats lists and pushes like any message. */
+async function sendServerDM(fromUid, toUid, text) {
+  const fromRef = col("directory").doc(fromUid), toRef = col("directory").doc(toUid);
+  const nameFrom = (d) => d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player";
+  const shortPic = (a) => (/^https?:\/\//i.test(String(a || "")) && String(a).length < 400 ? String(a) : "");
+  const now = Date.now();
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: DEFAULT_TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(now));
+  await db.runTransaction(async (tx) => {
+    const [a, b] = await Promise.all([tx.get(fromRef), tx.get(toRef)]);
+    const fd = a.exists ? a.data() : {}, td = b.exists ? b.data() : {};
+    const msg = { id: `msg_${now}_${Math.random().toString(36).slice(2, 9)}`, createdAt: now, senderUid: fromUid, sender: nameFrom(fd),
+      text, time, avatar: shortPic(fd.avatar), isRead: false };
+    const add = (threads, threadId, name, avatar) => {
+      const list = arr(threads).slice();
+      let t = list.find((x) => x && x.id === threadId);
+      if (!t) { t = { id: threadId, name, avatar, messages: [] }; list.push(t); }
+      t.messages = arr(t.messages).concat([msg]).slice(-100);
+      return list;
+    };
+    tx.set(fromRef, { chats: add(fd.chats, toUid, nameFrom(td), shortPic(td.avatar)) }, { merge: true });
+    tx.set(toRef, { chats: add(td.chats, fromUid, nameFrom(fd), shortPic(fd.avatar)) }, { merge: true });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Sign-in hint: after a wrong email + password, tell the login screen if this email signed up with
