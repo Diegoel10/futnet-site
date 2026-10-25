@@ -443,7 +443,7 @@ window.ensureUserProfile = function(user) {
             const empty = {
                 uid: user.uid, firstName: '', lastName: '', nickname: '', email: user.email || '',
                 gender: 'Male', dob: '1995-01-01', position: 'Forward',
-                avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+                avatar: bigProviderPhoto(user.photoURL) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
                 termsAccepted: false, profileComplete: false, createdAt: new Date().toISOString()
             };
             await setDoc(profileRef, empty, { merge: true });
@@ -469,7 +469,7 @@ window.ensureUserProfile = function(user) {
             gender: "Male",
             dob: "1995-01-01",
             position: "Forward",
-            avatar: user.photoURL || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
+            avatar: bigProviderPhoto(user.photoURL) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg',
             termsAccepted: false,
             profileComplete: false,   // the "Create your profile" screen fills in the rest
             createdAt: new Date().toISOString()
@@ -582,6 +582,15 @@ window.saveMyName = async function() {
 // Whatever the provider shared (name, email, photo) is filled in; they add birthday, gender, position.
 // Apple: email is optional (many people hide it). The screen cannot be skipped until it is saved.
 // ---------------------------------------------------------------------------------------------
+// Google / Facebook give a tiny photo (96px). Ask for a bigger one so it looks sharp on cards.
+function bigProviderPhoto(url) {
+    const u = String(url || '');
+    if (/googleusercontent\.com/.test(u)) return u.replace(/=s\d+(-c)?$/, '=s400-c');
+    if (/graph\.facebook\.com\/.+\/picture/.test(u) && !/type=/.test(u)) return u + (u.includes('?') ? '&' : '?') + 'type=large';
+    return u;
+}
+window.bigProviderPhoto = bigProviderPhoto;
+
 window.promptProfileSetupIfNeeded = function() {
     const p = window.userProfile; const user = window.currentUser;
     if (!p || !user || p.profileComplete !== false) return false;
@@ -612,24 +621,14 @@ window.promptProfileSetupIfNeeded = function() {
     m.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white my-auto">
             <div class="text-center">
+                <div class="text-[10px] font-black uppercase tracking-widest text-[#00F296]/80 mb-1">Step 1 of 2</div>
                 <h3 class="text-lg font-black">Create your profile</h3>
-                <p class="text-xs text-white/60 mt-1">Check your info and fill in the rest. Your teammates will see it.</p>
-            </div>
-            <div class="flex flex-col items-center gap-1.5">
-                <div class="relative cursor-pointer" onclick="document.getElementById('ps-photo-input').click()">
-                    <div id="ps-avatar-wrap" class="w-20 h-20 rounded-full overflow-hidden border-2 border-[#00F296] bg-black flex items-center justify-center text-2xl font-black text-[#00F296]">
-                        ${photo ? `<img id="ps-avatar-img" src="${esc(photo)}" class="w-full h-full object-cover">` : `<span id="ps-avatar-initial">${initial}</span>`}
-                    </div>
-                    <div class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[#00F296] text-slate-950 flex items-center justify-center text-xs"><i class="fa-solid fa-camera"></i></div>
-                </div>
-                <input type="file" id="ps-photo-input" accept="image/*" class="hidden" onchange="handleProfileSetupPhoto(event)">
-                <span class="text-[10px] font-bold text-white/50 uppercase tracking-wider">Profile picture</span>
+                <p class="text-xs text-white/60 mt-1">We filled in what ${isApple ? 'Apple' : 'Google'} shared. Check it and tap Next.</p>
             </div>
             <div class="grid grid-cols-2 gap-3">
                 <div><label class="${lab}">First name *</label><input id="ps-first" autocomplete="given-name" value="${esc(first)}" class="${inp}"></div>
                 <div><label class="${lab}">Last name</label><input id="ps-last" autocomplete="family-name" value="${esc(last)}" class="${inp}"></div>
             </div>
-            <div><label class="${lab}">Nickname (optional)</label><input id="ps-nick" placeholder="Optional, leave blank if none" value="${esc(p.nickname || '')}" class="${inp}"></div>
             <div><label class="${lab}">Email ${isApple ? '(optional)' : ''}</label><input id="ps-email" type="email" autocomplete="email" value="${esc(email)}" placeholder="${isApple ? 'Optional' : ''}" class="${inp}"></div>
             <div class="grid grid-cols-2 gap-3">
                 <div><label class="${lab}">Birthday (optional)</label><input id="ps-dob" type="date" class="${inp}" style="background-color:#000 !important;color:#fff !important;"></div>
@@ -638,12 +637,11 @@ window.promptProfileSetupIfNeeded = function() {
                         <option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
                     </select></div>
             </div>
-            <div><label class="${lab} text-center">Favorite position *</label>${positionPickerHtml('ps', p.positionSpot || '', p.position2Spot || '')}</div>
             ${canAddPassword ? `<div><label class="${lab}">Password (optional)</label>
                 <input id="ps-pass" type="password" autocomplete="new-password" placeholder="At least 6 characters" class="${inp}">
                 <p class="text-[10px] text-white/50 mt-1">Lets you also sign in with ${esc(authEmail)} and a password. Leave empty to only use ${isApple ? 'Apple' : 'Google'}.</p></div>` : ''}
             <div id="ps-error" class="hidden text-xs text-red-400 font-bold bg-red-950/50 border border-red-500/50 p-2 rounded-xl text-center"></div>
-            <button id="ps-save" onclick="saveProfileSetup()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm uppercase tracking-wider">Save &amp; continue</button>
+            <button id="ps-save" onclick="saveProfileSetup()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm uppercase tracking-wider">Next &rarr;</button>
         </div>`;
     document.body.appendChild(m);
     return true;
@@ -666,13 +664,11 @@ window.saveProfileSetup = async function() {
     const user = window.currentUser; if (!user) return;
     const v = (id) => (document.getElementById(id)?.value || '').trim();
     const err = (msg) => { const b = document.getElementById('ps-error'); if (b) { b.textContent = msg; b.classList.remove('hidden'); } };
-    const firstName = v('ps-first'), lastName = v('ps-last'), nickname = v('ps-nick'), email = v('ps-email');
-    const pick = readPositionPicker('ps');
-    const dob = v('ps-dob'), gender = v('ps-gender') || 'Male', position = pick.group || 'Forward';
+    const firstName = v('ps-first'), lastName = v('ps-last'), email = v('ps-email');
+    const dob = v('ps-dob'), gender = v('ps-gender') || 'Male';
     if (!firstName) return err('Please enter your first name.');
-    if (!pick.spot) return err('Tap your favorite position on the field.');
     if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right. Fix it or leave it empty.');
-    const avatar = window._profileSetupAvatar || (window.userProfile && window.userProfile.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
+    const avatar = bigProviderPhoto(window._profileSetupAvatar || (window.userProfile && window.userProfile.avatar) || user.photoURL) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     const pass = document.getElementById('ps-pass')?.value || '';
     if (pass && pass.length < 6) return err('Password needs at least 6 characters (or leave it empty).');
     const btn = document.getElementById('ps-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
@@ -680,26 +676,26 @@ window.saveProfileSetup = async function() {
     if (pass && user.email) {
         try { await linkWithCredential(user, EmailAuthProvider.credential(user.email, pass)); }
         catch (pe) {
-            if (pe.code === 'auth/weak-password') { if (btn) { btn.disabled = false; btn.textContent = 'Save & continue'; } return err('That password is too weak. Try a longer one.'); }
+            if (pe.code === 'auth/weak-password') { if (btn) { btn.disabled = false; btn.textContent = 'Next →'; } return err('That password is too weak. Try a longer one.'); }
             if (pe.code !== 'auth/provider-already-linked') console.warn('Password not added:', pe.code);
             if (pe.code === 'auth/requires-recent-login' && window.showToast) window.showToast('Password not added. You can set one later with Forgot password.', 'error');
         }
     }
     try {
-        const fields = { uid: user.uid, firstName, lastName, nickname, email, dob, gender, position, positionSpot: pick.spot, position2Spot: pick.spot2, avatar, name: full, profileComplete: true };
+        const fields = { uid: user.uid, firstName, lastName, email, dob, gender, avatar, name: full, profileComplete: true };
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), fields, { merge: true });
-        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full, nickname, avatar, position, positionSpot: pick.spot, position2Spot: pick.spot2 }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full, avatar }, { merge: true });
         window.userProfile = { ...(window.userProfile || {}), ...fields };
-        if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) { d.name = full; d.avatar = avatar; d.position = position; } });
+        if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) { d.name = full; d.avatar = avatar; } });
         ['nav-avatar-icon', 'mob-nav-avatar-icon'].forEach(id => { const el = document.getElementById(id); if (el) el.src = avatar; });
         document.getElementById('profile-setup-modal')?.remove();
         document.getElementById('name-prompt-modal')?.remove();
-        if (window.showToast) window.showToast(`Welcome, ${firstName}! Your profile is ready.`);
         if (typeof window.renderProfileTab === 'function') { try { window.renderProfileTab(); } catch (e) { /* not on that screen */ } }
-        setTimeout(() => window.promptFinishProfileIfNeeded && window.promptFinishProfileIfNeeded(), 800);   // still no photo: ask for it
+        window._fpStep2 = true;   // page 2: photo, position, nickname, foot
+        if (window.promptFinishProfileIfNeeded) window.promptFinishProfileIfNeeded();
     } catch (e) {
         console.error('Profile setup save failed:', e);
-        if (btn) { btn.disabled = false; btn.textContent = 'Save & continue'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Next →'; }
         err('Could not save. Check your connection and try again.');
     }
 };

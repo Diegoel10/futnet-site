@@ -75,7 +75,12 @@ window.renderProfileTab = function() {
                             <div class="text-[11px] text-white/60">Tap a shirt to change it. It saves right away.</div>
                         </div>
                     </div>
-                    ${window.positionPickerHtml ? window.positionPickerHtml('pf', p.positionSpot || '', p.position2Spot || '') : `<div class="text-xs font-bold text-white">${position}</div>`}
+                    ${window.positionPickerHtml ? window.positionPickerHtml('pf', p.positionSpot || '', p.position2Spot || '', p.positionSide || '', p.position2Side || '') : `<div class="text-xs font-bold text-white">${position}</div>`}
+                    <!-- Strong foot (optional): tap to save, tap again to clear -->
+                    <div class="border-t border-white/10 pt-3">
+                        <div class="text-[9px] font-black text-white/60 uppercase tracking-wider text-center mb-2">Strong foot (optional)</div>
+                        <div id="profile-foot" class="grid grid-cols-3 gap-2 max-w-[300px] mx-auto">${footButtons(p.foot)}</div>
+                    </div>
                 </div>
 
                 <!-- My Stats (js/player-stats.js) -->
@@ -359,6 +364,26 @@ window.previewProfileImage = function(event) {
     reader.readAsDataURL(file);
 };
 
+// Strong foot: Right / Left / Both (optional). Tap the chosen one again to clear it.
+function footButtons(cur) {
+    return [['right', 'Right 🦶'], ['left', '🦶 Left'], ['both', 'Both']].map(([k, label]) => `
+        <button type="button" onclick="setMyFoot('${k}')" class="py-2 rounded-xl text-xs font-black border transition ${cur === k ? 'bg-[#00F296] text-slate-950 border-[#00F296]' : 'bg-black/40 text-white/80 border-white/15'}">${label}</button>`).join('');
+}
+window.setMyFoot = async function (k) {
+    const user = window.currentUser; if (!user || !window.userProfile) return;
+    const foot = window.userProfile.foot === k ? '' : k;
+    window.userProfile.foot = foot;
+    const box = document.getElementById('profile-foot'); if (box) box.innerHTML = footButtons(foot);
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { foot }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, foot }, { merge: true });
+        if (window.showToast) window.showToast(foot ? `Saved: ${foot === 'both' ? 'both feet' : foot + ' footed'}` : 'Strong foot cleared');
+    } catch (e) {
+        console.error('foot save', e);
+        if (window.showToast) window.showToast('Could not save. Try again.', 'error');
+    }
+};
+
 // Profile page field: saves the position the moment a shirt is tapped.
 let pfTimer = null;
 window.pfOnChange = function () {
@@ -366,13 +391,13 @@ window.pfOnChange = function () {
     pfTimer = setTimeout(async () => {
         const user = window.currentUser; if (!user || !window.readPositionPicker) return;
         const pick = window.readPositionPicker('pf'); if (!pick.spot) return;
-        const fields = { positionSpot: pick.spot, position2Spot: pick.spot2, position: pick.group };
+        const fields = { positionSpot: pick.spot, positionSide: pick.side, position2Spot: pick.spot2, position2Side: pick.side2, position: pick.group };
         try {
             await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), fields, { merge: true });
             await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, ...fields }, { merge: true });
             window.userProfile = { ...(window.userProfile || {}), ...fields };
             if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) Object.assign(d, fields); });
-            if (window.showToast) window.showToast(`Saved: ${window.positionLabelOf ? window.positionLabelOf(pick.spot) : pick.spot}${pick.spot2 ? ' (also ' + pick.spot2 + ')' : ''}`);
+            if (window.showToast) window.showToast(`Saved: ${window.positionLabelOf ? window.positionLabelOf(pick.spot, pick.side) : pick.spot}${pick.spot2 ? ' (also ' + pick.spot2 + ')' : ''}`);
         } catch (e) {
             console.error('position save', e);
             if (window.showToast) window.showToast('Could not save your position. Try again.', 'error');
