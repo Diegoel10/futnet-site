@@ -8,54 +8,71 @@
 import { db, appId } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// x / y in % of the field (own goal at the bottom).
+// 4-4-2 with a defensive and an attacking mid (like the picture): x / y in % of the field, own goal at the bottom.
+// CB and CF have two shirts each (same position).
 export const POSITION_SPOTS = [
-    { k: 'ST', label: 'Striker', group: 'Forward', x: 50, y: 12 },
-    { k: 'LW', label: 'Left wing', group: 'Forward', x: 16, y: 22 },
-    { k: 'RW', label: 'Right wing', group: 'Forward', x: 84, y: 22 },
-    { k: 'CAM', label: 'Attacking mid', group: 'Midfielder', x: 50, y: 33 },
-    { k: 'CM', label: 'Central mid', group: 'Midfielder', x: 50, y: 47 },
-    { k: 'CDM', label: 'Defensive mid', group: 'Midfielder', x: 50, y: 60 },
-    { k: 'LB', label: 'Left back', group: 'Defender', x: 16, y: 70 },
-    { k: 'CB', label: 'Center back', group: 'Defender', x: 50, y: 74 },
-    { k: 'RB', label: 'Right back', group: 'Defender', x: 84, y: 70 },
+    { k: 'CF', label: 'Striker', group: 'Forward', x: 36, y: 10 },
+    { k: 'CF', label: 'Striker', group: 'Forward', x: 64, y: 10 },
+    { k: 'AM', label: 'Attacking mid', group: 'Midfielder', x: 50, y: 27 },
+    { k: 'LM', label: 'Left mid', group: 'Midfielder', x: 14, y: 40 },
+    { k: 'RM', label: 'Right mid', group: 'Midfielder', x: 86, y: 40 },
+    { k: 'DM', label: 'Defensive mid', group: 'Midfielder', x: 50, y: 55 },
+    { k: 'LB', label: 'Left back', group: 'Defender', x: 14, y: 72 },
+    { k: 'CB', label: 'Center back', group: 'Defender', x: 37, y: 72 },
+    { k: 'CB', label: 'Center back', group: 'Defender', x: 63, y: 72 },
+    { k: 'RB', label: 'Right back', group: 'Defender', x: 86, y: 72 },
     { k: 'GK', label: 'Goalkeeper', group: 'Goalkeeper', x: 50, y: 90 }
 ];
-const spotOf = (k) => POSITION_SPOTS.find(s => s.k === k) || null;
+// Spots saved by the first version of the picker still work.
+const ALIAS = { ST: 'CF', CAM: 'AM', CM: 'DM', CDM: 'DM', LW: 'LM', RW: 'RM' };
+const keyOf = (k) => ALIAS[k] || k;
+const spotOf = (k) => POSITION_SPOTS.find(s => s.k === keyOf(k)) || null;
 export const positionGroupOf = (k) => (spotOf(k) || {}).group || '';
 export const positionLabelOf = (k) => { const s = spotOf(k); return s ? `${s.k} · ${s.label}` : ''; };
 window.positionLabelOf = positionLabelOf;
+
+// A soccer shirt with the position on it.
+const shirt = (fill, stroke, text, textColor) => `
+    <svg viewBox="0 0 48 44" class="w-full h-full drop-shadow-[0_2px_3px_rgba(0,0,0,.5)]">
+        <path d="M15 3 L24 7 L33 3 L46 11 L40 20 L35 17 L35 42 L13 42 L13 17 L8 20 L2 11 Z" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>
+        <text x="24" y="31" text-anchor="middle" font-size="11" font-weight="900" font-family="system-ui,sans-serif" fill="${textColor}">${text}</text>
+    </svg>`;
 
 const PP = {};   // prefix -> { spot, spot2, mode }
 
 /** The field. `prefix` keeps several pickers apart; values are read with readPositionPicker(prefix). */
 export function positionPickerHtml(prefix, spot = '', spot2 = '') {
-    PP[prefix] = { spot: spotOf(spot) ? spot : '', spot2: spotOf(spot2) && spot2 !== spot ? spot2 : '', mode: 'main' };
+    const k1 = spotOf(spot) ? keyOf(spot) : '', k2 = spotOf(spot2) ? keyOf(spot2) : '';
+    PP[prefix] = { spot: k1, spot2: k2 && k2 !== k1 ? k2 : '', mode: 'main' };
     return `<div id="${prefix}-pp" class="space-y-2">${pickerInner(prefix)}</div>`;
 }
 window.positionPickerHtml = positionPickerHtml;
 
 function pickerInner(prefix) {
     const st = PP[prefix];
-    const line = 'absolute border-white/35';
+    const L = 'position:absolute;border:2px solid rgba(255,255,255,.75)';
     const spots = POSITION_SPOTS.map(s => {
         const main = st.spot === s.k, second = st.spot2 === s.k;
-        const cls = main ? 'bg-[#00F296] text-slate-950 border-white scale-110 shadow-[0_0_14px_rgba(0,242,150,0.8)]'
-            : second ? 'bg-amber-300 text-slate-950 border-white'
-            : 'bg-black/55 text-white border-white/60 hover:bg-black/80';
+        const look = main ? shirt('#00F296', '#ffffff', s.k, '#04130d')
+            : second ? shirt('#FCD34D', '#ffffff', s.k, '#1f1300')
+            : shirt('#c2410c', '#fdba74', s.k, '#ffffff');
         return `<button type="button" onclick="ppTap('${prefix}','${s.k}')" aria-label="${s.label}"
-            class="absolute -translate-x-1/2 -translate-y-1/2 w-11 h-11 rounded-full border-2 text-[10px] font-black transition ${cls}"
-            style="left:${s.x}%;top:${s.y}%">${s.k}</button>`;
+            class="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-11 transition ${main ? 'scale-125 z-10' : 'hover:scale-110'}"
+            style="left:${s.x}%;top:${s.y}%">${look}</button>`;
     }).join('');
     const chosen = st.spot ? spotOf(st.spot) : null;
     return `
-        <div class="relative w-full max-w-[300px] mx-auto rounded-2xl overflow-hidden border-2 border-white/30 select-none"
-             style="aspect-ratio:3/4;background:repeating-linear-gradient(0deg,#0f7a3a 0 12.5%,#11873f 12.5% 25%)">
-            <div class="${line} border-2 inset-2 rounded-md" style="position:absolute"></div>
-            <div class="${line} border-t-2 left-2 right-2" style="top:50%"></div>
-            <div class="${line} border-2 rounded-full" style="width:28%;aspect-ratio:1;left:36%;top:calc(50% - 10.5%)"></div>
-            <div class="${line} border-2 border-t-0" style="left:22%;right:22%;top:8px;height:15%"></div>
-            <div class="${line} border-2 border-b-0" style="left:22%;right:22%;bottom:8px;height:15%"></div>
+        <div class="relative w-full max-w-[320px] mx-auto rounded-2xl overflow-hidden select-none"
+             style="aspect-ratio:4/5;background:repeating-linear-gradient(0deg,#3f8f2f 0 10%,#47a034 10% 20%)">
+            <div style="${L};inset:3% 4%"></div>
+            <div style="${L};left:4%;right:4%;top:50%;border-width:2px 0 0 0"></div>
+            <div style="${L};width:24%;aspect-ratio:1;left:38%;top:50%;transform:translateY(-50%);border-radius:9999px"></div>
+            <div style="${L};left:25%;right:25%;top:3%;height:16%;border-top:0"></div>
+            <div style="${L};left:38%;right:38%;top:3%;height:6%;border-top:0"></div>
+            <div style="${L};left:25%;right:25%;bottom:3%;height:16%;border-bottom:0"></div>
+            <div style="${L};left:38%;right:38%;bottom:3%;height:6%;border-bottom:0"></div>
+            <div style="position:absolute;left:43%;right:43%;top:0;height:3%;background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 5px);opacity:.7"></div>
+            <div style="position:absolute;left:43%;right:43%;bottom:0;height:3%;background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 5px);opacity:.7"></div>
             ${spots}
         </div>
         <div class="text-center min-h-[34px]">

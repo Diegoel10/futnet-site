@@ -212,7 +212,7 @@ window.handleUnifiedRegistration = async function(event) {
     const password = document.getElementById('reg-password')?.value || '';
     const confirmPass = document.getElementById('reg-confirm')?.value || '';
     const gender = document.getElementById('reg-gender')?.value || 'Male';
-    const dob = document.getElementById('reg-dob')?.value || '1995-01-01';
+    const dob = document.getElementById('reg-dob')?.value || '';   // optional now
     const position = document.getElementById('reg-position')?.value || 'Forward';
     const errorBox = document.getElementById('signup-error-msg');
     

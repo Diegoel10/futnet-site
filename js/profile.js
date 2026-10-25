@@ -47,47 +47,35 @@ window.renderProfileTab = function() {
 
             <!-- Main Content Container (Shifted Up) -->
             <div class="px-5 space-y-3 -mt-2 relative z-20">
-                <!-- 2x2 Info Grid Cards -->
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
-                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-shield text-xs"></i>
-                        </div>
-                        <div>
-                            <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Favorite Position</div>
-                            <div class="text-xs font-bold text-white truncate">${(window.positionLabelOf && window.positionLabelOf(p.positionSpot)) || position}</div>
-                        </div>
+                <!-- Nickname / Birthday / Gender -->
+                <div class="grid grid-cols-3 gap-2">
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-2.5 space-y-1 shadow-lg backdrop-blur-md min-w-0">
+                        <div class="w-6 h-6 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-id-badge text-[10px]"></i></div>
+                        <div class="text-[8px] font-black text-white/60 uppercase tracking-wider">Nickname</div>
+                        <div class="text-[11px] font-bold text-white truncate">${nickname || '—'}</div>
                     </div>
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-2.5 space-y-1 shadow-lg backdrop-blur-md min-w-0">
+                        <div class="w-6 h-6 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-cake-candles text-[10px]"></i></div>
+                        <div class="text-[8px] font-black text-white/60 uppercase tracking-wider">Birthday</div>
+                        <div class="text-[11px] font-bold text-white truncate">${p.dob || '—'}</div>
+                    </div>
+                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-2.5 space-y-1 shadow-lg backdrop-blur-md min-w-0">
+                        <div class="w-6 h-6 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-venus-mars text-[10px]"></i></div>
+                        <div class="text-[8px] font-black text-white/60 uppercase tracking-wider">Gender</div>
+                        <div class="text-[11px] font-bold text-white truncate">${gender}</div>
+                    </div>
+                </div>
 
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
-                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-id-badge text-xs"></i>
-                        </div>
+                <!-- My position: the soccer field. Tap a shirt and it saves right away. -->
+                <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-2 shadow-lg">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-shirt text-xs"></i></div>
                         <div>
-                            <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Nickname</div>
-                            <div class="text-xs font-bold text-white truncate">${nickname || '—'}</div>
+                            <div class="text-[9px] font-black text-[#00B4AE] uppercase tracking-wider">My Position</div>
+                            <div class="text-[11px] text-white/60">Tap a shirt to change it. It saves right away.</div>
                         </div>
                     </div>
-
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
-                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-cake-candles text-xs"></i>
-                        </div>
-                        <div>
-                            <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Birthday</div>
-                            <div class="text-xs font-bold text-white truncate">${dob}</div>
-                        </div>
-                    </div>
-
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-1.5 shadow-lg backdrop-blur-md">
-                        <div class="w-7 h-7 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-venus-mars text-xs"></i>
-                        </div>
-                        <div>
-                            <div class="text-[9px] font-black text-white/60 uppercase tracking-wider">Gender</div>
-                            <div class="text-xs font-bold text-white truncate">${gender}</div>
-                        </div>
-                    </div>
+                    ${window.positionPickerHtml ? window.positionPickerHtml('pf', p.positionSpot || '', p.position2Spot || '') : `<div class="text-xs font-bold text-white">${position}</div>`}
                 </div>
 
                 <!-- My Stats (js/player-stats.js) -->
@@ -308,11 +296,6 @@ window.openEditProfileModal = function() {
                     <input type="text" id="edit-nickname" value="${p.nickname || ''}" placeholder="Optional, leave blank if none" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
                 </div>
 
-                <div>
-                    <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-2 text-center">Favorite position</label>
-                    ${window.positionPickerHtml ? window.positionPickerHtml('ep', p.positionSpot || '', p.position2Spot || '') : ''}
-                </div>
-
                 <div class="grid grid-cols-1 gap-3">
                     <div>
                         <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Birthday</label>
@@ -374,6 +357,27 @@ window.previewProfileImage = function(event) {
         img.src = e.target.result;
     };
     reader.readAsDataURL(file);
+};
+
+// Profile page field: saves the position the moment a shirt is tapped.
+let pfTimer = null;
+window.pfOnChange = function () {
+    clearTimeout(pfTimer);
+    pfTimer = setTimeout(async () => {
+        const user = window.currentUser; if (!user || !window.readPositionPicker) return;
+        const pick = window.readPositionPicker('pf'); if (!pick.spot) return;
+        const fields = { positionSpot: pick.spot, position2Spot: pick.spot2, position: pick.group };
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), fields, { merge: true });
+            await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, ...fields }, { merge: true });
+            window.userProfile = { ...(window.userProfile || {}), ...fields };
+            if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) Object.assign(d, fields); });
+            if (window.showToast) window.showToast(`Saved: ${window.positionLabelOf ? window.positionLabelOf(pick.spot) : pick.spot}${pick.spot2 ? ' (also ' + pick.spot2 + ')' : ''}`);
+        } catch (e) {
+            console.error('position save', e);
+            if (window.showToast) window.showToast('Could not save your position. Try again.', 'error');
+        }
+    }, 400);
 };
 
 window.handleSaveProfile = async function(e) {
