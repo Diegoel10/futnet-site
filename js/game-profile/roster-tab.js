@@ -123,7 +123,7 @@ export function renderRosterTab(event) {
                         <img src="${escapeHtml(safeAvatar)}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div>
                             <div class="flex items-center gap-1.5 flex-wrap">
-                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(rawName)}</span>
+                                <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(rawName)}${window.statusEmoji ? window.statusEmoji(att.uid) : ''}</span>
                                 ${window.skillBadge ? window.skillBadge(att.uid || '') : ''}
                                 ${organizerBadge}
                                 ${attendanceBadge}
@@ -280,14 +280,14 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
                 <button onclick="sendDirectMessageFromRoster(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar)" class="${GREEN} flex-1 py-3"><i class="fa-solid fa-comments"></i> Message</button>
             </div>` : ''}
             <button onclick="document.getElementById('player-profile-popup').remove(); openPlayerStatsSheet(window._popupPerson.uid, window._popupPerson.name, window._popupPerson.avatar, '${jsArg(ev.communityId || '')}')" class="${DARK} w-full py-3">
-                <i class="fa-solid fa-chart-simple text-[#00F296]"></i> View stats</button>
+                <i class="fa-solid fa-id-card text-[#00F296]"></i> View profile</button>
             <div class="flex gap-2">
                 <button onclick="document.getElementById('player-profile-popup').remove()" class="${DARK} flex-1 py-3">Close</button>
                 ${canManage && eventId ? `<button onclick="document.getElementById('player-profile-popup').remove(); openPlayerManagementModal('${jsArg(eventId)}', '${jsArg(uid)}', window._popupPerson.name)" class="${GREEN} flex-1 py-3"><i class="fa-solid fa-sliders"></i> Manage</button>` : ''}
             </div>
         </div>`;
     document.getElementById('player-popup-img').src = photo;
-    document.getElementById('player-popup-name').textContent = name;
+    document.getElementById('player-popup-name').innerHTML = escapeHtml(name) + (window.statusEmoji ? window.statusEmoji(uid) : '');
 };
 
 window.rosterCardFriend = async function(uid, accept) {

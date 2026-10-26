@@ -5,6 +5,7 @@
 import { auth } from './firebase-config.js';
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 import { cardKit } from './game-profile/celebration-cards.js';
+import { playerPageTabsHtml, mountPlayerPage } from './player-tabs.js';
 
 const call = () => httpsCallable(getFunctions(auth.app, 'us-central1'), 'playerStats');
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -228,7 +229,7 @@ window.playerStatsOpenGame = (eventId) => {
     if (window.openEventDetails) window.openEventDetails(eventId);
 };
 
-/** Full-screen player page: photo, name, stats, and Message / Add friend for other players. */
+/** Full-screen player page: photo, name, Message / Add friend, then tabs: Player info / Stats / Events / Basic info. */
 window.openPlayerStatsSheet = (uid, name, avatar, communityId = '') => {
     if (!uid) return;
     const p = personOf(uid, name, avatar);
@@ -243,18 +244,18 @@ window.openPlayerStatsSheet = (uid, name, avatar, communityId = '') => {
             <div class="flex justify-end"><button onclick="document.getElementById('player-stats-sheet').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="flex flex-col items-center text-center gap-1.5">
                 <img src="${esc(p.avatar)}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-24 h-24 rounded-full object-cover border-4 border-[#00F296] shadow-[0_0_20px_rgba(0,242,150,0.35)]">
-                <div class="text-lg font-black">${esc(p.name)}</div>
+                <div class="text-lg font-black">${esc(p.name)}${window.statusEmoji ? window.statusEmoji(uid) : ''}</div>
                 ${(p.nickname || p.position) ? `<div class="text-xs text-white/60">${esc([p.nickname, p.position].filter(Boolean).join(' · '))}</div>` : ''}
             </div>
             ${isMe ? '' : `<div class="flex gap-2">
                 ${isFriend ? '' : `<button onclick="sendFriendRequestFromRoster && sendFriendRequestFromRoster('${esc(uid)}')" class="flex-1 bg-black/60 border border-white/20 text-white font-bold py-3 rounded-xl text-xs"><i class="fa-solid fa-user-plus mr-1"></i> Add friend</button>`}
                 <button onclick="document.getElementById('player-stats-sheet').remove(); window.openDirectChat && openDirectChat('${esc(uid)}', '${esc(p.name).replace(/'/g, "\\'")}', '')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs"><i class="fa-solid fa-comments mr-1"></i> Message</button>
             </div>`}
-            <div class="text-[10px] font-black text-white/50 uppercase tracking-wider">Stats</div>
-            <div id="player-stats-sheet-box"></div>
+            ${playerPageTabsHtml()}
         </div>`;
     document.body.appendChild(m);
-    mountPlayerStats('player-stats-sheet-box', uid, { name: p.name, avatar: p.avatar, communityId });
+    // Player info / Stats / Events / Basic info (each can be hidden by the player in Settings > Privacy)
+    mountPlayerPage(uid, p.name, p.avatar, communityId);
 };
 // The Friends list already calls this
 window.viewPlayerProfile = (uid, name) => window.openPlayerStatsSheet(uid, name);

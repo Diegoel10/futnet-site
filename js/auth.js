@@ -96,30 +96,23 @@ window.showSignupScreen = function() {
     if (loginView) loginView.classList.add('hidden');
     if (signupView) signupView.classList.remove('hidden');
     
-    const signupForm = document.querySelector('#view-signup form');
-    if (signupForm && !document.getElementById('signup-avatar-preview')) {
-        const avatarWrapper = document.createElement('div');
-        avatarWrapper.className = 'flex flex-col items-center justify-center space-y-1.5 pb-2 border-b border-slate-100 mb-2';
-        avatarWrapper.innerHTML = `
-            <div class="relative group cursor-pointer" onclick="document.getElementById('signup-avatar-input').click()">
-                <img id="signup-avatar-preview" src="${window.selectedSignupAvatarUrl}" class="w-16 h-16 rounded-full object-cover bg-slate-100 border-2 border-slate-300 group-hover:border-brand shadow-sm transition">
-                <div class="absolute inset-0 bg-slate-950/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white text-xs font-bold">
-                    <i class="fa-solid fa-camera"></i>
-                </div>
-            </div>
-            <input type="file" id="signup-avatar-input" accept="image/*" class="hidden" onchange="handleSignupAvatarSelection(event)">
-            <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Choose Profile Picture</span>
-        `;
-        signupForm.insertBefore(avatarWrapper, signupForm.firstChild);
-    }
+    // Photo is asked right after signing up ("Finish your profile"), not here.
+    if (signupView) { signupView.classList.remove('fn-swap-in'); void signupView.offsetWidth; signupView.classList.add('fn-swap-in'); }
 };
 
 window.showLoginScreen = function() {
     const loginView = document.getElementById('view-login');
     const signupView = document.getElementById('view-signup');
     if (signupView) signupView.classList.add('hidden');
-    if (loginView) loginView.classList.remove('hidden');
+    if (loginView) { loginView.classList.remove('hidden'); loginView.classList.remove('fn-swap-in'); void loginView.offsetWidth; loginView.classList.add('fn-swap-in'); }
 };
+// Smooth switch between Sign in and Sign up (slide + fade, same card).
+(() => {
+    if (document.getElementById('fn-swap-css')) return;
+    const st = document.createElement('style'); st.id = 'fn-swap-css';
+    st.textContent = '@keyframes fnSwapIn{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}.fn-swap-in{animation:fnSwapIn .32s ease-out}';
+    document.head.appendChild(st);
+})();
 
 window.handleEmailAuth = async function(event) {
     event.preventDefault();
@@ -427,6 +420,9 @@ window.ensureUserProfile = function(user) {
                     nickname: d.nickname || '',
                     email: user.email || '',
                     position: d.position || 'Forward',
+                    // field position + foot picked in the iPhone/Android app
+                    positionSpot: d.positionSpot || '', positionSide: d.positionSide || '',
+                    position2Spot: d.position2Spot || '', position2Side: d.position2Side || '', foot: d.foot || '',
                     avatar: d.avatar || user.photoURL || '',
                     termsAccepted: false,
                     rebuiltFromDirectory: true

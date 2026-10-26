@@ -141,7 +141,8 @@ window.renderInfoTab = function(event) {
                         <i class="fa-solid fa-user-xmark"></i> Leave Game!
                     </button>
                     <button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3.5 rounded-2xl text-xs border-2 border-[#00F296]/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-users-gear"></i> Manage Guests
+                        ${(() => { const n = (((event.attendees || []).find(a => String(a.uid) === String(window.currentUser?.uid)) || {}).guests || []).length;
+                            return n ? `<i class="fa-solid fa-users-gear"></i> Guests (${n}) · Edit` : '<i class="fa-solid fa-user-plus"></i> Bring guest'; })()}
                     </button>
                 </div>
             `;
@@ -183,7 +184,7 @@ window.renderInfoTab = function(event) {
                     <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
                         <i class="fa-solid fa-calendar text-[#00F296]"></i> DATE
                     </div>
-                    <div class="text-xs font-bold text-white">${event.date || 'TBD'}</div>
+                    <div class="text-xs font-bold text-white">${event.date ? (window.fmtGameDate || String)(event.date) : 'TBD'}</div>
                 </div>
                 <div class="space-y-0.5 pl-2">
                     <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
@@ -1007,7 +1008,8 @@ window._openJoinGameModalCore = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event) return;
 
-    const allowPlusOnes = event.allowPlusOnes || false;
+    // Joining never asks about guests anymore: after joining, the "Bring guest" button adds them.
+    const allowPlusOnes = false;
     const maxGuests = event.plusOneLimit || 3;
     const showInfo = creditGame(event) && !joinIsOrganizer(event);
 
@@ -1514,7 +1516,7 @@ window.toggleShareDropdown = function() {
 
 function eventShareLink() {
     const id = window.currentSharedEventId;
-    return id ? `https://futnet.site/#event=${encodeURIComponent(id)}` : window.location.href;
+    return id ? `https://futnet.site/g/${encodeURIComponent(id)}` : window.location.href;   // short share link
 }
 
 window.shareToWhatsApp = function(title, location) {

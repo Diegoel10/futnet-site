@@ -623,8 +623,10 @@ async function sendToActiveChat(text, media) {
         window.chatsThreads.push(th);
     }
 
-    const senderName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || 'Player';
-    const rawAvatar = window.userProfile?.avatar || window.currentUser?.photoURL || '';
+    // A "FutNet Admin" chat (the welcome chat every new player gets): Diego's replies go out as FutNet Admin.
+    const asAdmin = th.adminThread === true && !(th.messages || []).some(m => m.senderUid === th.id && m.sender === 'FutNet Admin');
+    const senderName = asAdmin ? 'FutNet Admin' : (window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || 'Player');
+    const rawAvatar = asAdmin ? 'https://futnet.site/img/FutnetJustLogo.png' : (window.userProfile?.avatar || window.currentUser?.photoURL || '');
     // Only short web links are copied into messages (big saved photos would fill the chat record).
     const senderAvatar = /^https?:\/\//i.test(rawAvatar) && rawAvatar.length < 400 ? rawAvatar : '';
 

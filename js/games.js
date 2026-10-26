@@ -355,7 +355,7 @@ window.renderEventCardHtml = function(ev) {
                     <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                         <div class="flex items-center space-x-2">
                             <i class="fa-solid fa-calendar text-[#00F296] w-3.5"></i>
-                            <span>${ev.date || ''}</span>
+                            <span>${(window.fmtGameDate || String)(ev.date || '')}</span>
                         </div>
                         <div class="flex items-center space-x-2">
                             <i class="fa-solid fa-clock text-[#00F296] w-3.5"></i>

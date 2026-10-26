@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Share links: futnet.site/c/<link name> (community) and futnet.site/g/<game id> open the normal page -->
+    <script>(function(){var m=location.pathname.match(/^\/(c|g)\/([^\/?#]+)/);if(m){location.replace('/#'+(m[1]==='g'?'event=':'c=')+m[2]);}})();</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FutNet - Soccer Match Organizer & Scores</title>
 
@@ -351,7 +353,7 @@
                             </button>
                             <div>
                                 <h2 id="create-step-title" class="text-base sm:text-lg font-black text-white">Create New Soccer Game</h2>
-                                <p id="create-step-subtitle" class="text-white/70 text-[11px] font-medium">Step 1 of 2: Fill out basic match details.</p>
+                                <p id="create-step-subtitle" class="text-white/70 text-[11px] font-medium">Just the basics. The rest is optional.</p>
                             </div>
                         </div>
                     </div>
@@ -469,11 +471,16 @@
                                     </div>
                                 </div>
 
-                                <!-- Next Step Button -->
-                                <button type="button" onclick="setCreationStep(2)" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl transition text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
-                                    <span>Next: Description & Rules</span>
-                                    <i class="fa-solid fa-arrow-right"></i>
+                                <!-- The basics are enough: create right away. Everything else is optional. -->
+                                <button type="submit" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl transition text-xs uppercase tracking-wider shadow-[0_4px_15px_rgba(0,242,150,0.3)] flex items-center justify-center space-x-2">
+                                    <i class="fa-solid fa-paper-plane"></i>
+                                    <span>Create Game</span>
                                 </button>
+                                <button type="button" onclick="setCreationStep(2)" class="w-full bg-black/40 hover:bg-black/60 text-white font-bold py-3 rounded-2xl transition text-xs border border-white/15 flex items-center justify-center gap-2">
+                                    <span>Advanced settings (optional)</span>
+                                    <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                                </button>
+                                <p class="text-[10px] text-white/45 text-center -mt-2">Description, rules, waitlist time, plus ones</p>
                             </div>
 
                             <!-- STEP 2: Description, Rules & Plus Ones -->
@@ -650,6 +657,7 @@
 
  <!-- MAIN SCRIPT CONTROLLER -->
     <script type="module" src="js/player-stats.js"></script>
+    <script type="module" src="js/public-preview.js"></script>
     <script type="module">
         import { auth, db, appId } from './js/firebase-config.js';
         import './js/auth.js';

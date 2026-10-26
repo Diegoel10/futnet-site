@@ -151,11 +151,11 @@ window.renderCreateGameSteps = function() {
     if (currentCreationStep === 1) {
         step1El.classList.remove('hidden');
         step2El.classList.add('hidden');
-        if (subtitleEl) subtitleEl.textContent = "Step 1 of 2: Fill out basic match details.";
+        if (subtitleEl) subtitleEl.textContent = "Just the basics. The rest is optional.";
     } else {
         step1El.classList.add('hidden');
         step2El.classList.remove('hidden');
-        if (subtitleEl) subtitleEl.textContent = "Step 2 of 2: Add description, rules, and plus-ones.";
+        if (subtitleEl) subtitleEl.textContent = "Advanced settings (optional). Tap Create Game when ready.";
     }
 };
 

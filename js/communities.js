@@ -357,8 +357,38 @@ function communityFormBody(c, isEdit) {
                 <p class="text-[10px] text-white/50 mt-1">{name} becomes their first name. Sent once to each new member.</p></div>
             </div>`;
         })()}
+        ${(() => {
+            // Public share page: anyone with the link can look (no phone numbers, chat or member list), ON by default.
+            const on = c.publicPreview !== false;
+            const suggested = c.slug || slugify(c.name || '');
+            return `<div class="space-y-2">
+            <label class="flex items-center justify-between gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
+                <span><span class="block text-xs font-bold text-white">Public page (share link)</span><span class="block text-[10px] text-white/50">People without an account can see the info, games and Top scorers, then sign up to join</span></span>
+                <input id="cf-public" type="checkbox" ${on ? 'checked' : ''} class="w-5 h-5 accent-[#00F296] shrink-0">
+            </label>
+            <div>${lbl('Link name')}
+                <div class="flex items-center bg-black border border-teal-500/60 rounded-xl overflow-hidden">
+                    <span class="pl-3 pr-1 text-xs text-white/50 shrink-0">futnet.site/c/</span>
+                    <input id="cf-slug" maxlength="40" value="${esc(suggested)}" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'-')" class="flex-1 min-w-0 bg-transparent py-2.5 pr-3 text-white text-base sm:text-sm focus:outline-none" placeholder="firefighters">
+                </div>
+                <p class="text-[10px] text-white/50 mt-1">Letters, numbers and dashes. Leave empty to use a long link.</p></div>
+            </div>`;
+        })()}
         ${isEdit ? '' : toggleRow('cf-approval', 'Require approval to join', 'Admins approve every join request', c.requireApproval !== false)}
         <button id="cf-submit" onclick="${isEdit ? `submitEditCommunity('${jsArg(c.id)}')` : 'submitCreateCommunity()'}" class="${BTN_PRIMARY} w-full py-3 text-sm">${isEdit ? 'Save Changes' : 'Create Community'}</button>`;
+}
+
+const slugify = (v) => String(v || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+/** Link name from the form, checked with the server. Returns '' (no name), the name, or null (taken: toast shown). */
+async function readSlug(communityId, quietIfTaken = false) {
+    const raw = slugify(document.getElementById('cf-slug')?.value || '');
+    if (!raw) return '';
+    if (raw.length < 3) { if (!quietIfTaken) toast('Link name needs at least 3 letters', 'error'); return quietIfTaken ? '' : null; }
+    try {
+        const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'checkCommunitySlug')({ slug: raw, communityId: communityId || '' });
+        if (r.data && r.data.taken) { if (!quietIfTaken) toast(`futnet.site/c/${raw} is taken. Try another name.`, 'error'); return quietIfTaken ? '' : null; }
+        return (r.data && r.data.slug) || raw;
+    } catch (e) { return quietIfTaken ? '' : raw; }   // server not updated yet: keep the name
 }
 
 window._cfThumb = null;
@@ -386,6 +416,7 @@ window.submitCreateCommunity = async function() {
     if (!name || !city) { toast('Community name and city are required', 'error'); return; }
     S.busy = true;
     const btn = document.getElementById('cf-submit'); if (btn) btn.disabled = true;
+    const slug = await readSlug('', true);   // new community: a taken name is just skipped (long link)
     const id = 'comm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const uid = me().uid;
     const data = {
@@ -399,6 +430,7 @@ window.submitCreateCommunity = async function() {
         requireApproval: document.getElementById('cf-approval').checked, creditEnabled: true,
         adminOnlyFeed: false, matchesVisibleToNonMembers: true,
         thumbnail: window._cfThumb || DEFAULT_THUMB,
+        slug, publicPreview: document.getElementById('cf-public')?.checked !== false,
         adminId: uid, membersCount: 1, createdAt: serverTimestamp()
     };
     try {
@@ -427,8 +459,12 @@ window.submitEditCommunity = async function(id) {
         requirements: document.getElementById('cf-req').value.trim(),
         rules: document.getElementById('cf-rules').value.trim(),
         welcomeMessage: (document.getElementById('cf-welcome')?.value || '').trim(),
-        welcomeEnabled: !!document.getElementById('cf-welcome-on')?.checked
+        welcomeEnabled: !!document.getElementById('cf-welcome-on')?.checked,
+        publicPreview: document.getElementById('cf-public')?.checked !== false
     };
+    const slug = await readSlug(id);
+    if (slug === null) return;   // taken: they pick another name
+    upd.slug = slug;
     if (window._cfThumb) upd.thumbnail = window._cfThumb;
     try {
         await updateDoc(commRef(id), upd);
@@ -446,7 +482,8 @@ window.editCommunityInfo = function(id) {
 };
 
 // ------------------------------------------------------------------ SHARE
-const communityLink = (id) => `${location.origin}${location.pathname}#community=${encodeURIComponent(id)}`;
+// Short share link: futnet.site/c/<link name> (or the community id when there is no link name)
+const communityLink = (id) => `https://futnet.site/c/${encodeURIComponent((window.communitiesCache[id] || {}).slug || id)}`;
 function showShareModal(id) {
     const c = window.communitiesCache[id] || {};
     const link = communityLink(id);
@@ -1133,7 +1170,7 @@ function membersListHtml() {
         <button onclick="openMemberBox('${jsArg(m.uid)}')" class="w-full text-left flex items-center gap-3 bg-black/40 border ${isNew ? 'border-[#00F296] shadow-[0_0_12px_rgba(0,242,150,0.35)]' : 'border-white/10 hover:border-[#00F296]/50'} rounded-xl p-3 transition">
             ${avatarImg(m, 'w-11 h-11 rounded-full object-cover border border-emerald-500/40')}
             <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5"><span class="text-sm font-bold text-white truncate">${esc(name(m))}</span>
+                <div class="flex items-center gap-1.5"><span class="text-sm font-bold text-white truncate">${esc(name(m))}${window.statusEmoji ? window.statusEmoji(m.uid) : ''}</span>
                     ${isNew ? '<span class="text-[8px] font-black uppercase text-slate-950 bg-[#00F296] rounded-full px-1.5 py-0.5">New</span>' : ''}</div>
                 <div class="text-[10px] ${sc ? 'text-red-300' : 'text-white/50'} truncate">${sc ? `Suspended: ${esc(scopeLabels(sc))}` : bits.join(' • ')}</div>
             </div>
@@ -1233,6 +1270,10 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
     const mode = opts.mode === 'edit' || opts.mode === 'copy' ? opts.mode : 'create';
     const src = mode === 'create' ? null : (window.eventsList || []).find(e => e.id === opts.eventId);
     if (mode !== 'create' && !src) return;
+    // New game: start from the last game made in this community (time, park, teams, format, price, settings).
+    const last = mode === 'create' ? (window.eventsList || []).filter(e => e.communityId === communityId)
+        .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.createdAt?.seconds || b.createdAt || '').localeCompare(String(a.createdAt?.seconds || a.createdAt || '')))[0] || null : null;
+    const tpl = src || last;
     window._cgMode = { mode, eventId: opts.eventId || null };
     const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
     const to24 = (t) => {
@@ -1242,24 +1283,24 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
         if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
         return String(h).padStart(2, '0') + ':' + m[2];
     };
-    const loc = String(src?.location || '');
+    const loc = String(tpl?.location || '');
     const lm = loc.match(/^(.*?)\s*\(([^,()]*),\s*([^()]*)\)\s*$/);
-    const park0 = src ? (lm ? lm[1] : loc) : '';
-    const city0 = src ? (lm ? lm[2] : (c.city || '')) : (c.city || '');
-    const state0 = src ? (lm ? lm[3] : (c.state || 'FL')) : (c.state || 'FL');
-    const feeNow = src ? (String(src.fee || '').trim() && String(src.fee) !== '0' ? String(src.fee) : 'Free') : 'Free';
+    const park0 = tpl ? (lm ? lm[1] : loc) : '';
+    const city0 = tpl ? (lm ? lm[2] : (c.city || '')) : (c.city || '');
+    const state0 = tpl ? (lm ? lm[3] : (c.state || 'FL')) : (c.state || 'FL');
+    const feeNow = tpl ? (String(tpl.fee || '').trim() && String(tpl.fee) !== '0' ? String(tpl.fee) : 'Free') : 'Free';
     const feeOpts = ['Free', ...Array.from({ length: 14 }, (_, i) => `$${i + 2}`)]; if (!feeOpts.includes(feeNow)) feeOpts.push(feeNow);
-    const plusNow = src ? (src.allowPlusOnes ? 'Yes' : 'No') : 'No';
+    const plusNow = tpl ? (tpl.allowPlusOnes ? 'Yes' : 'No') : 'No';
     const sel = (id, opts2, cur, extra = '') => `<select id="${id}" ${extra} class="${INPUT}">${opts2.map(o => `<option ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
     const heading = mode === 'edit' ? 'Edit Game' : mode === 'copy' ? 'Copy Game' : `Create Game in ${esc(c.name)}`;
     const btnText = mode === 'edit' ? 'Save Changes' : mode === 'copy' ? 'Publish Copy' : 'Create Game';
-    const titleVal = src ? (src.title || '') : '';
+    const titleVal = tpl ? (tpl.title || '') : '';
     modalShell('community-game-modal', heading, `${esc(c.name)} · Community game`, `
         <div>${lbl('Game / event title (optional)')}<input id="cg-title" class="${INPUT}" placeholder="Soccer pick-up (default)" value="${esc(titleVal)}"></div>
-        ${toggleRow('cg-open', 'Open to non-members', 'Non-members can ask to join. The organizer or an admin approves them.', src ? src.openToNonMembers === true : true)}
+        ${toggleRow('cg-open', 'Open to non-members', 'Non-members can ask to join. The organizer or an admin approves them.', tpl ? tpl.openToNonMembers === true : true)}
         <div class="flex gap-3">
-            <div class="flex-1">${lbl('Date')}<input id="cg-date" type="date" min="${today}" value="${esc(mode === 'copy' || !src?.date ? today : src.date)}" class="${INPUT}"></div>
-            <div class="flex-1">${lbl('Time')}<input id="cg-time" type="time" value="${to24(src?.time)}" class="${INPUT}"></div>
+            <div class="flex-1">${lbl('Date')}<input id="cg-date" type="date" min="${today}" value="${esc(mode === 'edit' && src?.date ? src.date : today)}" class="${INPUT}"></div>
+            <div class="flex-1">${lbl('Time')}<input id="cg-time" type="time" value="${to24(tpl?.time)}" class="${INPUT}"></div>
         </div>
         <div class="relative">${lbl('Park & location *')}<input id="cg-park" class="${INPUT}" placeholder="Start typing a park name (required)" value="${esc(park0)}"></div>
         <div class="flex gap-3">
@@ -1267,20 +1308,31 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
             <div class="w-20">${lbl('State')}<input id="cg-state" maxlength="3" class="${INPUT}" value="${esc(state0)}"></div>
         </div>
         <div class="flex gap-3">
-            <div class="flex-1">${lbl('Teams')}${sel('cg-teams', ['2', '3', '4'], String(src?.teamsCount || 3))}</div>
-            <div class="flex-1">${lbl('Format')}${sel('cg-format', Array.from({ length: 10 }, (_, i) => `${i + 3}v${i + 3}`), src?.format || '7v7')}</div>
+            <div class="flex-1">${lbl('Teams')}${sel('cg-teams', ['2', '3', '4'], String(tpl?.teamsCount || 3))}</div>
+            <div class="flex-1">${lbl('Format')}${sel('cg-format', Array.from({ length: 10 }, (_, i) => `${i + 3}v${i + 3}`), tpl?.format || '7v7')}</div>
             <div class="flex-1">${lbl('Fee')}${sel('cg-fee', feeOpts, feeNow, 'onchange="refreshCgOptions()"')}</div>
         </div>
-        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', src ? { ...src, payWithCredit: src.payWithCredit === true, refundPolicy: src.refundPolicy || 'hours:1' } : {}) : ''}</div>
-        ${waitlistOptionsHtml('cg', src || {})}
-        <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}">${esc(src?.description || '')}</textarea></div>
-        <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}">${esc(src?.rules || '')}</textarea></div>
-        ${toggleRow('cg-accept', 'Users must accept rules to be confirmed', 'Players see the rules and the refund policy and tap "I accept" before they join.', src ? src.requireAcceptance === true : true)}
+        ${last ? `<p class="text-[10px] text-[#00F296]/80 -mt-1"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i>Filled in from your last game. Just pick the date.</p>` : ''}
+        <!-- Everything else: closed until they open it -->
+        <details id="cg-adv" class="group bg-black/30 border border-white/10 rounded-2xl" ${mode === 'edit' ? '' : ''}>
+            <summary class="list-none cursor-pointer px-3 py-3 flex items-center justify-between">
+                <span><span class="block text-xs font-black text-white">Advanced settings</span>
+                <span class="block text-[10px] text-white/50">Payment & refunds, waitlist, description, rules, plus ones${last ? ' (same as your last game)' : ''}</span></span>
+                <i class="fa-solid fa-chevron-down text-white/60 transition group-open:rotate-180"></i>
+            </summary>
+            <div class="px-3 pb-3 space-y-3">
+        <div id="cg-pay-wrap" class="hidden">${creditOn(c) ? payOptionsHtml('cg', tpl ? { ...tpl, payWithCredit: tpl.payWithCredit === true, refundPolicy: tpl.refundPolicy || 'hours:1' } : {}) : ''}</div>
+        ${waitlistOptionsHtml('cg', tpl || {})}
+        <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}">${esc(tpl?.description || '')}</textarea></div>
+        <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}">${esc(tpl?.rules || '')}</textarea></div>
+        ${toggleRow('cg-accept', 'Users must accept rules to be confirmed', 'Players see the rules and the refund policy and tap "I accept" before they join.', tpl ? tpl.requireAcceptance === true : true)}
         <div class="flex gap-3 items-end">
             <div class="flex-1">${lbl('Allow plus ones?')}${sel('cg-plus', ['No', 'Yes'], plusNow, 'onchange="refreshCgOptions()"')}</div>
-            <div class="flex-1">${lbl('Max plus ones')}${sel('cg-plus-limit', ['1', '2', '3', '4', '5', '6'], String(src?.plusOneLimit || 1))}</div>
+            <div class="flex-1">${lbl('Max plus ones')}${sel('cg-plus-limit', ['1', '2', '3', '4', '5', '6'], String(tpl?.plusOneLimit || 1))}</div>
         </div>
-        <div id="cg-p1-wrap" class="hidden">${creditOn(c) ? plusExtraHtml('cg', { plusOneExtra: src && src.plusOneExtra !== undefined ? src.plusOneExtra : 1 }) : ''}</div>
+        <div id="cg-p1-wrap" class="hidden">${creditOn(c) ? plusExtraHtml('cg', { plusOneExtra: tpl && tpl.plusOneExtra !== undefined ? tpl.plusOneExtra : 1 }) : ''}</div>
+            </div>
+        </details>
         <button id="cg-submit" onclick="submitCommunityGame('${jsArg(communityId)}')" class="${BTN_PRIMARY} w-full py-3 text-sm">${btnText}</button>`);
     attachParkPicker({ input: 'cg-park', city: 'cg-city', state: 'cg-state' });
     // A game that was already saved as both "must pay" and "open to non-members" keeps working as it is.
@@ -1940,7 +1992,7 @@ window.openMemberBox = (uid) => {
     overlay('member-box-modal', `
         <div class="relative text-center space-y-2 pt-1">
             ${avatarImg(m, 'w-24 h-24 rounded-full object-cover border-2 border-[#00F296] mx-auto')}
-            <div class="text-lg font-black">${esc(memberName(m))}</div>
+            <div class="text-lg font-black">${esc(memberName(m))}${window.statusEmoji ? window.statusEmoji(m.uid) : ''}</div>
             <div class="flex justify-center gap-2 flex-wrap">
                 <span class="text-[9px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 ${adm ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white/80'}">${String(uid) === String(c.adminId) ? 'Creator' : (adm ? 'Admin' : 'Member')}</span>
                 ${sc ? '<span class="text-[9px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 bg-red-500/30 text-red-200">Suspended</span>' : ''}
@@ -1974,7 +2026,7 @@ window.openMemberBox = (uid) => {
                 <button onclick="memberMessage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-comments mr-1"></i> Message</button>
             </div>`;
         })() : ''}
-        <button onclick="closeCommunityModal('member-box-modal'); openPlayerStatsSheet('${jsArg(uid)}', '${jsArg(memberName(m))}', '', '${jsArg(S.activeId)}')" class="${BTN_DARK} w-full py-3"><i class="fa-solid fa-chart-simple mr-1 text-[#00F296]"></i> View stats</button>
+        <button onclick="closeCommunityModal('member-box-modal'); openPlayerStatsSheet('${jsArg(uid)}', '${jsArg(memberName(m))}', '', '${jsArg(S.activeId)}')" class="${BTN_DARK} w-full py-3"><i class="fa-solid fa-id-card mr-1 text-[#00F296]"></i> View profile</button>
         <div class="flex gap-2">
             <button onclick="closeCommunityModal('member-box-modal')" class="${BTN_DARK} flex-1 py-3">Close</button>
             ${canManageMember(c, m) ? `<button onclick="openMemberManage('${jsArg(uid)}')" class="${BTN_PRIMARY} flex-1 py-3"><i class="fa-solid fa-sliders mr-1"></i> Manage</button>` : ''}

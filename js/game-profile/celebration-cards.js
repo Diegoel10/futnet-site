@@ -534,7 +534,7 @@ export async function openCelebrationCards(results, info, opts = {}) {
             <div id="celebration-cards-list" class="space-y-5"></div>
         </div>`;
     mountShareBar(m.querySelector('#cc-share-bar'), cards.map((c, i) => ({ title: c.title, file: files[i] })),
-        { eventId: opts.eventId, communityId: opts.communityId, caption: `🏆 ${info.title || 'Game'} results${info.date ? ' · ' + info.date : ''}` });
+        { eventId: opts.eventId, communityId: opts.communityId, caption: `🏆 ${info.title || 'Game'} results${info.date ? ' · ' + (window.fmtGameDate || String)(info.date) : ''}` });
     const list = m.querySelector('#celebration-cards-list');
     cards.forEach((c, i) => {
         const box = document.createElement('div');

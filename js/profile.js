@@ -4,6 +4,7 @@ import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-
 import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import './sign-in-details.js';
 import './owner-tools.js';
+import { myProfileTabsHtml } from './player-tabs.js';
 
 window.renderProfileTab = function() {
     const container = document.getElementById('tab-profile');
@@ -18,7 +19,7 @@ window.renderProfileTab = function() {
     const avatarUrl = p.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100';
 
     container.innerHTML = `
-        <div class="relative min-h-screen bg-[#01060A] text-white pb-24 overflow-y-auto">
+        <div class="relative min-h-screen bg-[#01060A] text-white pb-32 overflow-y-auto">
             <!-- Compact Stadium Header Banner -->
             <div class="relative h-[210px] w-full overflow-hidden bg-gradient-to-b from-[#031422] via-[#020b12] to-[#01060A] border-b border-[#00B4AE]/20">
                 <div class="absolute inset-0 opacity-25 bg-[radial-gradient(#00F296_1px,transparent_1px)] [background-size:16px_16px]"></div>
@@ -26,6 +27,8 @@ window.renderProfileTab = function() {
                 <!-- Top Header: Title Only -->
                 <div class="relative z-10 px-5 pt-4 flex items-center justify-between">
                     <h1 class="text-2xl font-black text-white tracking-wide">Profile</h1>
+                    <!-- Settings: edit, sign-in, privacy, log out, delete -->
+                    <button onclick="openProfileSettings()" aria-label="Settings" class="w-10 h-10 rounded-full bg-black/60 border border-[#00B3FF] text-white flex items-center justify-center shadow-[0_0_10px_rgba(0,179,255,0.5)]"><i class="fa-solid fa-gear"></i></button>
                 </div>
 
                 <!-- Avatar & Name Header -->
@@ -45,138 +48,16 @@ window.renderProfileTab = function() {
                 </div>
             </div>
 
-            <!-- Main Content Container (Shifted Up) -->
+            <!-- Tabs: Basic info / Player info / Stats / Events (js/player-tabs.js) -->
             <div class="px-5 space-y-3 -mt-2 relative z-20">
-                <!-- Nickname / Birthday / Gender -->
-                <div class="grid grid-cols-3 gap-2">
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-2.5 space-y-1 shadow-lg backdrop-blur-md min-w-0">
-                        <div class="w-6 h-6 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-id-badge text-[10px]"></i></div>
-                        <div class="text-[8px] font-black text-white/60 uppercase tracking-wider">Nickname</div>
-                        <div class="text-[11px] font-bold text-white truncate">${nickname || '—'}</div>
-                    </div>
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-2.5 space-y-1 shadow-lg backdrop-blur-md min-w-0">
-                        <div class="w-6 h-6 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-cake-candles text-[10px]"></i></div>
-                        <div class="text-[8px] font-black text-white/60 uppercase tracking-wider">Birthday</div>
-                        <div class="text-[11px] font-bold text-white truncate">${p.dob || '—'}</div>
-                    </div>
-                    <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-2.5 space-y-1 shadow-lg backdrop-blur-md min-w-0">
-                        <div class="w-6 h-6 rounded-lg bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-venus-mars text-[10px]"></i></div>
-                        <div class="text-[8px] font-black text-white/60 uppercase tracking-wider">Gender</div>
-                        <div class="text-[11px] font-bold text-white truncate">${gender}</div>
-                    </div>
-                </div>
-
-                <!-- My position: the soccer field. Tap a shirt and it saves right away. -->
-                <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-2 shadow-lg">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-shirt text-xs"></i></div>
-                        <div>
-                            <div class="text-[9px] font-black text-[#00B4AE] uppercase tracking-wider">My Position</div>
-                            <div class="text-[11px] text-white/60">Tap a shirt to change it. It saves right away.</div>
-                        </div>
-                    </div>
-                    ${window.positionPickerHtml ? window.positionPickerHtml('pf', p.positionSpot || '', p.position2Spot || '', p.positionSide || '', p.position2Side || '') : `<div class="text-xs font-bold text-white">${position}</div>`}
-                    <!-- Strong foot (optional): tap to save, tap again to clear -->
-                    <div class="border-t border-white/10 pt-3">
-                        <div class="text-[9px] font-black text-white/60 uppercase tracking-wider text-center mb-2">Strong foot (optional)</div>
-                        <div id="profile-foot" class="grid grid-cols-3 gap-2 max-w-[300px] mx-auto">${footButtons(p.foot)}</div>
-                    </div>
-                </div>
-
-                <!-- My Stats (js/player-stats.js) -->
-                <div class="bg-[#07141E]/85 border border-[#00B4AE]/40 rounded-2xl p-3 space-y-3 shadow-lg">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]"><i class="fa-solid fa-chart-simple text-xs"></i></div>
-                        <div class="text-[9px] font-black text-[#00B4AE] uppercase tracking-wider">My Stats</div>
-                    </div>
-                    <div id="profile-stats-box"></div>
-                </div>
-
-                <!-- My Games Button -->
-                <button onclick="toggleProfileEventsSection()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-futbol text-xs"></i>
-                        </div>
-                        <div class="text-left">
-                            <div class="text-[9px] font-black text-[#00B4AE] uppercase tracking-wider">My Games</div>
-                            <div class="text-xs font-bold text-white">View upcoming & previous matches.</div>
-                        </div>
-                    </div>
-                    <i id="profile-events-chevron" class="fa-solid fa-chevron-right text-[#00B4AE] text-xs"></i>
-                </button>
-
-                <!-- Collapsible Events Container with Tabs -->
-                <div id="profile-events-container" class="hidden space-y-3 bg-[#040E13] border border-white/10 rounded-2xl p-4 shadow-xl">
-                    <div class="bg-black/40 border border-white/10 p-1 rounded-xl flex items-center gap-1">
-                        <button onclick="switchProfileEventsTab('upcoming')" id="profile-tab-upcoming" class="flex-1 py-2 rounded-lg text-xs font-black transition bg-[#00F296] text-slate-950 shadow">Upcoming</button>
-                        <button onclick="switchProfileEventsTab('previous')" id="profile-tab-previous" class="flex-1 py-2 rounded-lg text-xs font-black transition text-white/60 hover:text-white">Previous</button>
-                    </div>
-                    <div id="profile-events-list-content" class="space-y-2.5 max-h-64 overflow-y-auto pr-1"></div>
-                </div>
-
-                <!-- Account Settings Section Header -->
-                <div class="pt-1">
-                    <h3 class="text-[10px] font-black text-white/50 uppercase tracking-wider">Account Settings</h3>
-                </div>
-
-                <!-- Edit Profile Details Button -->
-                <button onclick="openEditProfileModal()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
-                    <div class="flex items-center gap-3">
-                        <div class="w-7 h-7 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-pen-to-square text-xs"></i>
-                        </div>
-                        <span class="text-xs font-bold text-white">Edit Profile Details</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right text-[#00B4AE]/70 text-xs"></i>
-                </button>
-
-                <!-- Sign-in details: Google / Apple / Email & password -->
-                <button onclick="openSignInDetails()" class="w-full bg-[#07141E]/90 hover:bg-[#07141E] border border-[#00B4AE]/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
-                    <div class="flex items-center gap-3">
-                        <div class="w-7 h-7 rounded-xl bg-[#00B4AE]/20 flex items-center justify-center text-[#00B4AE]">
-                            <i class="fa-solid fa-key text-xs"></i>
-                        </div>
-                        <span class="text-xs font-bold text-white">Sign-in details</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right text-[#00B4AE]/70 text-xs"></i>
-                </button>
-
-                <div id="owner-tools-slot"></div>
-
-                <!-- Log Out Button -->
-                <button id="real-logout-btn" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-orange-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
-                    <div class="flex items-center gap-3">
-                        <div class="w-7 h-7 rounded-xl bg-orange-500/20 flex items-center justify-center text-orange-400">
-                            <i class="fa-solid fa-right-from-bracket text-xs"></i>
-                        </div>
-                        <span class="text-xs font-bold text-orange-400">Log Out</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right text-orange-400/50 text-xs"></i>
-                </button>
-
-                <!-- Delete Profile Button -->
-                <button onclick="confirmDeleteAccountPrompt()" class="w-full bg-[#260A0A]/90 hover:bg-[#260A0A] border border-red-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
-                    <div class="flex items-center gap-3">
-                        <div class="w-7 h-7 rounded-xl bg-red-500/20 flex items-center justify-center text-red-400">
-                            <i class="fa-solid fa-trash-can text-xs"></i>
-                        </div>
-                        <span class="text-xs font-bold text-red-400">Delete Profile</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right text-red-400/50 text-xs"></i>
-                </button>
+                ${myProfileTabsHtml()}
             </div>
         </div>
     `;
 
-    setTimeout(() => {
-        if (window.renderOwnerTools) window.renderOwnerTools();
-        if (window.mountPlayerStats && window.currentUser) window.mountPlayerStats('profile-stats-box', window.currentUser.uid);
-        const logoutBtn = document.getElementById('real-logout-btn');
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', window.handleLogout);
-        }
-    }, 50);
+    let tab = 'basic';
+    try { tab = localStorage.getItem('futnet.profileTab') || 'basic'; } catch (e) { /* private mode */ }
+    window.myProfileTab(tab);
 };
 
 window.profileEventsTabState = 'upcoming';
@@ -250,7 +131,7 @@ window.renderProfileEventsList = function() {
                     <span class="text-xs font-black text-white truncate">${ev.title || 'Soccer Match'}</span>
                     <span class="text-[9px] px-2 py-0.5 rounded-full font-bold bg-[#00F296]/20 text-[#00F296]">${ev.format || '7v7'}</span>
                 </div>
-                <p class="text-[10px] text-white/60 flex items-center gap-1"><i class="fa-solid fa-calendar text-[#00F296]"></i> ${ev.date || 'TBD'} • ${ev.time || ''}</p>
+                <p class="text-[10px] text-white/60 flex items-center gap-1"><i class="fa-solid fa-calendar text-[#00F296]"></i> ${ev.date ? (window.fmtGameDate || String)(ev.date) : 'TBD'} • ${ev.time || ''}</p>
             </div>
             ${window.profileEventsTabState === 'previous' ? '<span class="text-[9px] px-2 py-0.5 rounded-full font-bold bg-white/10 text-white/70 shrink-0 mr-2"><i class="fa-solid fa-flag-checkered"></i> Game ended</span>' : ''}
             <button class="bg-black/80 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg text-xs border border-white/10 shrink-0">View</button>
@@ -365,9 +246,9 @@ window.previewProfileImage = function(event) {
 };
 
 // Strong foot: Right / Left / Both (optional). Tap the chosen one again to clear it.
+window.footButtons = (cur) => footButtons(cur);
 function footButtons(cur) {
-    return [['right', 'Right 🦶'], ['left', '🦶 Left'], ['both', 'Both']].map(([k, label]) => `
-        <button type="button" onclick="setMyFoot('${k}')" class="py-2 rounded-xl text-xs font-black border transition ${cur === k ? 'bg-[#00F296] text-slate-950 border-[#00F296]' : 'bg-black/40 text-white/80 border-white/15'}">${label}</button>`).join('');
+    return window.footPill ? window.footPill(cur || '', 'setMyFoot') : '';
 }
 window.setMyFoot = async function (k) {
     const user = window.currentUser; if (!user || !window.userProfile) return;
@@ -434,7 +315,9 @@ window.handleSaveProfile = async function(e) {
             avatar: window.userProfile.avatar || '',
             position: window.userProfile.position || 'Player',
             positionSpot: window.userProfile.positionSpot || '',
-            position2Spot: window.userProfile.position2Spot || ''
+            position2Spot: window.userProfile.position2Spot || '',
+            dob: window.userProfile.dob || '',
+            gender: window.userProfile.gender || ''
         }, { merge: true });
 
         if (typeof window.showToast === 'function') window.showToast("Profile updated successfully!");

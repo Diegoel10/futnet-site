@@ -167,7 +167,7 @@ window.openSessionResults = function(eventId) {
                 <button onclick="document.getElementById('session-results-modal').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark text-sm"></i></button>
                 <div class="min-w-0">
                     <div class="text-base font-black truncate">Final results</div>
-                    <div class="text-[11px] text-white/60 truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml(ev.date || '')} · ${r.matches} match${r.matches === 1 ? '' : 'es'}</div>
+                    <div class="text-[11px] text-white/60 truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml((window.fmtGameDate || String)(ev.date || ''))} · ${r.matches} match${r.matches === 1 ? '' : 'es'}</div>
                 </div>
             </div>
             ${isCelebrationOwner() && r.winner ? `
@@ -241,7 +241,7 @@ window.openCelebration = function(eventId) {
     m.innerHTML = `
         <div class="max-w-md mx-auto px-4 pt-4 pb-10 text-center">
             <div class="flex justify-between items-center">
-                <div class="text-[11px] text-white/50 font-bold truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml(ev.date || '')}</div>
+                <div class="text-[11px] text-white/50 font-bold truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml((window.fmtGameDate || String)(ev.date || ''))}</div>
                 <button onclick="document.getElementById('celebration-modal').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center shrink-0"><i class="fa-solid fa-xmark text-sm"></i></button>
             </div>
             <button onclick="shareCelebrationCards('${escapeHtml(String(ev.id))}')" class="w-full mt-3 bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3.5 rounded-2xl text-base shadow-[0_0_20px_rgba(251,191,36,0.35)]">📸 Share images for WhatsApp</button>

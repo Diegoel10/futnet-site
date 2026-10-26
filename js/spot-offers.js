@@ -37,7 +37,7 @@ function render() {
             <div class="flex items-start justify-between gap-2">
                 <div>
                     <div class="text-sm font-black">🎉 Someone cancelled! You're up next</div>
-                    <div class="text-[11px] text-white/80">${esc(ev.title || 'Your game')} · ${esc(ev.date || '')} ${esc(ev.time || '')}</div>
+                    <div class="text-[11px] text-white/80">${esc(ev.title || 'Your game')} · ${esc((window.fmtGameDate || String)(ev.date || ''))} ${esc(ev.time || '')}</div>
                     ${ev.spotOffer.lastCall ? '<div class="text-[11px] text-amber-300 font-bold">Last call: first to confirm gets it.</div>'
                         : (exp ? `<div class="text-[11px] text-white/80">Confirm within <b class="text-[#00F296]" data-countdown="${Number(exp)}">--:--</b></div>` : '')}
                 </div>

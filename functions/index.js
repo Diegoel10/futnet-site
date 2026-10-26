@@ -662,7 +662,7 @@ exports.onCommunityMemberAdded = onDocumentCreated(`${BASE}/communities/{communi
 
 /** A private chat message written by the server, saved exactly like the website / apps do
  *  (directory/{uid}.chats on both people), so it shows in both Chats lists and pushes like any message. */
-async function sendServerDM(fromUid, toUid, text) {
+async function sendServerDM(fromUid, toUid, text, opts = {}) {
   const fromRef = col("directory").doc(fromUid), toRef = col("directory").doc(toUid);
   const nameFrom = (d) => d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player";
   const shortPic = (a) => (/^https?:\/\//i.test(String(a || "")) && String(a).length < 400 ? String(a) : "");
@@ -671,17 +671,20 @@ async function sendServerDM(fromUid, toUid, text) {
   await db.runTransaction(async (tx) => {
     const [a, b] = await Promise.all([tx.get(fromRef), tx.get(toRef)]);
     const fd = a.exists ? a.data() : {}, td = b.exists ? b.data() : {};
-    const msg = { id: `msg_${now}_${Math.random().toString(36).slice(2, 9)}`, createdAt: now, senderUid: fromUid, sender: nameFrom(fd),
-      text, time, avatar: shortPic(fd.avatar), isRead: false };
+    // opts.asName / opts.asAvatar: shown as someone else (FutNet Admin), opts.adminThread marks the chat.
+    const fromName = opts.asName || nameFrom(fd), fromPic = opts.asAvatar || shortPic(fd.avatar);
+    const msg = { id: `msg_${now}_${Math.random().toString(36).slice(2, 9)}`, createdAt: now, senderUid: fromUid, sender: fromName,
+      text, time, avatar: fromPic, isRead: false };
     const add = (threads, threadId, name, avatar) => {
       const list = arr(threads).slice();
       let t = list.find((x) => x && x.id === threadId);
       if (!t) { t = { id: threadId, name, avatar, messages: [] }; list.push(t); }
+      if (opts.adminThread) t.adminThread = true;
       t.messages = arr(t.messages).concat([msg]).slice(-100);
       return list;
     };
     tx.set(fromRef, { chats: add(fd.chats, toUid, nameFrom(td), shortPic(td.avatar)) }, { merge: true });
-    tx.set(toRef, { chats: add(td.chats, fromUid, nameFrom(fd), shortPic(fd.avatar)) }, { merge: true });
+    tx.set(toRef, { chats: add(td.chats, fromUid, fromName, fromPic) }, { merge: true });
   });
 }
 
@@ -2652,4 +2655,132 @@ exports.rebuildPlayerStats = onSchedule({ schedule: "every day 04:00", timeZone:
     }
   }
   logger.info(`Rebuilt ${n} saved stats`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Public share links: futnet.site/c/<link name> (community) and futnet.site/g/<game id>.
+// Anyone can open them, even with no account, so this sends ONLY safe info: no phone numbers,
+// no member list, no chat or feed. Admins can turn it off (community.publicPreview === false).
+// ---------------------------------------------------------------------------------------------
+const slugify = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+  .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
+async function findCommunity(key) {
+  const k = String(key || "").trim();
+  if (!k) return null;
+  const byId = await col("communities").doc(k).get().catch(() => null);
+  if (byId && byId.exists) return { id: byId.id, c: byId.data() || {} };
+  const bySlug = await col("communities").where("slug", "==", k.toLowerCase()).limit(1).get().catch(() => null);
+  if (bySlug && !bySlug.empty) return { id: bySlug.docs[0].id, c: bySlug.docs[0].data() || {} };
+  return null;
+}
+
+function publicGame(id, g, communityName) {
+  return {
+    id, title: g.title || "Soccer game", date: g.date || "", time: g.time || "", location: g.location || "",
+    format: g.format || "", price: Number(g.price) || 0, spotsLeft: rules.freeSpotsOf(g), capacity: rules.capacityOf(g),
+    going: rules.headsOf((g.attendees || []).filter((a) => (a.status || "confirmed") === "confirmed")),
+    communityId: g.communityId || "", communityName: communityName || "",
+    ended: !!g.isSessionEnded,
+  };
+}
+
+async function topScorersOf(communityId) {
+  try {
+    const { byUid } = await ratingData();
+    const rows = [];
+    for (const [u, list] of Object.entries(byUid)) {
+      const mine = list.filter((r) => r.communityId === communityId && r.attendance !== "noshow");
+      const goals = mine.reduce((s, r) => s + r.goals, 0);
+      if (goals > 0) rows.push({ uid: u, goals, games: mine.length });
+    }
+    const top = rows.sort((a, b) => (b.goals - a.goals) || (a.games - b.games)).slice(0, 5);
+    const dir = {};
+    await Promise.all(top.map((r) => col("directory").doc(r.uid).get().then((d) => { dir[r.uid] = d.data() || {}; }).catch(() => { dir[r.uid] = {}; })));
+    return top.map((r) => {
+      const d = dir[r.uid] || {};
+      const full = d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player";
+      const parts = full.split(" ");
+      // first name + last initial only (public page)
+      return { name: parts[0] + (parts[1] ? ` ${parts[1][0]}.` : ""), avatar: String(d.avatar || "").startsWith("http") ? d.avatar : "", goals: r.goals };
+    });
+  } catch (e) { return []; }
+}
+
+exports.publicPreview = onCall(async (request) => {
+  const data = request.data || {};
+  const kind = data.kind === "game" ? "game" : "community";
+  if (kind === "game") {
+    const s = await col("eventsList").doc(String(data.id || "")).get().catch(() => null);
+    if (!s || !s.exists) return { ok: false, reason: "not-found" };
+    const g = s.data() || {};
+    let cName = "";
+    if (g.communityId) {
+      const cs = await col("communities").doc(g.communityId).get().catch(() => null);
+      const c = (cs && cs.data()) || {};
+      if (c.publicPreview === false) return { ok: false, reason: "private", communityId: g.communityId };
+      cName = c.name || "";
+    }
+    return { ok: true, kind, game: publicGame(s.id, g, cName) };
+  }
+  const found = await findCommunity(data.id);
+  if (!found) return { ok: false, reason: "not-found" };
+  const { id, c } = found;
+  if (c.publicPreview === false) return { ok: false, reason: "private", id, name: c.name || "" };
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date());
+  const gs = await col("eventsList").where("communityId", "==", id).get().catch(() => null);
+  const games = (gs ? gs.docs : []).map((d) => ({ id: d.id, g: d.data() || {} }))
+    .filter(({ g }) => String(g.date || "") >= today && !g.isSessionEnded)
+    .sort((a, b) => String(a.g.date).localeCompare(String(b.g.date)) || String(a.g.time || "").localeCompare(String(b.g.time || "")))
+    .slice(0, 5).map(({ id: gid, g }) => publicGame(gid, g, c.name));
+  return {
+    ok: true, kind,
+    community: {
+      id, slug: c.slug || "", name: c.name || "Community", thumbnail: c.thumbnail || "",
+      city: c.city || "", state: c.state || "", description: c.description || "", rules: c.rules || "",
+      membersCount: Number(c.membersCount) || 0, requireApproval: c.requireApproval !== false,
+    },
+    games, topScorers: await topScorersOf(id),
+  };
+});
+
+/** Is this link name free? { slug } -> { ok, slug, taken } (signed-in admins, from Edit community) */
+exports.checkCommunitySlug = onCall(async (request) => {
+  if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
+  const slug = slugify((request.data || {}).slug);
+  const mine = String((request.data || {}).communityId || "");
+  if (slug.length < 3) return { ok: false, slug, reason: "short" };
+  const s = await col("communities").where("slug", "==", slug).limit(2).get();
+  const taken = s.docs.some((d) => d.id !== mine);
+  return { ok: !taken, slug, taken };
+});
+
+// ---------------------------------------------------------------------------------------------
+// FutNet Admin: every NEW account gets a private chat "Welcome to FutNet! ...". It is sent from
+// Diego's account (poncediego@hotmail.com) but shows as "FutNet Admin" with the logo; their replies
+// land in Diego's Chats. Sent once per person (adminWelcomed/{uid}); accounts older than 2 days are skipped.
+// ---------------------------------------------------------------------------------------------
+const FUTNET_ADMIN_EMAIL = "poncediego@hotmail.com";
+const FUTNET_ADMIN_NAME = "FutNet Admin";
+const FUTNET_ADMIN_AVATAR = "https://futnet.site/img/FutnetJustLogo.png";
+const FUTNET_ADMIN_WELCOME = "Welcome to FutNet! ⚽ Please ask me any question about the app. I'm here to help.";
+let adminUidCache = "";
+async function futnetAdminUid() {
+  if (adminUidCache) return adminUidCache;
+  try { adminUidCache = (await admin.auth().getUserByEmail(FUTNET_ADMIN_EMAIL)).uid; } catch (e) { adminUidCache = ""; }
+  return adminUidCache;
+}
+
+exports.welcomeFromAdmin = onDocumentCreated(`${BASE}/directory/{uid}`, async (event) => {
+  const uid = event.params.uid;
+  const adminUid = await futnetAdminUid();
+  if (!adminUid || uid === adminUid) return;
+  try {
+    const u = await admin.auth().getUser(uid);
+    const created = Date.parse(u.metadata.creationTime || "") || 0;
+    if (Date.now() - created > 2 * 86400000) return;   // an old account whose card was re-made: no welcome
+  } catch (e) { return; }                                // not a real login
+  try { await col("adminWelcomed").doc(uid).create({ at: Date.now() }); } catch (e) { return; }   // already welcomed
+  await new Promise((r) => setTimeout(r, 4000));         // let the sign-up finish saving the name first
+  await sendServerDM(adminUid, uid, FUTNET_ADMIN_WELCOME, { asName: FUTNET_ADMIN_NAME, asAvatar: FUTNET_ADMIN_AVATAR, adminThread: true });
 });

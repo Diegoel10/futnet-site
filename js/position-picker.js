@@ -46,9 +46,10 @@ const shirt = (fill, stroke, text, textColor) => `
 const PP = {};   // prefix -> { spot, spot2, mode }
 
 /** The field. `prefix` keeps several pickers apart; values are read with readPositionPicker(prefix). */
-export function positionPickerHtml(prefix, spot = '', spot2 = '', side = '', side2 = '') {
+export function positionPickerHtml(prefix, spot = '', spot2 = '', side = '', side2 = '', opts = {}) {
     const i1 = idOf(spot, side), i2 = idOf(spot2, side2);
-    PP[prefix] = { spot: i1, spot2: i2 && i2 !== i1 ? i2 : '', mode: 'main' };
+    // opts.readOnly: other players' pages just show it. opts.maxWidth: smaller field so a screen fits.
+    PP[prefix] = { spot: i1, spot2: i2 && i2 !== i1 ? i2 : '', mode: 'main', readOnly: !!opts.readOnly, maxWidth: opts.maxWidth || '' };
     return `<div id="${prefix}-pp" class="space-y-2">${pickerInner(prefix)}</div>`;
 }
 window.positionPickerHtml = positionPickerHtml;
@@ -60,34 +61,51 @@ function pickerInner(prefix) {
         const main = st.spot === s.id, second = st.spot2 === s.id;
         const look = main ? shirt('#00F296', '#ffffff', s.k, '#04130d')
             : second ? shirt('#FCD34D', '#ffffff', s.k, '#1f1300')
-            : shirt('#c2410c', '#fdba74', s.k, '#ffffff');
+            : shirt('#E53935', '#ffffff', s.k, '#ffffff');
+        const glow = main ? 'filter:drop-shadow(0 0 7px rgba(34,230,200,.95));' : second ? 'filter:drop-shadow(0 0 6px rgba(252,211,77,.8));' : '';
+        if (st.readOnly) return `<div class="absolute -translate-x-1/2 -translate-y-1/2 w-[15%] aspect-[48/44] ${main ? 'scale-125 z-10' : ''}" style="left:${s.x}%;top:${s.y}%;${glow}">${look}</div>`;
         return `<button type="button" onclick="ppTap('${prefix}','${s.id}')" aria-label="${s.label}${s.side ? (s.side === 'L' ? ' (left)' : ' (right)') : ''}"
-            class="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-11 transition ${main ? 'scale-125 z-10' : 'hover:scale-110'}"
-            style="left:${s.x}%;top:${s.y}%">${look}</button>`;
+            class="absolute -translate-x-1/2 -translate-y-1/2 w-[15%] aspect-[48/44] transition ${main ? 'scale-125 z-10' : 'hover:scale-110'}"
+            style="left:${s.x}%;top:${s.y}%;${glow}">${look}</button>`;
     }).join('');
     const chosen = st.spot ? byId(st.spot) : null, chosen2 = st.spot2 ? byId(st.spot2) : null;
     return `
         <div class="relative w-full max-w-[320px] mx-auto rounded-2xl overflow-hidden select-none"
-             style="aspect-ratio:4/5;background:repeating-linear-gradient(0deg,#3f8f2f 0 10%,#47a034 10% 20%)">
-            <div style="${L};inset:3% 4%"></div>
-            <div style="${L};left:4%;right:4%;top:50%;border-width:2px 0 0 0"></div>
-            <div style="${L};width:24%;aspect-ratio:1;left:38%;top:50%;transform:translateY(-50%);border-radius:9999px"></div>
-            <div style="${L};left:25%;right:25%;top:3%;height:16%;border-top:0"></div>
-            <div style="${L};left:38%;right:38%;top:3%;height:6%;border-top:0"></div>
-            <div style="${L};left:25%;right:25%;bottom:3%;height:16%;border-bottom:0"></div>
-            <div style="${L};left:38%;right:38%;bottom:3%;height:6%;border-bottom:0"></div>
-            <div style="position:absolute;left:43%;right:43%;top:0;height:3%;background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 5px);opacity:.7"></div>
-            <div style="position:absolute;left:43%;right:43%;bottom:0;height:3%;background:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 5px);opacity:.7"></div>
+             style="${st.maxWidth ? `max-width:${st.maxWidth};` : ''}border:1.5px solid rgba(0,242,150,.55);box-shadow:0 0 22px rgba(0,242,150,.3);aspect-ratio:4/5;background:#1f5a1a url('img/position_field.jpg') center / cover no-repeat">
+            <!-- A real grass field (img/position_field.jpg, cut from the team builder pitch) -->
             ${spots}
         </div>
-        <div class="text-center min-h-[34px]">
-            ${chosen ? `<div class="text-sm font-black text-[#00F296]">${positionLabelOf(chosen.k, chosen.side)}</div>` : '<div class="text-xs font-bold text-white/60">Tap your favorite position</div>'}
+        ${st.readOnly || !st.spot ? `<div class="text-center min-h-[30px] pt-1">
+            ${chosen ? `<div class="text-sm font-black text-[#00F296]">${positionLabelOf(chosen.k, chosen.side)}</div>` : `<div class="text-xs font-semibold text-white/60">${st.readOnly ? 'No position picked yet' : 'Tap your favorite position'}</div>`}
             ${chosen2 ? `<div class="text-[11px] font-bold text-amber-300">Also plays: ${positionLabelOf(chosen2.k, chosen2.side)}</div>` : ''}
-        </div>
-        ${st.spot ? `<div class="flex justify-center">
-            <button type="button" onclick="ppMode('${prefix}')" class="text-[11px] font-bold px-3 py-1.5 rounded-full border ${st.mode === 'second' ? 'border-amber-300 text-amber-300' : 'border-white/25 text-white/70'}">
-                ${st.mode === 'second' ? 'Tap a second spot (or tap here to stop)' : (st.spot2 ? 'Change "also plays"' : '+ Also plays (optional)')}</button></div>` : ''}`;
+        </div>` : `
+        <!-- 1st choice / 2nd choice: tap one, then tap a shirt -->
+        <div class="grid grid-cols-2 gap-2 max-w-[340px] mx-auto pt-1">
+            ${choiceChip(prefix, '1st choice', positionLabelOf(chosen.k, chosen.side), '', '#00F296', st.mode !== 'second', false)}
+            ${choiceChip(prefix, '2nd choice', chosen2 ? positionLabelOf(chosen2.k, chosen2.side) : '', st.mode === 'second' ? 'Tap a shirt' : '+ Add (optional)', '#FCD34D', st.mode === 'second', !!chosen2)}
+        </div>`}`;
 }
+
+function choiceChip(prefix, title, value, placeholder, color, active, canClear) {
+    const second = title.startsWith('2');
+    return `<div onclick="ppChoice('${prefix}', ${second})" class="relative cursor-pointer rounded-xl px-2.5 py-1.5 text-left min-h-[44px] transition"
+        style="border:${active ? 1.5 : 1}px solid ${active ? color : 'rgba(255,255,255,.15)'};background:${active ? color + '24' : 'rgba(0,0,0,.35)'}">
+        <div class="text-[9px] font-black uppercase tracking-wider" style="color:${color}">${title}</div>
+        <div class="text-[11px] font-bold truncate ${value ? 'text-white' : 'text-white/50'} pr-4">${value || placeholder}</div>
+        ${canClear ? `<button type="button" onclick="event.stopPropagation(); ppClearSecond('${prefix}')" aria-label="Remove 2nd choice" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/50"><i class="fa-solid fa-circle-xmark"></i></button>` : ''}
+    </div>`;
+}
+window.ppChoice = (prefix, second) => {
+    const st = PP[prefix]; if (!st) return;
+    st.mode = second ? 'second' : 'main';
+    const box = document.getElementById(`${prefix}-pp`); if (box) box.innerHTML = pickerInner(prefix);
+};
+window.ppClearSecond = (prefix) => {
+    const st = PP[prefix]; if (!st) return;
+    st.spot2 = ''; st.mode = 'main';
+    const box = document.getElementById(`${prefix}-pp`); if (box) box.innerHTML = pickerInner(prefix);
+    if (typeof window[`${prefix}OnChange`] === 'function') window[`${prefix}OnChange`]();
+};
 
 window.ppTap = (prefix, k) => {
     const st = PP[prefix]; if (!st) return;
@@ -140,47 +158,54 @@ window.promptFinishProfileIfNeeded = function () {
     window._fpFoot = p.foot || '';
     const m = document.createElement('div');
     m.id = 'finish-profile-modal';
-    m.className = 'fixed inset-0 z-[185] flex items-start sm:items-center justify-center bg-black/90 p-4 backdrop-blur-md overflow-y-auto';
+    m.className = 'fixed inset-0 z-[185] flex items-start sm:items-center justify-center px-4 py-3 overflow-y-auto';
+    // Stadium lights at the top + soft teal glow (pictures the site already has)
+    m.style.background = "radial-gradient(ellipse at 50% 45%, rgba(34,230,200,.14), transparent 60%), linear-gradient(to bottom, rgba(3,10,18,.55), #030A12 260px), url('img/Background_Login.jpg') top center / cover no-repeat, #030A12";
+    const sec = (t, opt) => `<div class="flex items-center gap-2.5 px-6"><span class="flex-1 h-px bg-[#22E6C8]/60"></span>
+        <span class="text-[13px] font-black tracking-wider text-[#22E6C8] whitespace-nowrap">${t}${opt ? '<span class="font-semibold opacity-75"> (OPTIONAL)</span>' : ''}</span><span class="flex-1 h-px bg-[#22E6C8]/60"></span></div>`;
+    const quick = !(isNew || step2);
     m.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-white my-auto">
-            <div class="text-center">
-                ${step2 ? '<div class="text-[10px] font-black uppercase tracking-widest text-[#00F296]/80 mb-1">Step 2 of 2</div>' : ''}
-                <h3 class="text-lg font-black">${isNew || step2 ? 'Finish your profile' : `Quick check, ${esc(first)} ✅`}</h3>
-                <p class="text-xs text-white/60 mt-1">Your photo and position show on rosters, teams and cards.</p>
+        <div class="max-w-sm w-full space-y-2.5 text-white my-auto">
+            <div class="text-center space-y-1">
+                <img src="img/FutNetLogo.png" alt="FutNet" class="h-9 mx-auto object-contain" onerror="this.style.display='none'">
+                ${step2 ? '<div class="text-[10px] font-black uppercase tracking-widest text-[#22E6C8]/85">Step 2 of 2</div>' : ''}
+                <h3 class="text-[23px] leading-tight font-black italic" style="text-shadow:0 0 14px rgba(34,230,200,.35)">${quick ? `QUICK <span class="text-[#22E6C8]">CHECK ✅</span>` : `FINISH YOUR <span class="text-[#22E6C8]">PROFILE</span>`}</h3>
             </div>
-            <div class="flex flex-col items-center gap-1.5">
-                <div class="relative cursor-pointer" onclick="document.getElementById('fp-photo-input').click()">
-                    <div id="fp-avatar-wrap" class="w-24 h-24 rounded-full overflow-hidden border-2 ${window._fpAvatar ? 'border-[#00F296]' : 'border-dashed border-amber-300'} bg-black flex items-center justify-center">
-                        ${window._fpAvatar ? `<img src="${esc(window._fpAvatar)}" class="w-full h-full object-cover">` : '<i class="fa-solid fa-camera text-2xl text-amber-300"></i>'}
+            <div class="flex items-center gap-3.5">
+                <div class="relative cursor-pointer shrink-0" onclick="document.getElementById('fp-photo-input').click()">
+                    <div id="fp-avatar-wrap" class="w-[62px] h-[62px] rounded-full overflow-hidden border-2 border-[#22E6C8] bg-[#0b1620] flex items-center justify-center shadow-[0_0_14px_rgba(34,230,200,.55)]">
+                        ${window._fpAvatar ? `<img src="${esc(window._fpAvatar)}" class="w-full h-full object-cover">` : '<i class="fa-solid fa-camera text-2xl text-white/40"></i>'}
                     </div>
-                    <div class="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-[#00F296] text-slate-950 flex items-center justify-center text-xs"><i class="fa-solid fa-camera"></i></div>
+                    <div class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[#22E6C8] text-slate-950 flex items-center justify-center text-[11px]"><i class="fa-solid fa-camera"></i></div>
                 </div>
                 <input type="file" id="fp-photo-input" accept="image/*" class="hidden" onchange="fpPhoto(event)">
-                <span id="fp-photo-hint" class="text-[11px] font-bold ${window._fpAvatar ? 'text-white/50' : 'text-amber-300'}">${window._fpAvatar ? 'Tap to change your photo' : 'Add a profile photo *'}</span>
+                <div class="flex-1 min-w-0 space-y-1">
+                    <div id="fp-photo-hint">${window._fpAvatar ? '<div class="text-[13px] font-black text-[#22E6C8]">NICKNAME</div>' : '<div class="text-[13px] font-black text-[#22E6C8]">PROFILE PHOTO</div><div class="text-xs text-white/65">Tap the circle to add one</div>'}</div>
+                    <input id="fp-nick" value="${esc(p.nickname || '')}" maxlength="24" placeholder="Nickname (optional)" class="w-full bg-black/40 border border-[#22E6C8]/55 rounded-2xl px-3.5 py-2 text-white text-base placeholder:italic placeholder:text-white/35 focus:outline-none focus:border-[#22E6C8]">
+                </div>
             </div>
-            <div>
-                <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-2 text-center">Favorite position *</div>
-                ${positionPickerHtml('fp', p.positionSpot || '', p.position2Spot || '', p.positionSide || '', p.position2Side || '')}
-            </div>
-            <div>
-                <label class="block text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Nickname (optional)</label>
-                <input id="fp-nick" value="${esc(p.nickname || '')}" maxlength="24" placeholder="What the guys call you" class="w-full bg-black border border-teal-500/60 rounded-xl px-3 py-2.5 text-white text-base focus:outline-none focus:border-[#00F296]">
-            </div>
-            <div>
-                <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1 text-center">Strong foot (optional)</div>
-                <div id="fp-foot" class="grid grid-cols-3 gap-2">${fpFootButtons(window._fpFoot)}</div>
-            </div>
+            ${sec('FAVORITE POSITION', false)}
+            ${positionPickerHtml('fp', p.positionSpot || '', p.position2Spot || '', p.positionSide || '', p.position2Side || '', { maxWidth: 'max(150px, min(320px, calc((100dvh - 500px) * 0.8)))' })}
+            ${sec('STRONG FOOT', true)}
+            <div id="fp-foot">${fpFootButtons(window._fpFoot)}</div>
             <div id="fp-error" class="hidden text-xs text-red-400 font-bold bg-red-950/50 border border-red-500/50 p-2 rounded-xl text-center"></div>
-            <button id="fp-save" onclick="saveFinishProfile()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm uppercase tracking-wider">Save</button>
+            <button id="fp-save" onclick="saveFinishProfile()" class="w-full h-12 rounded-2xl bg-gradient-to-r from-[#22E6C8] to-[#00D9F2] text-slate-950 font-black italic text-[17px] tracking-wide shadow-[0_0_18px_rgba(34,230,200,.5)] flex items-center justify-center gap-2"><i class="fa-solid fa-floppy-disk"></i> SAVE PROFILE</button>
         </div>`;
     document.body.appendChild(m);
     return true;
 };
 
 function fpFootButtons(cur) {
-    return [['right', 'Right 🦶'], ['left', '🦶 Left'], ['both', 'Both']].map(([k, label]) =>
-        `<button type="button" onclick="fpFoot('${k}')" class="py-2 rounded-xl text-xs font-black border ${cur === k ? 'bg-[#00F296] text-slate-950 border-[#00F296]' : 'bg-black text-white/70 border-teal-500/40'}">${label}</button>`).join('');
+    return footPill(cur, 'fpFoot');
 }
+/** One pill split in three (Right | Left | Both); the picked one glows. Shared with the Profile page. */
+export function footPill(cur, fn) {
+    const cell = ([k, label, icon], i) => `${i ? '<span class="w-px h-6 bg-white/15 shrink-0"></span>' : ''}
+        <button type="button" onclick="${fn}('${k}')" class="flex-1 h-11 rounded-full flex items-center justify-center gap-1.5 text-sm font-extrabold italic transition ${cur === k ? 'text-white bg-[#22E6C8]/15 shadow-[0_0_10px_rgba(34,230,200,.55)]' : 'text-white/65'}"
+            style="${cur === k ? 'border:1.5px solid #22E6C8' : 'border:1.5px solid transparent'}">${icon}<span>${label}</span></button>`;
+    return `<div class="flex items-center p-0.5 rounded-full border border-white/20 bg-black/35 max-w-[340px] mx-auto">${[['right', 'Right', '🦶'], ['left', 'Left', '<span style="display:inline-block;transform:scaleX(-1)">🦶</span>'], ['both', 'Both', '🦶🦶']].map(cell).join('')}</div>`;
+}
+window.footPill = footPill;
 // Tap to pick, tap the same one again to clear it.
 window.fpFoot = function (k) {
     window._fpFoot = window._fpFoot === k ? '' : k;
@@ -197,7 +222,7 @@ window.fpPhoto = function (event) {
         const wrap = document.getElementById('fp-avatar-wrap');
         if (wrap) { wrap.innerHTML = `<img src="${url}" class="w-full h-full object-cover">`; wrap.className = wrap.className.replace('border-dashed border-amber-300', 'border-[#00F296]'); }
         const hint = document.getElementById('fp-photo-hint');
-        if (hint) { hint.textContent = 'Tap to change your photo'; hint.className = 'text-[11px] font-bold text-white/50'; }
+        if (hint) hint.innerHTML = '<div class="text-[13px] font-black text-[#22E6C8]">NICKNAME</div>';
     };
     reader.readAsDataURL(file);
 };
@@ -223,7 +248,7 @@ window.saveFinishProfile = async function () {
         if (typeof window.renderProfileTab === 'function') { try { window.renderProfileTab(); } catch (e) { /* not on that screen */ } }
     } catch (e) {
         console.error('Finish profile save failed:', e);
-        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> SAVE PROFILE'; }
         err('Could not save. Check your connection and try again.');
     }
 };

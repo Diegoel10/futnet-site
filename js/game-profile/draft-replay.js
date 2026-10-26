@@ -347,7 +347,7 @@ window.openTeamCard = async function(eventId) {
     const bar = document.createElement('div');
     body.appendChild(bar);
     mountShareBar(bar, cards.map((c, i) => ({ title: c.title, file: files[i] })),
-        { eventId: ev.id, communityId: ev.communityId || '', caption: `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + ev.date : ''}` });
+        { eventId: ev.id, communityId: ev.communityId || '', caption: `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + (window.fmtGameDate || String)(ev.date) : ''}` });
     cards.forEach((c, i) => {
         const box = document.createElement('div');
         box.className = 'space-y-2 pt-2';

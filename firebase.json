@@ -40,6 +40,14 @@
       {
         "source": "/.well-known/assetlinks.json",
         "destination": "/well-known/assetlinks.json"
+      },
+      {
+        "source": "/c/**",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/g/**",
+        "destination": "/index.html"
       }
     ],
     "headers": [
