@@ -50,8 +50,7 @@ window.renderFriends = async function() {
 
     if (!window.cachedDirectoryList) {
         try {
-            const snap = await getDocs(collection(db, 'artifacts', appId, 'directory'));
-            window.cachedDirectoryList = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+            window.cachedDirectoryList = await window.getPeopleList();
         } catch (e) {
             window.cachedDirectoryList = [];
         }

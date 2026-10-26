@@ -2784,3 +2784,51 @@ exports.welcomeFromAdmin = onDocumentCreated(`${BASE}/directory/{uid}`, async (e
   await new Promise((r) => setTimeout(r, 4000));         // let the sign-up finish saving the name first
   await sendServerDM(adminUid, uid, FUTNET_ADMIN_WELCOME, { asName: FUTNET_ADMIN_NAME, asAvatar: FUTNET_ADMIN_AVATAR, adminThread: true });
 });
+
+// ---------------------------------------------------------------------------
+// 20. "people": a light copy of every player card, WITHOUT the chats and phone tokens.
+//     Screens that list everyone (names, photos, search) read this instead of the full
+//     directory, which also holds every private chat and made the apps slow.
+//     The directory stays exactly as it is, so older app versions keep working.
+// ---------------------------------------------------------------------------
+const PEOPLE_SKIP = new Set(["chats", "fcmToken", "fcmTokens", "apnsToken", "pushToken", "pushTokens", "voipToken"]);
+function lightCard(d) {
+  const out = {};
+  for (const [k, v] of Object.entries(d || {})) if (!PEOPLE_SKIP.has(k)) out[k] = v;
+  return out;
+}
+/** Same text for the same content, whatever order the fields are in. */
+function stableText(v) {
+  if (v && typeof v === "object" && typeof v.toMillis === "function") return `T${v.toMillis()}`;
+  if (Array.isArray(v)) return `[${v.map(stableText).join(",")}]`;
+  if (v && typeof v === "object") return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableText(v[k])}`).join(",")}}`;
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+exports.onCardForPeople = onDocumentWritten(`${BASE}/directory/{uid}`, async (event) => {
+  const ref = col("people").doc(event.params.uid);
+  if (!event.data.after.exists) { await ref.delete().catch(() => {}); return; }
+  const after = lightCard(event.data.after.data());
+  if (event.data.before.exists && stableText(lightCard(event.data.before.data())) === stableText(after)) return;   // only chats / tokens changed
+  if (!after.uid) after.uid = event.params.uid;
+  await ref.set(after);
+});
+
+// Owner only, once: build the light copies for everyone who already has a card.
+exports.buildPeopleList = onCall({ timeoutSeconds: 540, memory: "512MiB" }, async (request) => {
+  if (!isOwner(request.auth)) throw new HttpsError("permission-denied", "Only the FutNet owner can run this.");
+  const dir = await col("directory").get();
+  let batch = db.batch(), n = 0, total = 0;
+  for (const d of dir.docs) {
+    const card = lightCard(d.data());
+    if (!card.uid) card.uid = d.id;
+    batch.set(col("people").doc(d.id), card);
+    n++; total++;
+    if (n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n) await batch.commit();
+  // The apps only switch to the light list once it's complete (never a half-built list).
+  await col("meta").doc("people").set({ builtAt: Date.now(), count: total });
+  logger.info(`people list built: ${total} players`);
+  return { ok: true, count: total };
+});

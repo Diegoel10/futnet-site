@@ -59,6 +59,7 @@ window.initEventsLiveListener = function() {
 
     eventsUnsubscribe = onSnapshot(eventsRef, (snapshot) => {
         initialLoadResolved = true;
+        window._eventsLoaded = true;
         clearTimeout(loadTimeout);
         const list = [];
         window.eventDocIds = {};
@@ -74,12 +75,24 @@ window.initEventsLiveListener = function() {
         });
         window.eventsList = list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
-        if (window.renderDateTabs) window.renderDateTabs();
-        if (window.renderEvents) window.renderEvents();
+        // Only redraw what actually changed. Before, ANY game changing anywhere redrew the open game
+        // page and the list, so a button could be swapped out right while you were tapping it.
+        const day = window.selectedDateStr || '';
+        const daySig = day + '|' + JSON.stringify(list.filter(ev => String(ev.date || '').slice(0, 10) === day));
+        if (daySig !== window._gamesDaySig || window.gamesView === 'previous') {
+            window._gamesDaySig = daySig;
+            if (window.renderDateTabs) window.renderDateTabs();
+            if (window.renderEvents) window.renderEvents();
+        }
         if (window.refreshCommunityGamesTab) window.refreshCommunityGamesTab();
 
         if (window.activeModalEventId && window.renderEventDetailModalContent) {
-            window.renderEventDetailModalContent();
+            const act = list.find(ev => ev.id === window.activeModalEventId);
+            const sig = window.activeModalEventId + '|' + (act ? JSON.stringify(act) : '');
+            if (sig !== window._activeEventSig) {
+                window._activeEventSig = sig;
+                window.renderEventDetailModalContent();
+            }
         }
         // Team builder open (e.g. a captains draft): show other people's picks live.
         if (window.refreshTeamBuilderLive) window.refreshTeamBuilderLive();
@@ -88,6 +101,9 @@ window.initEventsLiveListener = function() {
         if (splash) splash.style.display = 'none';
     }, (error) => {
         initialLoadResolved = true;
+        window._eventsLoaded = true;
+        // Firestore stops a listener after an error and never restarts it: try again shortly.
+        setTimeout(() => { if (window.currentUser) window.initEventsLiveListener(); }, 4000);
         clearTimeout(loadTimeout);
         if (error.code !== 'permission-denied') {
             console.error("Error listening to events collection:", error);
@@ -99,24 +115,7 @@ window.initEventsLiveListener = function() {
     });
 };
 
-window.initDirectoryLiveListener = function() {
-    if (directoryUnsubscribe) directoryUnsubscribe();
-
-    const dirRef = collection(db, 'artifacts', appId, 'directory');
-
-    directoryUnsubscribe = onSnapshot(dirRef, (snapshot) => {
-        window.directoryList = [];
-        snapshot.forEach(docSnap => {
-            const data = docSnap.data();
-            if (!data.uid) data.uid = docSnap.id;
-            window.directoryList.push(data);
-        });
-    }, (err) => {
-        if (err.code !== 'permission-denied') {
-            console.error("Error listening to global directory:", err);
-        }
-    });
-};
+// Everyone's names and photos (window.directoryList) now come from js/people.js.
 
 window.renderDateTabs = function() {
     const container = document.getElementById('date-tabs-container');
@@ -246,6 +245,10 @@ window.renderEvents = function() {
         })
         .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
 
+    if (filtered.length === 0 && !window._eventsLoaded) {
+        grid.innerHTML = `<div class="col-span-full text-center text-white/70 text-xs font-bold py-10"><i class="fa-solid fa-futbol fa-spin text-[#00F296] mr-2"></i> Loading games…</div>`;
+        return;
+    }
     if (filtered.length === 0) {
         grid.innerHTML = `
             <div class="col-span-full bg-[#040E13]/90 border border-emerald-500/40 rounded-[28px] p-8 text-center space-y-3.5 shadow-2xl backdrop-blur-md">

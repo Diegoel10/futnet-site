@@ -26,7 +26,27 @@ window.renderOwnerTools = async function () {
                 <span class="text-xs font-bold text-amber-200">Owner: Sync names &amp; photos</span>
             </div>
             <i class="fa-solid fa-chevron-right text-amber-300/60 text-xs"></i>
+        </button>
+        <button id="owner-people-btn" onclick="buildPeopleListNow()" class="mt-2 w-full bg-[#1A1405]/90 border border-amber-400/40 rounded-2xl p-3 flex items-center justify-between shadow-lg transition">
+            <div class="flex items-center gap-3">
+                <div class="w-7 h-7 rounded-xl bg-amber-400/20 flex items-center justify-center text-amber-300"><i class="fa-solid fa-bolt text-xs"></i></div>
+                <span class="text-xs font-bold text-amber-200">Owner: Speed up (rebuild the light player list)</span>
+            </div>
+            <i class="fa-solid fa-chevron-right text-amber-300/60 text-xs"></i>
         </button>`;
+};
+
+/** Builds people/{uid} (player cards without chats) for everyone. Safe to run again any time. */
+window.buildPeopleListNow = async function () {
+    const btn = document.getElementById('owner-people-btn');
+    const label = btn?.querySelector('span');
+    if (label) label.textContent = 'Working… (can take a minute)';
+    try {
+        const r = await fn('buildPeopleList')({});
+        if (label) label.textContent = `Done ✅ ${(r.data && r.data.count) || 0} players. Reload the page.`;
+    } catch (e) {
+        if (label) label.textContent = 'Could not run it: ' + (e.message || e);
+    }
 };
 
 window.openNameSync = function () {

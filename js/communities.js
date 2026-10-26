@@ -106,11 +106,9 @@ async function syncMemberRecords(id, raw) {
 async function ensureDirectory() {
     if (Array.isArray(window.directoryList) && window.directoryList.length) return;
     if (!_dirLoading) {
-        _dirLoading = getDocs(collection(db, 'artifacts', appId, 'directory'))
-            .then(snap => {
-                if (!(Array.isArray(window.directoryList) && window.directoryList.length)) {
-                    window.directoryList = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
-                }
+        _dirLoading = window.getPeopleList()
+            .then(list => {
+                if (!(Array.isArray(window.directoryList) && window.directoryList.length)) window.directoryList = list;
             })
             .catch(() => {})
             .finally(() => { _dirLoading = null; });
@@ -228,15 +226,17 @@ window.renderCommunitiesHub = async function() {
     list.sort((a, b) => (myRole(b.id) ? 1 : 0) - (myRole(a.id) ? 1 : 0) || (b.membersCount || 0) - (a.membersCount || 0));
 
     const focus = document.activeElement?.id === 'hub-search';
+    const showSearch = q || Object.keys(window.communitiesCache).length > 4;   // only useful with several communities
     el.innerHTML = `
-        <div class="${CARD} p-5 flex items-center justify-between gap-3">
-            <div>
-                <h2 class="text-xl font-black text-white">Hubs & Communities</h2>
-                <p class="text-white/70 text-xs">Your local football hubs, group chats and leagues.</p>
+        <div class="flex items-center justify-between gap-3 px-1 pt-1">
+            <div class="min-w-0">
+                <h2 class="text-[22px] font-black text-white uppercase tracking-wide leading-tight">Communities</h2>
+                <p class="text-white/60 text-[13px]">Your local football hubs &amp; leagues</p>
             </div>
-            <button onclick="showCommunityCreation()" class="${BTN_PRIMARY} shrink-0"><i class="fa-solid fa-plus mr-1"></i> New Hub</button>
+            <button onclick="showCommunityCreation()" class="shrink-0 bg-[#00E08F] hover:opacity-95 text-slate-950 font-black text-sm px-4 py-2.5 rounded-2xl flex items-center gap-2 shadow-[0_0_14px_rgba(0,224,143,0.35)]">
+                <i class="fa-solid fa-circle-plus"></i> New Hub</button>
         </div>
-        <input id="hub-search" oninput="renderCommunitiesHub()" value="${esc(q)}" class="${INPUT}" placeholder="Search communities by name or city...">
+        ${showSearch ? `<input id="hub-search" oninput="renderCommunitiesHub()" value="${esc(q)}" class="${INPUT}" placeholder="Search communities by name or city...">` : ''}
         ${list.length === 0 ? `
             <div class="${CARD} p-10 text-center space-y-2">
                 <i class="fa-solid fa-people-group text-4xl text-teal-400/60"></i>
@@ -246,26 +246,62 @@ window.renderCommunitiesHub = async function() {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             ${list.map(communityCard).join('')}
         </div>`}`;
-    if (focus) { const i = document.getElementById('hub-search'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+    if (focus) { const i = document.getElementById('hub-search'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+    paintHubAdmins();
 };
 
+// ---- "Admin: Diego Ponce" on each community card (same as the iPhone app).
+// Shown right away when known (player list loaded, or remembered on this device); otherwise a soft
+// "Loading…" for a moment, never a fake "Organizer".
+const ADMIN_KEY = (uid) => `futnet_admin_${uid}`;
+function adminCardOf(uid) {
+    if (!uid) return null;
+    const d = (window.directoryList || []).find(u => String(u.uid) === String(uid));
+    if (d) {
+        const name = d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim();
+        const avatar = /^https?:\/\//.test(d.avatar || '') ? d.avatar : '';
+        try { localStorage.setItem(ADMIN_KEY(uid), JSON.stringify({ name, avatar })); } catch (e) { /* private mode */ }
+        return { name, avatar: d.avatar || '' };
+    }
+    try { const saved = JSON.parse(localStorage.getItem(ADMIN_KEY(uid)) || 'null'); if (saved && saved.name) return saved; } catch (e) { /* none */ }
+    return null;
+}
+function adminRowHtml(uid) {
+    const a = adminCardOf(uid);
+    if (!a) return `<span class="w-7 h-7 rounded-full bg-white/10 shrink-0"></span><span class="text-xs text-white/40">Admin: Loading…</span>`;
+    const pic = safeImg(a.avatar, '');
+    return `${pic ? `<img src="${esc(pic)}" class="w-7 h-7 rounded-full object-cover border-2 border-[#00F296] shrink-0">`
+        : `<span class="w-7 h-7 rounded-full border-2 border-[#00F296] bg-[#00F296]/20 flex items-center justify-center text-[11px] font-black text-white shrink-0">${esc((a.name || '?')[0])}</span>`}
+        <span class="text-xs text-white/70 truncate">Admin: <b class="text-white">${esc(a.name || 'Organizer')}</b></span>`;
+}
+function paintHubAdmins() {
+    document.querySelectorAll('[data-hub-admin]').forEach(el => {
+        const html = adminRowHtml(el.getAttribute('data-hub-admin'));
+        if (el.innerHTML !== html) el.innerHTML = html;
+    });
+}
+window.addEventListener('futnet-people', paintHubAdmins);   // the player list just arrived: fill in the names
+
 function communityCard(c) {
-    const role = myRole(c.id);
+    const adminUid = c.creatorId || c.adminId || '';
     return `
-    <div onclick="openCommunity('${jsArg(c.id)}')" class="${CARD} overflow-hidden cursor-pointer hover:border-emerald-400 transition">
-        <div class="bg-black/40 relative">
+    <div onclick="openCommunity('${jsArg(c.id)}')" class="bg-[#040E13]/95 border border-teal-500/30 rounded-[22px] overflow-hidden cursor-pointer hover:border-emerald-400 transition shadow-xl">
+        <div class="bg-black/40">
             <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="block w-full h-auto max-h-[70vh] object-contain mx-auto">
-            ${role ? `<span class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/70 border border-[#00F296]/60 text-[#00F296] text-[9px] font-black uppercase">${role === 'admin' ? 'Admin' : 'Member'}</span>` : ''}
         </div>
-        <div class="p-4 space-y-1.5">
-            <div class="flex items-center justify-between gap-2">
-                <h3 class="text-sm font-black text-white truncate">${esc(c.name || 'Community')}</h3>
-                <i class="fa-solid fa-chevron-right text-white/40 text-xs"></i>
+        <div class="px-5 pt-4 pb-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 space-y-1">
+                    <h3 class="text-base font-black text-white truncate">${esc(c.name || 'Community')}</h3>
+                    <div class="flex items-center gap-2 text-xs text-white/60">
+                        ${c.city ? `<span class="truncate"><i class="fa-solid fa-location-dot text-[#00F296] mr-1"></i>${esc(c.city)}${c.state ? ', ' + esc(c.state) : ''}</span><span class="text-white/40">•</span>` : ''}
+                        <span class="font-bold text-teal-300 shrink-0">${Number(c.membersCount) || 1} Member(s)</span>
+                    </div>
+                </div>
+                <i class="fa-solid fa-chevron-right text-white/40 text-sm shrink-0"></i>
             </div>
-            <div class="flex items-center gap-2 text-[11px] text-white/60">
-                ${c.city ? `<span><i class="fa-solid fa-location-dot text-[#00F296] mr-1"></i>${esc(c.city)}${c.state ? ', ' + esc(c.state) : ''}</span><span>•</span>` : ''}
-                <span class="font-bold text-teal-300">${Number(c.membersCount) || 1} Member(s)</span>
-            </div>
+            ${adminUid ? `<div class="h-px bg-white/10"></div>
+            <div class="flex items-center gap-2.5 min-w-0" data-hub-admin="${esc(adminUid)}">${adminRowHtml(adminUid)}</div>` : ''}
         </div>
     </div>`;
 }
@@ -734,7 +770,14 @@ window.setCommunityTab = (t) => { S.tab = t; renderCommunityPage(); };
 // Games changed (someone joined, left, a new game...): redraw the community's Games tab so the
 // "Going" counts are live. Only that tab, so typing in the feed or chat is never interrupted.
 window.setCommunityGamesView = (v) => { S.gamesView = v === 'prev' ? 'prev' : 'up'; renderCommunityPage(); };
-window.refreshCommunityGamesTab = () => { if (S.activeId && S.tab === 'games') renderCommunityPage(); };
+window.refreshCommunityGamesTab = () => {
+    if (!(S.activeId && S.tab === 'games')) return;
+    // Redraw only when this community's games changed (not when any game anywhere changed).
+    const sig = S.activeId + '|' + JSON.stringify((window.eventsList || []).filter(e => e.communityId === S.activeId));
+    if (sig === window._commGamesSig) return;
+    window._commGamesSig = sig;
+    renderCommunityPage();
+};
 
 function communityGames(id) {
     const all = (window.eventsList || []).filter(e => e.communityId === id);
@@ -769,7 +812,7 @@ function renderCommunityPage() {
     else if (S.tab === 'credit' && isMember) body = isAdmin ? adminCreditHtml(c, S.members, S.credits, S.ledger) : memberCreditHtml(c, S.myCredit, S.ledger);
     else if (S.tab === 'admin' && isAdmin) body = adminTab(c);
 
-    el.innerHTML = `
+    const html = `
         <div class="${CARD} overflow-hidden">
             <div class="relative bg-black/40">
                 <img src="${esc(safeImg(c.thumbnail, DEFAULT_THUMB))}" class="block w-full h-auto max-h-[70vh] object-contain mx-auto">
@@ -803,6 +846,11 @@ function renderCommunityPage() {
             Blocked from: <b>${esc(scopeLabels(S.mySusp))}</b>${S.mySusp.reason ? `<br>Reason: ${esc(S.mySusp.reason)}` : ''}
         </div>` : ''}
         <div class="${CARD} p-4 sm:p-5">${body}</div>`;
+    // Nothing on screen changed (and nobody else redrew this area): leave it alone, so the page
+    // doesn't flicker and a tap or typing isn't interrupted by a redraw.
+    if (el._fnHtml === html && el._fnSet === el.innerHTML) return;
+    el.innerHTML = html;
+    el._fnHtml = html; el._fnSet = el.innerHTML;
     if (S.tab === 'feed') window.attachFeedMentions();
 
     if (focusId) {

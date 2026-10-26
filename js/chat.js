@@ -53,6 +53,8 @@ window.initChatListener = function() {
         }
     }, (error) => {
         console.error("Error listening to chats:", error);
+        // Firestore stops a listener after an error and never restarts it (chats froze): try again.
+        setTimeout(() => { if (window.currentUser) window.initChatListener(); }, 4000);
     });
 };
 
@@ -74,7 +76,7 @@ function watchCommunityChats() {
                 commLast[cid] = snap.docs.map(d => ({ ...d.data(), id: d.id }));
                 if (window.activeChatThreadId === 'community:' + cid) markCommunityRead(cid);
                 window.renderChatsList();
-            }, () => {});
+            }, () => { delete commUnsubs[cid]; setTimeout(watchCommunityChats, 5000); });
     });
 }
 
@@ -274,8 +276,7 @@ window.renderChatsList = async function() {
 
     if (!window.cachedDirectoryList) {
         try {
-            const snap = await getDocs(collection(db, 'artifacts', appId, 'directory'));
-            window.cachedDirectoryList = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+            window.cachedDirectoryList = await window.getPeopleList();
         } catch (e) {
             window.cachedDirectoryList = [];
         }

@@ -11,7 +11,7 @@
 // A player who paid with credit carries on the roster entry:  creditPaidCents, creditCommunityId.
 import { db, appId } from './firebase-config.js';
 import {
-    doc, collection, runTransaction, serverTimestamp, getDoc, getDocs, query, where
+    doc, collection, runTransaction, serverTimestamp, getDoc, getDocs, query, where, onSnapshot
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-store.js';
 import { policyLines, fullRefundAllowed, leaveRefund, startMsOf, refundsOnCancel, CLAIM_MINUTES, DEFAULT_CLAIM_MINUTES, claimMinutesOf, partialPctOf } from './money-rules.js';
@@ -546,14 +546,34 @@ export function costSummary(ev) {
 }
 
 /** Fills every <span data-credit-balance="communityId"> with the signed-in member's balance. */
+// My credit per community, kept live (one listener per community), so the game page shows it right
+// away and it updates by itself when an admin adds credit or a game fee is taken.
+const _myBal = {};          // communityId -> cents
+const _myBalUnsub = {};     // communityId -> stop function
+let _myBalUid = '';
+export function myLiveBalance(cid) { return Object.prototype.hasOwnProperty.call(_myBal, cid) ? _myBal[cid] : null; }
+window.myLiveBalance = myLiveBalance;
+function paintBalance(cid) {
+    document.querySelectorAll(`[data-credit-balance="${CSS.escape(cid)}"]`).forEach(el => { el.textContent = dollars(_myBal[cid] || 0); });
+}
 export async function hydrateBalances() {
     const me = window.currentUser; if (!me) return;
-    const spans = Array.from(document.querySelectorAll('[data-credit-balance]'));
-    for (const el of spans) {
+    if (_myBalUid !== me.uid) {   // signed in as someone else: start over
+        Object.values(_myBalUnsub).forEach(u => { try { u(); } catch (e) { /* gone */ } });
+        Object.keys(_myBalUnsub).forEach(k => delete _myBalUnsub[k]);
+        Object.keys(_myBal).forEach(k => delete _myBal[k]);
+        _myBalUid = me.uid;
+    }
+    const cids = new Set(Array.from(document.querySelectorAll('[data-credit-balance]')).map(el => el.getAttribute('data-credit-balance')).filter(Boolean));
+    for (const cid of cids) {
+        if (myLiveBalance(cid) !== null) paintBalance(cid);
+        if (_myBalUnsub[cid]) continue;
         try {
-            const s = await getDoc(credRef(el.getAttribute('data-credit-balance'), me.uid));
-            el.textContent = dollars(s.exists() ? (s.data().balanceCents || 0) : 0);
-        } catch (e) { el.textContent = '$0.00'; }
+            _myBalUnsub[cid] = onSnapshot(credRef(cid, me.uid), (s) => {
+                _myBal[cid] = s.exists() ? (s.data().balanceCents || 0) : 0;
+                paintBalance(cid);
+            }, () => { delete _myBalUnsub[cid]; if (myLiveBalance(cid) === null) { _myBal[cid] = 0; paintBalance(cid); } });
+        } catch (e) { _myBal[cid] = 0; paintBalance(cid); }
     }
 }
 

@@ -152,7 +152,9 @@ window.promptFinishProfileIfNeeded = function () {
     }
     const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     const first = String(p.firstName || '').trim() || 'there';
-    window._fpAvatar = realPhoto(p.avatar) ? p.avatar : '';
+    // No real photo yet: use the one from their Google / Facebook sign-in (Apple doesn't share a photo).
+    const provPhoto = window.bigProviderPhoto ? window.bigProviderPhoto(user.photoURL) : (user.photoURL || '');
+    window._fpAvatar = realPhoto(p.avatar) ? p.avatar : (realPhoto(provPhoto) ? provPhoto : '');
     const isNew = !p.positionSpot && !realPhoto(p.avatar) && !p.position;
     const step2 = !!window._fpStep2; window._fpStep2 = false;
     window._fpFoot = p.foot || '';
@@ -227,12 +229,38 @@ window.fpPhoto = function (event) {
     reader.readAsDataURL(file);
 };
 
+/** Bounce + glow the part that's missing and show a little bubble next to it for a few seconds. */
+function fpNudge(id, msg, where) {
+    const el = document.getElementById(id); if (!el) return;
+    if (!document.getElementById('fp-nudge-css')) {
+        const st = document.createElement('style'); st.id = 'fp-nudge-css';
+        st.textContent = `@keyframes fpShake{0%,100%{transform:translateX(0)}15%{transform:translateX(-7px) rotate(-2deg)}30%{transform:translateX(7px) rotate(2deg)}45%{transform:translateX(-5px)}60%{transform:translateX(5px)}75%{transform:translateX(-2px)}}
+@keyframes fpRing{0%{box-shadow:0 0 0 0 rgba(252,211,77,.9)}70%{box-shadow:0 0 0 16px rgba(252,211,77,0)}100%{box-shadow:0 0 0 0 rgba(252,211,77,0)}}
+@keyframes fpPop{0%{opacity:0;transform:translate(var(--tx),6px) scale(.85)}15%,85%{opacity:1;transform:translate(var(--tx),0) scale(1)}100%{opacity:0;transform:translate(var(--tx),-4px) scale(.95)}}
+.fp-nudge{animation:fpShake .55s ease-in-out 2, fpRing 1.1s ease-out 3}
+.fp-bubble{position:absolute;z-index:30;white-space:nowrap;pointer-events:none;background:#FCD34D;color:#1f1300;font-weight:900;font-size:13px;padding:7px 12px;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.45);animation:fpPop 3.2s ease forwards}`;
+        document.head.appendChild(st);
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('fp-nudge'); void el.offsetWidth; el.classList.add('fp-nudge');
+    const host = where === 'right' ? el.parentElement : el; if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    host.querySelectorAll(':scope > .fp-bubble').forEach(b => b.remove());
+    const b = document.createElement('div'); b.className = 'fp-bubble'; b.textContent = msg; b.setAttribute('role', 'alert');
+    if (where === 'right') { b.style.left = 'calc(100% + 8px)'; b.style.top = '50%'; b.style.marginTop = '-16px'; b.style.setProperty('--tx', '0px'); }
+    else { b.style.left = '50%'; b.style.top = '38%'; b.style.setProperty('--tx', '-50%'); }
+    host.appendChild(b);
+    setTimeout(() => { b.remove(); el.classList.remove('fp-nudge'); }, 3300);
+    if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) { /* not on iPhone */ } }
+}
+
 window.saveFinishProfile = async function () {
     const user = window.currentUser; if (!user) return;
     const err = (msg) => { const b = document.getElementById('fp-error'); if (b) { b.textContent = msg; b.classList.remove('hidden'); } };
     const pos = readPositionPicker('fp');
-    if (!window._fpAvatar) return err('Please add a profile photo so your teammates know who you are.');
-    if (!pos.spot) return err('Tap your favorite position on the field.');
+    document.getElementById('fp-error')?.classList.add('hidden');
+    // Missing something: a friendly animation on that part (photo first, then the field).
+    if (!window._fpAvatar) return fpNudge('fp-avatar-wrap', 'Please add a profile picture 📸', 'right');
+    if (!pos.spot) return fpNudge('fp-pp', 'Tap your position on the field ⚽', 'top');
     const nickname = (document.getElementById('fp-nick')?.value || '').trim();
     const btn = document.getElementById('fp-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
     const fields = { positionSpot: pos.spot, positionSide: pos.side, position2Spot: pos.spot2, position2Side: pos.side2, position: pos.group, avatar: window._fpAvatar, nickname, foot: window._fpFoot || '', profileCheckedAt: Date.now() };

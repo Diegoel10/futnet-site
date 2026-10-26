@@ -108,6 +108,24 @@ window.renderInfoTab = function(event) {
     const isConfirmed = isConfirmedAttendee;
     const allowPlusOnes = event.allowPlusOnes || false;
 
+    // ---- 1. You: "Are you in?" / "You're in!" / waitlist (same look as the iPhone app)
+    const myAvatar = safeAvatar(window.userProfile?.avatar) || safeAvatar(window.currentUser?.photoURL) || resolveAvatar({ uid: userId, name: window.userProfile?.firstName || 'Me' });
+    const myCircle = (ring, badge) => `<div class="relative w-[76px] h-[76px] mx-auto">
+            <img src="${escapeHtml(myAvatar)}" class="w-full h-full rounded-full object-cover bg-black" style="${ring}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+            ${badge ? `<span class="gi-badge absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-black flex items-center justify-center text-[20px] leading-none">${badge}</span>` : ''}
+        </div>`;
+    const realGoing = attendeesArr.reduce((n, a) => n + 1 + (Array.isArray(a.guests) ? a.guests.length : 0), 0);
+    const spotsLeft = Math.max(0, maxCapacity - realGoing);
+    const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'));
+    const card = (border, bg, inner) => `<div class="rounded-[22px] p-4 shadow-xl text-center space-y-3" style="border:2px solid ${border};background:${bg}">${inner}</div>`;
+    const DARK = 'rgba(4,14,19,.95)';
+    // Play the "You're in" animation only right after joining (not every time the page opens).
+    window._giWasIn = window._giWasIn || {};
+    const wasIn = window._giWasIn[event.id];
+    window._giWasIn[event.id] = !!isConfirmed;
+    const justJoined = isConfirmed && wasIn === false;
+    if (justJoined) giInjectCss();
+
     let rsvpButtonHtml = '';
     const waitingEntry = !isConfirmed && userId ? (Array.isArray(event.waitingList) ? event.waitingList : []).find(w => String(w.uid) === userId) : null;
     if (waitingEntry) {
@@ -115,100 +133,90 @@ window.renderInfoTab = function(event) {
         const eligible = offerEligible(event, nowMs, startMs).includes(userId);
         const pos = waitingUids(event).indexOf(userId) + 1;
         const exp = event.spotOffer && event.spotOffer.expiresAt;
-        rsvpButtonHtml = `
-            ${eligible ? `<div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 mb-2.5 text-center space-y-1 shadow-[0_0_20px_rgba(0,242,150,0.25)]">
-                <div class="text-sm font-black text-white">🎉 Someone cancelled! You're up next</div>
-                <div class="text-[11px] text-white/80">${event.spotOffer && event.spotOffer.lastCall ? 'Last call before kickoff: first to confirm gets it.' : (exp ? `Confirm within <b class="text-[#00F296]" data-countdown="${Number(exp)}">--:--</b> or it goes to the next player.` : 'Confirm now to take the spot.')}</div>
-            </div>
-            <button onclick="openJoinGameModal('${event.id}')" class="w-full mb-2.5 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-circle-check"></i> ${creditGame(event) ? 'Claim my spot & pay' : 'Claim my spot'}
-            </button>` : `<div class="bg-amber-500/10 border border-amber-400/40 rounded-2xl p-3 mb-2.5 text-center text-xs text-white/90">
-                <i class="fa-solid fa-hourglass-half text-amber-300 mr-1"></i> You're <b>#${pos || 1}</b> on the waitlist. We'll notify you when a spot opens.
-            </div>`}
-            ${eligible ? '' : `<label class="flex items-center justify-between gap-3 bg-black/40 border border-white/10 rounded-2xl p-3 mb-2.5 cursor-pointer">
+        const paid = creditGame(event);
+        const claimTxt = claimMinutesOf(event) === 60 ? '1 hour' : claimMinutesOf(event) + ' min';
+        rsvpButtonHtml = card(eligible ? '#00F296' : '#FACC15', DARK, `
+            ${myCircle(`border:3px solid ${eligible ? '#00F296' : '#FACC15'}`, eligible ? '⭐' : '⏳')}
+            ${eligible ? `<div class="text-lg font-black">🎉 A spot opened up for you!</div>
+                <div class="text-[12px] text-white/80">${event.spotOffer && event.spotOffer.lastCall ? '<b class="text-amber-300">Last call: the first person to confirm gets it.</b>' : (exp ? `Confirm within <b class="text-[#00F296]" data-countdown="${Number(exp)}">--:--</b>. If you don't, it goes to the next person too (first to confirm wins).` : 'Confirm now to take the spot.')}</div>
+                <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-2xl text-xs uppercase tracking-wider shadow-lg">${paid ? 'Confirm my spot & pay' : 'Confirm my spot'}</button>`
+            : `<div class="text-xl font-black">You're ${ordinal(pos || 1)} on the waitlist</div>
+                <div class="text-[12px] text-white/75">${waitingEntry.autoJoin ? (paid ? "When a spot opens you'll be put in automatically (if you have the funds in your credit)." : "When a spot opens you'll be put in automatically.") : `When a spot opens we'll ask you, and you'll have ${claimTxt} to confirm.`}</div>`}
+            <label class="flex items-center justify-between gap-3 bg-black/40 border border-white/10 rounded-2xl p-3 cursor-pointer text-left">
                 <span><span class="block text-xs font-bold text-white">Put me in automatically</span>
-                <span class="block text-[10px] text-white/55">${waitingEntry.autoJoin ? (creditGame(event) ? 'On: you are added (and charged) the moment a spot opens. Must have the funds.' : 'On: you are added the moment a spot opens.') : "Off: we'll ask you first and you have " + (claimMinutesOf(event) === 60 ? '1 hour' : claimMinutesOf(event) + ' min') + ' to confirm.'}</span></span>
+                <span class="block text-[10px] text-white/55">${paid ? 'Must have the funds in your credit.' : 'No need to confirm.'}</span></span>
                 <input type="checkbox" ${waitingEntry.autoJoin ? 'checked' : ''} onchange="setWaitlistAuto('${event.id}', this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0">
-            </label>`}
-            <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3 rounded-2xl text-xs border-2 border-red-500/40 uppercase tracking-wider transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-user-xmark"></i> Leave waitlist
-            </button>`;
+            </label>
+            <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full text-red-400 font-black py-3 rounded-2xl text-xs border-2 border-red-500/60 uppercase tracking-wider">Leave waitlist</button>`);
     } else if (isConfirmed) {
-        if (allowPlusOnes) {
-            rsvpButtonHtml = `
-                <div class="grid grid-cols-2 gap-2.5">
-                    <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border-2 border-red-500/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-user-xmark"></i> Leave Game!
-                    </button>
-                    <button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00F296]/20 hover:bg-[#00F296]/30 text-[#00F296] font-black py-3.5 rounded-2xl text-xs border-2 border-[#00F296]/40 shadow transition uppercase tracking-wider flex items-center justify-center gap-2">
-                        ${(() => { const n = (((event.attendees || []).find(a => String(a.uid) === String(window.currentUser?.uid)) || {}).guests || []).length;
-                            return n ? `<i class="fa-solid fa-users-gear"></i> Guests (${n}) · Edit` : '<i class="fa-solid fa-user-plus"></i> Bring guest'; })()}
-                    </button>
-                </div>
-            `;
-        } else {
-            rsvpButtonHtml = `
-                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="w-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black py-3.5 rounded-2xl text-xs border-2 border-red-500/40 shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-user-xmark"></i> Leave Game!
-                </button>
-            `;
-        }
-    } else if (isFull || (userId && !mayTakeSpot(event, userId, Date.now(), startMsOf(event)))) {
-        rsvpButtonHtml = `
-            <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-amber-400 hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-hourglass-half"></i> Join Waitlist!
-            </button>
-        `;
+        const mine = attendeesArr.find(a => String(a.uid) === userId) || {};
+        const guests = Array.isArray(mine.guests) ? mine.guests : [];
+        const when = [event.date ? (window.fmtGameDate || String)(event.date) : '', event.time || ''].filter(Boolean).join(' · ');
+        const confetti = justJoined ? Array.from({ length: 14 }, (_, i) => {
+            const a = i / 14 * 2 * Math.PI;
+            return `<span class="gi-conf" style="--x:${Math.round(Math.cos(a) * 120)}px;--y:${Math.round(Math.sin(a) * 70)}px;animation-delay:${(i % 4) * 30}ms">${['⚽', '🎉', '✨'][i % 3]}</span>`;
+        }).join('') : '';
+        rsvpButtonHtml = card('rgba(0,242,150,.7)', `linear-gradient(to bottom, rgba(0,242,150,.16), ${DARK})`, `
+            <div class="relative h-[90px] flex items-center justify-center ${justJoined ? 'gi-pop' : ''}">${confetti}${myCircle('border:3px solid #00F296;box-shadow:0 0 16px rgba(0,242,150,.7)', '<i class="fa-solid fa-circle-check text-[#00F296] text-[22px]"></i>')}</div>
+            <div class="space-y-0.5">
+                <div class="text-[22px] font-black">You're in! ⚽</div>
+                ${when ? `<div class="text-[12px] font-semibold text-white/65">See you ${escapeHtml(when)}</div>` : ''}
+                ${guests.length ? `<div class="text-[12px] font-bold text-[#00F296]">+ ${guests.map(g => escapeHtml(g.name || 'Guest')).join(', ')}</div>` : ''}
+            </div>
+            <div class="grid ${allowPlusOnes ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5">
+                <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 text-red-400 font-black py-3 rounded-2xl text-xs border-2 border-red-500/70 uppercase tracking-wider">Cancel</button>
+                ${allowPlusOnes ? `<button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00B4AE]/30 text-[#00F296] font-black py-3 rounded-2xl text-xs border-2 border-[#00B4AE] uppercase tracking-wider flex items-center justify-center gap-1.5">
+                    <i class="fa-solid ${guests.length ? 'fa-user-group' : 'fa-user-plus'}"></i> ${guests.length ? 'Manage guests' : 'Bring guests'}</button>` : ''}
+            </div>`);
     } else {
-        rsvpButtonHtml = `
-            <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-2xl text-xs shadow-lg uppercase tracking-wider transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-person-badge-plus text-sm"></i> Join Game!
-            </button>
-        `;
+        const toWaitlist = isFull || (userId && !mayTakeSpot(event, userId, Date.now(), startMsOf(event)));
+        rsvpButtonHtml = card('rgba(0,180,174,.5)', DARK, `
+            ${myCircle('border:3px dashed rgba(255,255,255,.35)', '')}
+            <div class="space-y-0.5">
+                <div class="text-[22px] font-black">${toWaitlist ? "Game's full 😬" : 'Are you in? ⚽'}</div>
+                <div class="text-[12px] font-semibold text-white/65">${toWaitlist ? 'Join the waitlist. If a spot opens, it can be yours.' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left · ${displayPrice}`}</div>
+            </div>
+            <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-2xl text-xs uppercase tracking-wider shadow-[0_0_14px_rgba(0,242,150,.5)] flex items-center justify-center gap-2">
+                <i class="fa-solid ${toWaitlist ? 'fa-hourglass-half' : 'fa-user-plus'}"></i> ${toWaitlist ? 'Join waitlist (free)' : 'Join game'}
+            </button>`);
     }
 
+    // ---- 2. The game at a glance
+    const box = 'bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] shadow-xl';
+    const fact = (icon, title, value, warn) => `<div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-[30px] h-[30px] rounded-[9px] bg-[#00F296]/10 text-[#00F296] flex items-center justify-center text-sm shrink-0"><i class="fa-solid ${icon}"></i></span>
+            <div class="min-w-0"><div class="text-[8px] font-black text-white/50">${title}</div><div class="text-[13px] font-bold truncate ${warn ? 'text-yellow-300' : 'text-white'}">${value}</div></div></div>`;
+    const chip = (t) => `<span class="text-[11px] font-bold text-[#00F296] bg-[#00F296]/10 rounded-full px-2.5 py-1">${escapeHtml(t)}</span>`;
+    const factsHtml = `<div class="${box} p-3.5 space-y-3 text-left">
+            <div class="grid grid-cols-2 gap-2">${fact('fa-calendar', 'DATE', event.date ? escapeHtml((window.fmtGameDate || String)(event.date)) : 'TBD')}${fact('fa-clock', 'TIME', escapeHtml(event.time || 'TBD'))}</div>
+            <div class="h-px bg-white/10"></div>
+            <div class="grid grid-cols-2 gap-2">${fact('fa-circle-dollar-to-slot', 'PRICE', displayPrice)}${fact('fa-users', 'SPOTS', spotsLeft > 0 ? `${spotsLeft} left of ${maxCapacity}` : 'Full · waitlist open', spotsLeft > 0 && spotsLeft <= 3)}</div>
+            <div class="flex flex-wrap justify-center gap-1.5">${chip(event.format || '7v7')}${chip(teamsCountNum + (teamsCountNum === 1 ? ' team' : ' teams'))}${allowPlusOnes ? chip(`Guests allowed (up to ${Math.max(1, Number(event.plusOneLimit) || 1)})`) : ''}</div>
+        </div>`;
+
+    // ---- 3. Who's going (tap = Roster tab)
+    const faces = attendeesArr.slice(0, 6).map((a, i) => `<img src="${escapeHtml(resolveAvatar(a))}" class="w-[30px] h-[30px] rounded-full object-cover border-2 border-[#040E13] bg-black ${i ? '-ml-2.5' : ''}" onerror="this.style.visibility='hidden'">`).join('');
+    const goingHtml = `<button onclick="switchModalTab('roster')" class="${box} w-full px-3.5 py-2.5 flex items-center gap-2.5 text-left">
+            <span class="flex">${faces}</span>
+            <span class="text-[13px] font-bold text-white flex-1">${realGoing ? realGoing + ' going' : 'Be the first one in!'}</span>
+            ${realGoing > 6 ? `<span class="text-xs font-bold text-white/50">+${realGoing - 6}</span>` : ''}
+            <span class="text-[11px] font-bold text-[#00F296]">Roster <i class="fa-solid fa-chevron-right text-[10px]"></i></span>
+        </button>`;
+
+    // ---- 4. Details + rules: closed until tapped, so the page stays short
+    const section = (icon, title, text) => `<details class="${box} p-3.5 group">
+            <summary class="flex items-center gap-2.5 text-[11px] font-black text-white cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <i class="fa-solid ${icon} text-[#00F296] text-[15px]"></i><span class="flex-1">${title}</span>
+                <i class="fa-solid fa-chevron-down text-[10px] text-[#00F296] transition group-open:rotate-180"></i></summary>
+            <p class="text-[13px] text-white/90 leading-relaxed font-medium pt-2 whitespace-pre-line">${text}</p>
+        </details>`;
+    const refund = creditGame(event);
+    const rulesText = escapeHtml(event.rules || 'Standard fair play rules apply. Be punctual and respectful.') + (refund ? '\n\n↩️ Refund policy: ' + escapeHtml(policyText(event)) : '');
+
     return `
-        <div class="space-y-4 font-sans text-white">
+        <div class="space-y-3.5 font-sans text-white">
             ${gameStatusCardHtml(event)}
-            <!-- Join / Leave first, so it's the first thing people see -->
-            <div>
-                ${rsvpButtonHtml}
-            </div>
-
-            ${window.creatorAdminsHtml
-                ? window.creatorAdminsHtml({ creator: { uid: organizerId, name: organizerName, avatar: finalHostAvatar }, admins: window.communityAdminsList ? window.communityAdminsList(event.communityId) : [], cid: event.communityId || '' })
-                : ''}
-
-            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] px-4 py-3.5 grid grid-cols-2 gap-2 shadow-xl text-left">
-                <div class="space-y-0.5 border-r border-white/15 pr-2">
-                    <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                        <i class="fa-solid fa-calendar text-[#00F296]"></i> DATE
-                    </div>
-                    <div class="text-xs font-bold text-white">${event.date ? (window.fmtGameDate || String)(event.date) : 'TBD'}</div>
-                </div>
-                <div class="space-y-0.5 pl-2">
-                    <div class="flex items-center gap-1.5 text-[9px] font-black text-white/50 uppercase tracking-wider">
-                        <i class="fa-solid fa-clock text-[#00F296]"></i> TIME
-                    </div>
-                    <div class="text-xs font-bold text-white">${event.time || 'TBD'}</div>
-                </div>
-            </div>
-
-            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 grid grid-cols-3 gap-2 shadow-xl text-left">
-                <div class="space-y-0.5 border-r border-white/10 pr-2">
-                    <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">FORMAT</span>
-                    <span class="text-xs font-bold text-white">${event.format || '7v7'}</span>
-                </div>
-                <div class="space-y-0.5 border-r border-white/10 px-2">
-                    <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">ENTRY FEE</span>
-                    <span class="text-xs font-bold text-white">${displayPrice}</span>
-                </div>
-                <div class="space-y-0.5 pl-2">
-                    <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block">TEAMS</span>
-                    <span class="text-xs font-bold text-white">${teamsCountNum} Teams</span>
-                </div>
-            </div>
-
+            ${rsvpButtonHtml}
             ${creditGame(event) ? (() => {
                 const meUid = window.currentUser ? String(window.currentUser.uid) : '';
                 const isOrg = meUid && String(event.organizerId) === meUid;
@@ -219,39 +227,38 @@ window.renderInfoTab = function(event) {
             <div class="bg-amber-500/10 border-2 border-amber-400/40 rounded-[22px] p-4 space-y-2 shadow-xl text-left">
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300"><i class="fa-solid fa-wallet mr-1"></i> Must pay to be confirmed</div>
                 <div class="text-xs text-white/90">Cost: <b>${escapeHtml(costSummary(event))}</b> (taken from your community credit)</div>
-                <div class="text-xs text-white/90">Refund policy: <b>${escapeHtml(policyText(event))}</b></div>
                 ${paidCents > 0 ? `<div class="flex items-center gap-2 bg-emerald-500/15 border border-[#00F296]/50 rounded-xl px-3 py-2 text-xs font-bold text-[#00F296]"><i class="fa-solid fa-circle-check"></i> You paid ${dollars(paidCents)} with credit${(mineAtt.guests || []).length ? ` (you + ${(mineAtt.guests || []).length} guest${(mineAtt.guests || []).length > 1 ? 's' : ''})` : ''}</div>` : ''}
                 ${(!isOrg && member) ? `<div class="flex items-center justify-between bg-emerald-500/10 border border-[#00F296]/40 rounded-xl px-3 py-2">
                     <span class="text-[11px] font-bold text-white/80">Your credit</span>
-                    <b class="text-base font-black text-[#00F296]" data-credit-balance="${escapeHtml(event.communityId)}">...</b>
+                    <b class="text-base font-black text-[#00F296]" data-credit-balance="${escapeHtml(event.communityId)}">${window.myLiveBalance && window.myLiveBalance(event.communityId) !== null ? dollars(window.myLiveBalance(event.communityId)) : '...'}</b>
                 </div>` : ''}
                 ${!isOrg ? `<button onclick="openPayDetails('${escapeHtml(event.id)}')" class="w-full bg-black/50 border border-amber-400/40 text-amber-200 font-bold py-2 rounded-xl text-[11px]"><i class="fa-solid fa-money-bill-transfer mr-1"></i> How to add credit</button>` : ''}
             </div>`;
             })() : ''}
-
-
-            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
-                <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
-                    <div class="flex items-center gap-2.5">
-                        <i class="fa-solid fa-file-lines text-[#00F296]"></i> GAME DETAILS
-                    </div>
-                    <i class="fa-solid fa-chevron-down text-[10px] text-white/60"></i>
-                </div>
-                <p class="text-xs text-white/80 leading-relaxed font-medium pl-6 pt-1">${event.description || 'Standard game. Come ready to play, have fun and respect the squad. 💪⚽'}</p>
-            </div>
-
-            <div class="bg-[#040E13]/95 border-2 border-[#00B4AE]/40 rounded-[22px] p-4 space-y-2 shadow-xl">
-                <div class="flex items-center justify-between text-xs font-black text-white cursor-pointer">
-                    <div class="flex items-center gap-2.5">
-                        <i class="fa-solid fa-list-check text-[#00F296]"></i> RULES
-                    </div>
-                    <i class="fa-solid fa-chevron-down text-[10px] text-white/60"></i>
-                </div>
-                <p class="text-xs text-white/80 leading-relaxed font-medium pl-6 pt-1">${event.rules || 'Standard fair play rules apply. Be punctual and respectful.'}</p>
-            </div>
+            ${factsHtml}
+            ${goingHtml}
+            ${section('fa-file-lines', 'GAME DETAILS', escapeHtml(event.description || 'Standard game. Come ready to play, have fun and respect the squad. 💪⚽'))}
+            ${section('fa-list-check', refund ? 'RULES & REFUND POLICY' : 'RULES', rulesText)}
+            ${window.creatorAdminsHtml
+                ? window.creatorAdminsHtml({ creator: { uid: organizerId, name: organizerName, avatar: finalHostAvatar }, admins: window.communityAdminsList ? window.communityAdminsList(event.communityId) : [], cid: event.communityId || '' })
+                : ''}
         </div>
     `;
 };
+
+/** "You're in!" pop + confetti burst (CSS added once). */
+function giInjectCss() {
+    if (document.getElementById('gi-css')) return;
+    const st = document.createElement('style'); st.id = 'gi-css';
+    st.textContent = `@keyframes giPop{0%{transform:scale(.4)}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+@keyframes giConf{0%{opacity:1;transform:translate(0,0) scale(.4)}100%{opacity:0;transform:translate(var(--x),var(--y)) scale(1.3)}}
+@keyframes giBadge{0%,40%{transform:scale(0)}100%{transform:scale(1)}}
+.gi-pop>div{animation:giPop .55s cubic-bezier(.3,1.6,.5,1)}
+.gi-pop .gi-badge{animation:giBadge .7s ease-out}
+.gi-conf{position:absolute;left:50%;top:50%;margin:-11px 0 0 -11px;font-size:18px;pointer-events:none;opacity:0;animation:giConf 1.1s ease-out forwards}`;
+    document.head.appendChild(st);
+    if (navigator.vibrate) { try { navigator.vibrate([30, 40, 60]); } catch (e) { /* no vibration */ } }
+}
 
 window.openManageGuestsModal = function(eventId) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
@@ -272,10 +279,11 @@ window.openManageGuestsModal = function(eventId) {
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-[32px] max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 class="text-xs font-black uppercase tracking-wider text-white">MANAGE YOUR GUESTS</h3>
+                <h3 class="text-xs font-black uppercase tracking-wider text-white">${guests.length ? 'MANAGE YOUR GUESTS' : 'BRING GUESTS'}</h3>
                 <button onclick="document.getElementById('manage-guests-modal').remove()" class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-white/70 hover:text-white font-bold"><i class="fa-solid fa-xmark text-xs"></i></button>
             </div>
-            <p class="text-[11px] text-white/60 text-center">You can bring up to ${maxGuests} guest(s). Edit names or add new ones.</p>
+            <p class="text-[11px] text-white/60 text-center">${guests.length ? `You can bring up to ${maxGuests} guest(s). Edit names or add new ones.` : 'How many guests are you bringing?'}</p>
+            ${guests.length ? '' : `<div id="guest-count-pick" class="flex justify-center gap-2">${Array.from({ length: maxGuests }, (_, i) => `<button onclick="pickGuestCount(${i + 1})" class="w-11 h-11 rounded-full border-2 border-[#00F296]/60 text-[#00F296] font-black text-sm hover:bg-[#00F296]/15">${i + 1}</button>`).join('')}</div>`}
             
             <div id="manage-guests-list-inputs" class="space-y-2.5 max-h-48 overflow-y-auto pr-1">
                 ${guests.map((g, idx) => `
@@ -295,6 +303,16 @@ window.openManageGuestsModal = function(eventId) {
             </button>
         </div>
     `;
+};
+
+// Bring guests: pick how many, then type their names.
+window.pickGuestCount = function (n) {
+    const list = document.getElementById('manage-guests-list-inputs'); if (!list) return;
+    list.innerHTML = '';
+    for (let i = 0; i < n; i++) window.addNewGuestInputRow();
+    document.getElementById('guest-count-pick')?.remove();
+    const p = list.parentElement.querySelector('p'); if (p) p.textContent = n === 1 ? "Your guest's name" : "Your guests' names";
+    list.querySelector('input')?.focus();
 };
 
 window.addNewGuestInputRow = function() {
