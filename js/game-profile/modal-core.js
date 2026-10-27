@@ -168,7 +168,22 @@ window.renderInfoTab = function(event) {
                 ${allowPlusOnes ? `<button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00B4AE]/30 text-[#00F296] font-black py-3 rounded-2xl text-xs border-2 border-[#00B4AE] uppercase tracking-wider flex items-center justify-center gap-1.5">
                     <i class="fa-solid ${guests.length ? 'fa-user-group' : 'fa-user-plus'}"></i> ${guests.length ? 'Manage guests' : 'Bring guests'}</button>` : ''}
             </div>`);
+    } else if (userId && ((event.joinRequests || []).some(r => String(r.uid) === userId) || communityRequestPending(event.communityId) === true)) {
+        // Asked to join (this game, or the community): don't offer "Join" again.
+        const toGame = (event.joinRequests || []).some(r => String(r.uid) === userId);
+        rsvpButtonHtml = card('#FACC15', DARK, `
+            ${myCircle('border:3px dashed rgba(250,204,21,.8)', '⏳')}
+            <div class="space-y-0.5">
+                <div class="text-[22px] font-black">Request pending ⏳</div>
+                <div class="text-[12px] font-semibold text-white/65">${toGame ? 'The organizer has to approve you. You\'ll be added to the roster when they do.' : 'You asked to join the community. You can join this game once an admin approves you.'}</div>
+            </div>
+            <button onclick="openJoinGameModal('${event.id}')" class="w-full bg-black/50 text-amber-200 font-black py-3 rounded-2xl text-xs border-2 border-amber-400/50 uppercase tracking-wider">See my request</button>`);
     } else {
+        // Not known yet if I asked to join this community: check once, then redraw.
+        if (event.communityId && userId && !(window.myCommunityRoles || {})[event.communityId] && event.openToNonMembers !== true
+            && communityRequestPending(event.communityId) === null) {
+            checkCommunityRequest(event.communityId).then(p => { if (p && window.activeModalEventId === event.id && window.renderEventDetailModalContent) window.renderEventDetailModalContent(); });
+        }
         const toWaitlist = isFull || (userId && !mayTakeSpot(event, userId, Date.now(), startMsOf(event)));
         rsvpButtonHtml = card('rgba(0,180,174,.5)', DARK, `
             ${myCircle('border:3px dashed rgba(255,255,255,.35)', '')}
@@ -680,20 +695,53 @@ if (!window._futnetCountdown) {
     }, 1000);
 }
 
-window.showCommunityOnlyModal = function(ev) {
+window.showCommunityOnlyModal = function(ev, checked = false) {
     const c = (window.communitiesCache || {})[ev.communityId] || {};
     const name = escapeHtml(ev.communityName || c.name || 'this');
+    const cid = String(ev.communityId || '');
     const needsApproval = c.requireApproval !== false;
+    const pending = communityRequestPending(cid) === true;
     let m = document.getElementById('community-only-modal');
     if (!m) { m = document.createElement('div'); m.id = 'community-only-modal'; m.className = 'fixed inset-0 z-[205] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
     m.innerHTML = `
-        <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
+        <div class="bg-[#040E13] border ${pending ? 'border-amber-400/60' : 'border-emerald-500/40'} rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white text-center">
             <div class="flex justify-end"><button onclick="document.getElementById('community-only-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button></div>
+            ${pending ? `
+            <div class="w-14 h-14 mx-auto rounded-full bg-black/50 border border-amber-400/50 flex items-center justify-center text-amber-300 text-xl -mt-4"><i class="fa-solid fa-hourglass-half"></i></div>
+            <p class="text-base font-black">Request pending ⏳</p>
+            <p class="text-xs text-white/70">You asked to join ${name} Community. An admin will review it, and you'll get a notification when you're in. Then you can join this game.</p>
+            <button onclick="document.getElementById('community-only-modal').remove()" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20">OK</button>
+            <button onclick="cancelJoinRequest('${escapeHtml(cid)}')" class="w-full text-red-400 font-bold text-xs py-1">Cancel my request</button>` : `
             <div class="w-14 h-14 mx-auto rounded-full bg-black/50 border border-emerald-500/30 flex items-center justify-center text-[#00F296] text-xl -mt-4"><i class="fa-solid fa-lock"></i></div>
             <p class="text-sm font-black">This is a community game only.</p>
-            <button onclick="requestJoinCommunity('${escapeHtml(String(ev.communityId))}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">${needsApproval ? 'Request to join' : 'Join'} ${name} Community</button>
+            <button onclick="requestJoinCommunity('${escapeHtml(cid)}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">${needsApproval ? 'Request to join' : 'Join'} ${name} Community</button>`}
         </div>`;
+    // Not checked yet (or a while ago): look it up, then show the right box.
+    if (!checked && communityRequestPending(cid) === null) checkCommunityRequest(cid).then(() => {
+        if (document.getElementById('community-only-modal')) window.showCommunityOnlyModal(ev, true);   // once only
+    });
 };
+
+// ---- Did I already ask to join this community? (requests/{me} exists) Remembered for a minute.
+window._pendingCommRequests = window._pendingCommRequests || {};
+/** true / false, or null when not known (yet). */
+function communityRequestPending(cid) {
+    if (!cid || (window.myCommunityRoles || {})[cid]) return false;   // already a member
+    const r = window._pendingCommRequests[cid];
+    return r && Date.now() - r.at < 60000 ? r.pending : null;
+}
+const _reqChecks = {};
+function checkCommunityRequest(cid) {
+    if (!cid || !window.currentUser) return Promise.resolve(false);
+    if (!_reqChecks[cid]) {
+        _reqChecks[cid] = getDoc(doc(db, 'artifacts', appId, 'communities', cid, 'requests', String(window.currentUser.uid)))
+            .then(s => s.exists())
+            .catch(() => false)
+            .finally(() => { setTimeout(() => { delete _reqChecks[cid]; }, 1000); });
+    }
+    // Always store the answer (even when an earlier lookup is reused).
+    return _reqChecks[cid].then(v => { window._pendingCommRequests[cid] = { pending: v, at: Date.now() }; return v; });
+}
 
 // ---- "I accept" step: game rules (when the organizer asked for it) + the refund policy (must-pay games)
 window._acceptedRules = window._acceptedRules || {};

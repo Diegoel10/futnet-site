@@ -91,6 +91,23 @@ function requestRatings(uids) {
         } catch (e) { console.warn('ratings', e); }
     }, 150);
 }
+/** Skill stars for a few players right now (used by "Lowest-rated captain picks first").
+ *  New players (under 3 games) count as 3 stars, the middle. Returns { uid: stars }. */
+export async function fetchSkillStars(uids) {
+    const need = uids.filter(u => u && !ratingCache[u]);
+    if (need.length) {
+        try {
+            const r = await httpsCallable(getFunctions(auth.app, 'us-central1'), 'playerRatings')({ uids: need });
+            Object.assign(ratingCache, (r.data && r.data.ratings) || {});
+        } catch (e) { console.warn('ratings', e); }
+    }
+    return Object.fromEntries(uids.map(u => {
+        const k = (ratingCache[u] || {}).skill || {};
+        return [u, k.isNew || !(Number(k.stars) > 0) ? 3 : Number(k.stars)];
+    }));
+}
+window.fetchSkillStars = fetchSkillStars;
+
 function paintRating(el) {
     const r = ratingCache[el.dataset.ratingUid];
     if (!r) return;

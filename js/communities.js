@@ -17,6 +17,7 @@ import { escapeHtml as esc, jsArg, mutateEvent } from './game-profile/event-stor
 import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readPayOptions, waitlistOptionsHtml, readWaitlistOptions, paymentMethodsFormHtml, readPaymentMethods } from './credits.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { computePlayerStats } from './leaderboard.js';
+import './money-tracker.js';
 import { renderWhatsApp, typingBubbleHtml, typingText, watchTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText } from './wa-chat.js';
 
 const DEFAULT_THUMB = 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800';
@@ -894,6 +895,9 @@ window.cancelJoinRequest = async function(id) {
     try {
         await deleteDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', me().uid));
         S.pending = false; toast('Request cancelled.');
+        (window._pendingCommRequests = window._pendingCommRequests || {})[id] = { pending: false, at: Date.now() };
+        document.getElementById('community-only-modal')?.remove();
+        if (window.activeModalEventId && window.renderEventDetailModalContent) window.renderEventDetailModalContent();
         renderCommunityPage();
     } catch (e) { console.error(e); toast('Could not cancel the request', 'error'); }
 };
@@ -923,6 +927,9 @@ window.requestJoinCommunity = async function(id) {
         if (c.requireApproval !== false) {
             if ((await getDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid))).exists()) { toast('Your request is already waiting for approval.', 'info'); }
             else { await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'requests', uid), { ...base, requestedAt: serverTimestamp() }); toast('Request sent! An admin will review it.'); }
+            // Remember it, so the game page and the "community game" box say "Request pending" (not "Request to join" again).
+            (window._pendingCommRequests = window._pendingCommRequests || {})[id] = { pending: true, at: Date.now() };
+            if (window.activeModalEventId && window.renderEventDetailModalContent) window.renderEventDetailModalContent();
         } else {
             await setDoc(doc(db, 'artifacts', appId, 'communities', id, 'members', uid), { ...base, role: 'member', joinedAt: serverTimestamp() });
             await updateDoc(commRef(id), { membersCount: increment(1) });
@@ -1945,6 +1952,9 @@ function adminTab(c) {
                 ${settingToggle(id, 'creditEnabled', 'Credit system', creditOn(c))}
             </div>
             <button onclick="editCommunityInfo('${jsArg(id)}')" class="${BTN_DARK} w-full mt-3"><i class="fa-solid fa-pen mr-1"></i> Edit name, info & thumbnail</button></div>
+        <button onclick="openMoneyTracker('${jsArg(id)}')" class="w-full flex items-center gap-3 bg-gradient-to-r from-emerald-950 to-teal-950 border border-[#00F296]/50 rounded-2xl p-3 text-left">
+            <span class="text-2xl">💰</span><span class="flex-1"><span class="block text-sm font-black text-white">Money tracker</span>
+            <span class="block text-[10px] text-white/60">Income from games, expenses (field, water…), profit</span></span><i class="fa-solid fa-chevron-right text-white/40 text-xs"></i></button>
         ${creditOn(c) ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Accepted payments</div>
             <p class="text-[10px] text-white/50 mb-2">Members see these when they need to add credit. Leave blank the ones you don't use.</p>
             ${paymentMethodsFormHtml(c)}

@@ -488,31 +488,52 @@ const PAY_KINDS = [
 ];
 const clean = (v) => String(v || '').trim().slice(0, 80);
 
-function payLink(kind, value, cents) {
+function payLink(kind, value, cents, note = '') {
     const amt = cents > 0 ? (cents / 100).toFixed(2) : '';
-    if (kind === 'venmo') return `https://venmo.com/u/${encodeURIComponent(value.replace(/^@/, ''))}`;
+    // Venmo opens (app or site) with the amount and a note already filled in.
+    if (kind === 'venmo') return `https://venmo.com/${encodeURIComponent(value.replace(/^@/, ''))}?txn=pay${amt ? '&amount=' + amt : ''}${note ? '&note=' + encodeURIComponent(note) : ''}`;
     if (kind === 'cashapp') return `https://cash.app/$${encodeURIComponent(value.replace(/^\$/, ''))}${amt ? '/' + amt : ''}`;
     if (kind === 'paypal' && !value.includes('@')) return `https://paypal.me/${encodeURIComponent(value.replace(/^https?:\/\/(www\.)?paypal\.me\//i, ''))}${amt ? '/' + amt : ''}`;
+    // Apple Cash is sent from Messages: open a message to them.
+    if (kind === 'applepay') return `sms:${value.includes('@') ? value : value.replace(/[^\d+]/g, '')}`;
     return '';
 }
 
-/** Payment details screen content: how to send money to the community admin. */
+/** Payment details: how much, then a Pay button for each way the admin accepts (Venmo, Cash App and PayPal
+ *  open with the amount and a note filled in). The admin adds the credit once they get it. */
 export function paymentMethodsHtml(community, cents, adminName) {
     const pm = (community && community.paymentMethods) || {};
     const rows = PAY_KINDS.filter(([k]) => clean(pm[k])).map(([k, label, icon]) => {
         const val = clean(pm[k]);
-        const link = payLink(k, val, cents);
+        const canOpen = !!payLink(k, val, 0);
         return `<div class="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl p-2.5">
             <i class="${icon} text-[#00F296] w-5 text-center"></i>
             <div class="flex-1 min-w-0"><div class="text-[10px] font-black uppercase text-white/50">${label}</div><div class="text-xs font-bold text-white truncate">${esc(val)}</div></div>
-            ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="shrink-0 bg-[#00F296] text-slate-950 font-black text-[10px] uppercase px-2.5 py-1.5 rounded-lg">Pay</a>` : ''}
+            ${canOpen ? `<button type="button" onclick="payNow(this, '${k}', '${jsArg(val)}')" class="shrink-0 bg-[#00F296] text-slate-950 font-black text-[10px] uppercase px-2.5 py-1.5 rounded-lg">${k === 'applepay' ? 'Message' : 'Pay'}</button>` : ''}
             <button type="button" onclick="copyPayValue(this, '${jsArg(val)}')" class="shrink-0 bg-black/60 border border-white/20 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg"><i class="fa-solid fa-copy"></i></button>
         </div>`;
     });
     if (!rows.length) return `<p class="text-xs text-white/70">Ask ${esc(adminName || 'your admin')} how to pay (Zelle, Venmo, Cash App, PayPal or Apple Pay). Once they get it, they add it to your credit.</p>`;
-    return `<div class="space-y-2">${rows.join('')}</div>
-        <p class="text-[10px] text-white/50">Send it to ${esc(adminName || 'your admin')}. Once they get it, they add it to your credit and you can join.</p>`;
+    return `<div class="space-y-2" data-pay-box data-cname="${esc((community && community.name) || '')}">
+            <label class="flex items-center gap-2 bg-black/50 border border-[#00F296]/40 rounded-xl px-3 py-2">
+                <span class="text-[11px] font-black uppercase text-white/60 shrink-0">Amount $</span>
+                <input data-pay-amount type="number" inputmode="decimal" min="1" step="0.01" placeholder="20" value="${cents > 0 ? (cents / 100).toFixed(2) : ''}"
+                    class="flex-1 min-w-0 bg-transparent text-white text-base font-black focus:outline-none">
+            </label>
+            ${rows.join('')}
+        </div>
+        <p class="text-[10px] text-white/50">Send it to ${esc(adminName || 'your admin')}, once they get it, they add it to your credit and you can join.</p>`;
 }
+
+/** Pay: opens Venmo / Cash App / PayPal with the amount (and a note) filled in. */
+window.payNow = function (btn, kind, val) {
+    const box = btn.closest('[data-pay-box]');
+    const amt = parseFloat(box?.querySelector('[data-pay-amount]')?.value || '');
+    const cents = amt > 0 ? Math.round(amt * 100) : 0;
+    const note = `FutNet credit${box?.dataset.cname ? ' · ' + box.dataset.cname : ''}`;
+    const link = payLink(kind, val, cents, note);
+    if (link) window.open(link, '_blank', 'noopener');
+};
 
 window.copyPayValue = async function(btn, val) {
     let ok = false;

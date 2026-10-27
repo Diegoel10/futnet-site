@@ -1397,6 +1397,8 @@ function renderCapsSetup() {
                 <p class="text-[10px] text-white/50 text-left">${st.mode === 'turns' ? 'Captains take turns: one pick each, in order, everyone sees whose turn it is.' : 'Any captain can pick whenever they want until their team is full.'}</p></div>
             ${st.mode === 'turns' ? `<div class="space-y-2">${label('Who picks first?')}
                 <div class="flex gap-2">${chip(st.firstWho === 'me', "I'll choose", "window._capsSetup.firstWho='me';window.renderCapsSetupUI()")}${chip(st.firstWho === 'random', 'Random', "window._capsSetup.firstWho='random';window.renderCapsSetupUI()")}</div>
+                <div class="flex gap-2">${chip(st.firstWho === 'low', '⭐ Lowest-rated captain first', "window._capsSetup.firstWho='low';window.renderCapsSetupUI()")}</div>
+                ${st.firstWho === 'low' ? '<p class="text-[10px] text-white/50 text-left">The captain with the fewest skill stars picks first, then the next lowest, and so on. New players (under 3 games) count as 3 stars.</p>' : ''}
                 ${st.firstWho === 'me' ? `<select onchange="window._capsSetup.first=parseInt(this.value,10)" class="w-full bg-black/70 border border-white/20 rounded-lg px-2 py-2 text-base sm:text-xs text-white">${names.map((n, i) => `<option value="${i}" ${st.first === i ? 'selected' : ''}>${escapeHtml(n)} picks first</option>`).join('')}</select>` : ''}</div>` : ''}
             <div class="space-y-2">${label('Time limit')}
                 <select onchange="window._capsSetup.deadline=this.value;window.renderCapsSetupUI()" class="w-full bg-black/70 border border-white/20 rounded-lg px-2 py-2 text-base sm:text-xs text-white">
@@ -1456,7 +1458,13 @@ window.startCapsDraft = async function() {
     const first = st.mode === 'turns' ? (st.firstWho === 'me' ? (st.first || 0) : Math.floor(Math.random() * count)) : 0;
     const deadlineAt = deadlineFor(event, st.deadline, st.customAt);
     if (deadlineAt === false) return;
-    const order = Array.from({ length: count }, (_, k) => (first + k) % count);
+    let order = Array.from({ length: count }, (_, k) => (first + k) % count);
+    if (st.mode === 'turns' && st.firstWho === 'low' && window.fetchSkillStars) {
+        // Lowest skill stars picks first; a tie is decided at random.
+        const stars = await window.fetchSkillStars(Object.values(caps));
+        const tie = Object.fromEntries(order.map(t => [t, Math.random()]));
+        order = [...order].sort((a, b) => (stars[caps[a]] ?? 3) - (stars[caps[b]] ?? 3) || tie[a] - tie[b]);
+    }
     const byUid = Object.fromEntries(players.map(p => [String(p.uid), p]));
     const btn = document.querySelector('#randomize-options-modal button[onclick="window.startCapsDraft()"]'); if (btn) btn.disabled = true;
     const res = await mutateEvent(event.id, (draft) => {
@@ -1465,7 +1473,7 @@ window.startCapsDraft = async function() {
         draft.teamAssignments = ta;
         draft.teamCaptains = caps;
         if (draft.captainCall) draft.captainCall = { ...draft.captainCall, open: false };
-        draft.capsDraft = { mode: st.mode, status: 'live', order, turnIdx: 0, turnTeam: st.mode === 'turns' ? order[0] : null, picks: [], startedAt: Date.now(), startedBy: meUid(), deadline: st.deadline || 'none', deadlineAt };
+        draft.capsDraft = { mode: st.mode, status: 'live', order, turnIdx: 0, turnTeam: st.mode === 'turns' ? order[0] : null, picks: [], firstBy: st.mode === 'turns' ? (st.firstWho || 'random') : null, startedAt: Date.now(), startedBy: meUid(), deadline: st.deadline || 'none', deadlineAt };
     });
     document.getElementById('randomize-options-modal')?.remove();
     if (!res.ok) return;
