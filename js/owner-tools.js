@@ -13,6 +13,13 @@ async function sha256(text) {
     return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** True when the signed-in account is the FutNet owner (used for the private FutNet app costs). */
+window.isFutnetOwner = async function () {
+    const mail = (auth.currentUser?.email || '').trim().toLowerCase();
+    if (!mail || !window.crypto?.subtle) return false;
+    return OWNER_EMAIL_SHA256.includes(await sha256(mail));
+};
+
 /** Shows the owner tools button inside #owner-tools-slot (profile page) when this is the owner. */
 window.renderOwnerTools = async function () {
     const slot = document.getElementById('owner-tools-slot');

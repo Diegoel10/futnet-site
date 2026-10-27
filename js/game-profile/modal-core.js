@@ -445,6 +445,7 @@ window.openEventDetails = function(eventId) {
     if (!event) return;
 
     window.activeModalEventId = eventId;
+    if (event.communityId && window.recordCommunityView) window.recordCommunityView(event.communityId, 'game', event.id, event.title || 'Game');   // analytics
     
     window.teamNames = window.teamNames || {};
     window.teamNames[event.id] = event.teamNames || {};

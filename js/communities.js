@@ -18,6 +18,7 @@ import { memberCreditHtml, adminCreditHtml, payOptionsHtml, plusExtraHtml, readP
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { computePlayerStats } from './leaderboard.js';
 import './money-tracker.js';
+import './analytics.js';
 import { renderWhatsApp, typingBubbleHtml, typingText, watchTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText } from './wa-chat.js';
 
 const DEFAULT_THUMB = 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800';
@@ -727,6 +728,7 @@ window.openCommunity = async function(id, tab) {
     } catch (e) { /* ignore */ }
     if (role) window.myCommunityRoles[id] = role; else delete window.myCommunityRoles[id];
     S.pending = pending; S.mySusp = mySusp;
+    if (window.recordCommunityView) window.recordCommunityView(id, 'community', id, c.name || 'Community');   // analytics (admins aren't counted)
 
     const base = ['artifacts', appId, 'communities', id];
     ensureDirectory();
@@ -1540,7 +1542,7 @@ function postCard(p, c, isAdmin) {
     const votes = poll?.votes || {};
     const totalVotes = Object.keys(votes).length;
     const myVote = votes[uid];
-    return `<div class="bg-black/30 border border-white/10 rounded-xl p-3 space-y-2.5">
+    return `<div data-view-post="${esc(p.id)}" data-view-cid="${esc(c.id)}" data-view-title="${esc(String(p.text || (p.poll && p.poll.question) || (p.media && p.media.length ? 'Photo / video post' : 'Post')).slice(0, 60))}" class="bg-black/30 border border-white/10 rounded-xl p-3 space-y-2.5">
         <div class="flex items-center gap-2.5">
             ${avatarImg({ uid: p.authorId, name: p.authorName, avatar: p.authorAvatar }, 'w-8 h-8 rounded-full object-cover')}
             <div class="flex-1 min-w-0"><div class="text-xs font-black text-white truncate">${esc(p.authorName || 'Player')}</div><div class="text-[10px] text-white/40">${fmtAgo(tsMs(p.createdAt))}</div></div>
@@ -1955,6 +1957,9 @@ function adminTab(c) {
         <button onclick="openMoneyTracker('${jsArg(id)}')" class="w-full flex items-center gap-3 bg-gradient-to-r from-emerald-950 to-teal-950 border border-[#00F296]/50 rounded-2xl p-3 text-left">
             <span class="text-2xl">💰</span><span class="flex-1"><span class="block text-sm font-black text-white">Money tracker</span>
             <span class="block text-[10px] text-white/60">Income from games, expenses (field, water…), profit</span></span><i class="fa-solid fa-chevron-right text-white/40 text-xs"></i></button>
+        <button onclick="openAnalytics('${jsArg(id)}')" class="w-full flex items-center gap-3 bg-gradient-to-r from-sky-950 to-indigo-950 border border-sky-400/50 rounded-2xl p-3 text-left">
+            <span class="text-2xl">📈</span><span class="flex-1"><span class="block text-sm font-black text-white">Analytics</span>
+            <span class="block text-[10px] text-white/60">Who comes the most, who keeps missing, who viewed games and posts</span></span><i class="fa-solid fa-chevron-right text-white/40 text-xs"></i></button>
         ${creditOn(c) ? `<div><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Accepted payments</div>
             <p class="text-[10px] text-white/50 mb-2">Members see these when they need to add credit. Leave blank the ones you don't use.</p>
             ${paymentMethodsFormHtml(c)}
