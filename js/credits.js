@@ -491,7 +491,7 @@ const clean = (v) => String(v || '').trim().slice(0, 80);
 function payLink(kind, value, cents, note = '') {
     const amt = cents > 0 ? (cents / 100).toFixed(2) : '';
     // Venmo opens (app or site) with the amount and a note already filled in.
-    if (kind === 'venmo') return `https://venmo.com/${encodeURIComponent(value.replace(/^@/, ''))}?txn=pay${amt ? '&amount=' + amt : ''}${note ? '&note=' + encodeURIComponent(note) : ''}`;
+    if (kind === 'venmo') return `https://venmo.com/u/${encodeURIComponent(value.replace(/^@/, '').trim())}?txn=pay${amt ? '&amount=' + amt : ''}${note ? '&note=' + encodeURIComponent(note) : ''}`;
     if (kind === 'cashapp') return `https://cash.app/$${encodeURIComponent(value.replace(/^\$/, ''))}${amt ? '/' + amt : ''}`;
     if (kind === 'paypal' && !value.includes('@')) return `https://paypal.me/${encodeURIComponent(value.replace(/^https?:\/\/(www\.)?paypal\.me\//i, ''))}${amt ? '/' + amt : ''}`;
     // Apple Cash is sent from Messages: open a message to them.

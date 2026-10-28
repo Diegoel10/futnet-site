@@ -12,6 +12,7 @@ import { renderCommentsTab } from './comments-tab.js';
 import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
 import { resultsBannerHtml } from './results.js';
+import { renderLiveTab, adminLiveCardHtml, gameLiveBannerHtml, liveOf, isLive } from '../livestream.js';
 
 
 // Roster entries saved without a real name show up as "Player". Look the name up from the player's
@@ -454,7 +455,7 @@ window.openEventDetails = function(eventId) {
     window.teamAssignments[event.id] = event.teamAssignments || {};
 
     const isCreator = window.currentUser && (event.organizerId === window.currentUser.uid || (event.communityId && (window.myCommunityRoles || {})[event.communityId] === 'admin'));
-    window.activeModalTab = isCreator ? 'admin' : 'info';
+    window.activeModalTab = isCreator ? 'admin' : (isLive(event) ? 'live' : 'info');   // players land on the stream while it's live
     window.adminManagePlayersExpanded = false;
     window.adminMatchResultsExpanded = false;
     window.activeStatsSubTab = 'matches';
@@ -625,10 +626,12 @@ window.renderEventDetailModalContent = function() {
             </div>
 
             ${resultsBannerHtml(event)}
+            ${gameLiveBannerHtml(event, tab)}
 
             <!-- Navigation Tabs Bar -->
             <div class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
+                ${liveOf(event) ? `<button onclick="switchModalTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black transition whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white shadow' : 'text-red-300 hover:text-white'}">${isLive(event) ? '🔴 Live' : '▶ Replay'}</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>
                 <button onclick="switchModalTab('roster')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'roster' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${rosterDisplayLabel}</button>
                 <button onclick="switchModalTab('stats')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'stats' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Stats</button>
@@ -637,7 +640,8 @@ window.renderEventDetailModalContent = function() {
 
             <!-- Tab Content View -->
             <div class="bg-[#040E13]/95 border-2 border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-md">
-                ${tab === 'admin' && isCreator ? renderAdminTab(event) : ''}
+                ${tab === 'admin' && isCreator ? adminLiveCardHtml(event) + renderAdminTab(event) : ''}
+                ${tab === 'live' ? renderLiveTab(event, isCreator) : ''}
                 ${tab === 'info' ? window.renderInfoTab(event) : ''}
                 ${tab === 'roster' ? renderRosterTab(event) : ''}
                 ${tab === 'stats' ? renderStatsTab(event) : ''}
@@ -663,14 +667,16 @@ window.showMustPayModal = async function(ev, needed, have) {
     const render = (methods) => `
         <div class="bg-[#040E13] border border-amber-400/50 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white max-h-[92vh] overflow-y-auto">
             <div class="flex justify-between items-center border-b border-white/10 pb-3">
-                <h3 class="text-xs font-black uppercase text-amber-300"><i class="fa-solid fa-wallet mr-1"></i> Please send funds</h3>
+                <h3 class="text-xs font-black uppercase text-amber-300"><i class="fa-solid fa-wallet mr-1"></i> ${short > 0 ? 'Please send funds' : 'Add credit'}</h3>
                 <button onclick="document.getElementById('must-pay-modal').remove()" class="text-white/50 hover:text-white text-lg font-bold"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="grid grid-cols-2 gap-2 text-center">
                 <div class="bg-black/50 border border-white/10 rounded-xl p-3"><div class="text-[10px] font-black uppercase text-white/50">Game costs</div><div class="text-xl font-black text-white">${dollars(needed)}</div></div>
                 <div class="bg-black/50 border border-white/10 rounded-xl p-3"><div class="text-[10px] font-black uppercase text-white/50">Your credit</div><div class="text-xl font-black ${have >= needed ? 'text-[#00F296]' : 'text-red-300'}">${dollars(have)}</div></div>
             </div>
-            <p class="text-xs text-white/85 leading-relaxed">This is a must-pay game and you don't have enough credit yet. Send at least <b class="text-amber-300">${dollars(short)}</b> to <b>${escapeHtml(who)}</b>, then come back and join.</p>
+            <p class="text-xs text-white/85 leading-relaxed">${short > 0
+                ? `This is a must-pay game and you don't have enough credit yet. Send at least <b class="text-amber-300">${dollars(short)}</b> to <b>${escapeHtml(who)}</b>, then come back and join.`
+                : `✅ Your credit covers this game. To add more, send money to <b>${escapeHtml(who)}</b>:`}</p>
             ${methods}
             <button onclick="document.getElementById('must-pay-modal').remove()" class="w-full bg-black/60 text-white font-bold py-3 rounded-xl text-xs border border-white/20">OK</button>
         </div>`;
@@ -1067,7 +1073,8 @@ async function refreshJoinSummary(eventId) {
         }
         bal.textContent = dollars(window._joinBalanceCents);
         const warn = document.getElementById('join-short-warning');
-        if (warn) warn.classList.toggle('hidden', window._joinBalanceCents >= costCents(ev, count) - ((ev.attendees || []).find(a => String(a.uid) === String(window.currentUser?.uid)) || {}).creditPaidCents || 0);
+        const alreadyPaid = (((ev.attendees || []).find(a => String(a.uid) === String(window.currentUser?.uid)) || {}).creditPaidCents) || 0;
+        if (warn) warn.classList.toggle('hidden', window._joinBalanceCents >= costCents(ev, count) - alreadyPaid);
     }
 }
 

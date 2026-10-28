@@ -539,6 +539,23 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
   //     player cancels, that team gets the next pick (then the normal order goes on).
   try { await capsDraftUpdates(eventId, before, after, title, organizer); } catch (e) { logger.warn("caps draft", eventId, e.message); }
 
+  // e3) Livestream started: the whole community (or everyone in the game, for games outside a community).
+  const ls = after.livestream, lsBefore = before.livestream;
+  if (ls && ls.status === "live" && ls.startedAt && (!lsBefore || lsBefore.startedAt !== ls.startedAt)) {
+    try {
+      const people = after.communityId ? (await communityMembers(after.communityId)).all : participants(after);
+      const who = ls.startedByName || (await nameOf(ls.startedBy || organizer));
+      await notify(people, {
+        type: "game_live",
+        senderUid: ls.startedBy || organizer,
+        eventId,
+        communityId: after.communityId || "",
+        title: `🔴 LIVE now: ${title}`,
+        body: `${who} is streaming ${title}. Tap to watch.`,
+      }, { exclude: [ls.startedBy], key: `live_${eventId}_${ls.startedAt}` });
+    } catch (e) { logger.warn("livestream push", eventId, e.message); }
+  }
+
   // f) Admin tapped End Event -> results are ready
   if (!before.isSessionEnded && after.isSessionEnded === true) {
     await notify(uniq([...participants(after), organizer]), {
@@ -2760,7 +2777,7 @@ exports.checkCommunitySlug = onCall(async (request) => {
 // Diego's account (poncediego@hotmail.com) but shows as "FutNet Admin" with the logo; their replies
 // land in Diego's Chats. Sent once per person (adminWelcomed/{uid}); accounts older than 2 days are skipped.
 // ---------------------------------------------------------------------------------------------
-const FUTNET_ADMIN_EMAIL = "poncediego@hotmail.com";
+const FUTNET_ADMIN_EMAIL = "diegoponce05@gmail.com";   // the "FutNet Admin" account (welcome chat for new players)
 const FUTNET_ADMIN_NAME = "FutNet Admin";
 const FUTNET_ADMIN_AVATAR = "https://futnet.site/img/FutnetJustLogo.png";
 const FUTNET_ADMIN_WELCOME = "Welcome to FutNet! ⚽ Please ask me any question about the app. I'm here to help.";

@@ -774,6 +774,13 @@ window.setCommunityTab = (t) => { S.tab = t; renderCommunityPage(); };
 // "Going" counts are live. Only that tab, so typing in the feed or chat is never interrupted.
 window.setCommunityGamesView = (v) => { S.gamesView = v === 'prev' ? 'prev' : 'up'; renderCommunityPage(); };
 window.refreshCommunityGamesTab = () => {
+    // Feed: redraw only when a game of this community starts or stops streaming (the LIVE banner).
+    if (S.activeId && S.tab === 'feed') {
+        const live = (window.eventsList || []).filter(e => e.communityId === S.activeId && e.livestream && e.livestream.status === 'live').map(e => e.id).join(',');
+        if (live !== (window._commLiveSig ?? live)) { window._commLiveSig = live; renderCommunityPage(); }
+        window._commLiveSig = live;
+        return;
+    }
     if (!(S.activeId && S.tab === 'games')) return;
     // Redraw only when this community's games changed (not when any game anywhere changed).
     const sig = S.activeId + '|' + JSON.stringify((window.eventsList || []).filter(e => e.communityId === S.activeId));
@@ -1508,6 +1515,7 @@ function feedTab(c, isMember, isAdmin) {
     }
     const canPost = isMember && !suspFrom('feed') && (!c.adminOnlyFeed || isAdmin);
     return `<div class="space-y-4">
+        ${window.communityLiveBannerHtml ? window.communityLiveBannerHtml(c.id) : ''}
         ${canPost ? `
         <button onclick="openPostComposer()" class="w-full flex items-center gap-3 bg-black/30 border border-white/10 rounded-xl p-3 text-left hover:bg-black/50 transition">
             ${avatarImg({ uid: me().uid, name: myName(), avatar: myAvatar() }, 'w-9 h-9 rounded-full object-cover shrink-0')}
