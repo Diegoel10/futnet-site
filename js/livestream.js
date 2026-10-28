@@ -47,7 +47,9 @@ window.openStartLivestream = function (eventId) {
         </ol>
         <input id="ls-url" type="url" inputmode="url" placeholder="https://youtube.com/live/…" autocomplete="off"
             class="w-full bg-black/60 border border-red-500/50 rounded-xl px-3 py-2.5 text-white text-base sm:text-sm focus:outline-none focus:border-red-400">
-        <p class="text-[10px] text-white/50">Everyone in the community gets a notification, and a red LIVE banner shows on the game and the community feed.</p>
+        <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
+            <input id="ls-notify" type="checkbox" checked class="w-5 h-5 accent-red-500 shrink-0">
+            <span class="text-xs"><b>Notify the community</b><span class="block text-[10px] text-white/50">Untick it to test: no push goes out. The red LIVE banner still shows on the game and the feed.</span></span></label>
         <button id="ls-go" onclick="startLivestream('${jsArg(eventId)}')" class="w-full bg-red-600 hover:bg-red-500 text-white font-black py-3 rounded-xl text-sm">Go live</button>
     </div>`;
     f.onclick = () => f.remove();
@@ -62,14 +64,15 @@ window.startLivestream = async function (eventId) {
         toast(/youtube\.com\/(@|c\/|channel\/)/i.test(url) ? 'That\'s a channel link. Open the live video itself and copy its link (Share → Copy link).' : 'Paste a YouTube video link (like youtube.com/live/… or youtu.be/…).', 'error');
         return;
     }
+    const notify = document.getElementById('ls-notify') ? document.getElementById('ls-notify').checked : true;
     const b = document.getElementById('ls-go'); if (b) { b.disabled = true; b.textContent = 'Going live…'; }
     const me = window.currentUser;
     const res = await mutateEvent(eventId, (draft) => {
-        draft.livestream = { url, videoId, status: 'live', startedAt: Date.now(), startedBy: String(me?.uid || ''), startedByName: myName() };
+        draft.livestream = { url, videoId, status: 'live', startedAt: Date.now(), startedBy: String(me?.uid || ''), startedByName: myName(), notify };
     });
     document.getElementById('livestream-modal')?.remove();
     if (!res.ok) return;
-    toast("You're live! 🔴 The community was notified.");
+    toast(notify ? "You're live! 🔴 The community was notified." : "You're live! 🔴 (no notification sent)");
     window.activeModalTab = 'live';
     if (window.renderEventDetailModalContent) window.renderEventDetailModalContent();
 };
@@ -89,16 +92,15 @@ window.removeLivestream = async function (eventId) {
     if (res.ok) { if (window.activeModalTab === 'live') window.activeModalTab = 'info'; window.renderEventDetailModalContent && window.renderEventDetailModalContent(); }
 };
 
-/** Top of the game's Admin tab. */
+/** Top of the game's Admin tab: only while live (the "Go live" button sits in Event Controls). */
 export function adminLiveCardHtml(ev) {
     const ls = liveOf(ev);
-    if (ls && ls.status === 'live') return `<div class="bg-red-600/15 border-2 border-red-500 rounded-2xl p-3 flex items-center gap-3 mb-4">
+    if (!(ls && ls.status === 'live')) return '';
+    return `<div class="bg-red-600/15 border-2 border-red-500 rounded-2xl p-3 flex items-center gap-3 mb-4">
         <span class="w-3 h-3 rounded-full bg-red-500 animate-pulse shrink-0"></span>
-        <div class="flex-1 min-w-0"><div class="text-sm font-black text-white">You're live</div><div class="text-[10px] text-white/60">Started by ${esc(ls.startedByName || 'an admin')}</div></div>
+        <div class="flex-1 min-w-0"><div class="text-sm font-black text-white">You're live</div><div class="text-[10px] text-white/60">Started by ${esc(ls.startedByName || 'an admin')}${ls.notify === false ? ' · no notification sent' : ''}</div></div>
         <button onclick="switchModalTab('live')" class="bg-white/10 border border-white/20 text-white font-black text-xs px-3 py-2 rounded-xl">Watch</button>
         <button onclick="endLivestream('${jsArg(ev.id)}')" class="bg-red-600 text-white font-black text-xs px-3 py-2 rounded-xl">End</button></div>`;
-    return `<button onclick="openStartLivestream('${jsArg(ev.id)}')" class="w-full mb-4 bg-red-600 hover:bg-red-500 text-white font-black py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-[0_0_18px_rgba(239,68,68,0.35)]">
-        <span class="w-2.5 h-2.5 rounded-full bg-white"></span> ${ls ? 'Start a new livestream' : 'Start livestream'}</button>`;
 }
 
 /** Red LIVE bar on the game page (any tab but Live). */

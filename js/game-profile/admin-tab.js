@@ -241,6 +241,7 @@ export function renderAdminTab(event) {
                     <div class="flex flex-wrap gap-2">
                         <button onclick="openTwoPageGameWizard('${event.id}', 'edit')" class="bg-[#00F296] text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow">Edit Game</button>
                         <button onclick="openTwoPageGameWizard('${event.id}', 'copy')" class="bg-black/60 text-white font-bold px-4 py-2.5 rounded-xl text-xs border border-white/20">Copy Event</button>
+                        ${event.livestream && event.livestream.status === 'live' ? '' : `<button onclick="openStartLivestream('${event.id}')" class="bg-red-600 text-white font-black px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-white"></span> Go live</button>`}
                         <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl text-xs border border-red-500/40">Cancel Game</button>
                     </div>
                 </div>

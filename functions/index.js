@@ -541,7 +541,7 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
 
   // e3) Livestream started: the whole community (or everyone in the game, for games outside a community).
   const ls = after.livestream, lsBefore = before.livestream;
-  if (ls && ls.status === "live" && ls.startedAt && (!lsBefore || lsBefore.startedAt !== ls.startedAt)) {
+  if (ls && ls.status === "live" && ls.notify !== false && ls.startedAt && (!lsBefore || lsBefore.startedAt !== ls.startedAt)) {
     try {
       const people = after.communityId ? (await communityMembers(after.communityId)).all : participants(after);
       const who = ls.startedByName || (await nameOf(ls.startedBy || organizer));
