@@ -700,8 +700,16 @@ async function healMyMemberRecord(cid) {
     catch (e) { /* the rules may not allow it; pictures still come from the directory */ }
 }
 
+// If opening a community ever fails, say why instead of doing nothing (the owner also sees the details).
 window.openCommunity = async function(id, tab) {
-    if (!window.currentUser) return;
+    try { return await openCommunityInner(id, tab); }
+    catch (e) {
+        console.error('openCommunity', e);
+        toast(`Couldn't open the community. ${window.__futnetOwner ? 'Error: ' + (e && e.message || e) : 'Try again.'}`, 'error');
+    }
+};
+async function openCommunityInner(id, tab) {
+    if (!window.currentUser) { toast('Still signing you in… try again in a second.', 'error'); return; }
     stopCommunityListeners();
     S.activeId = id; S.tab = tab || 'info'; S.members = []; S.requests = []; S.feed = [];
     if (window.switchTab && document.getElementById('tab-hub')?.classList.contains('hidden')) window.switchTab('hub');
@@ -798,6 +806,13 @@ function communityGames(id) {
 }
 
 function renderCommunityPage() {
+    try { renderCommunityPageInner(); }
+    catch (e) {
+        console.error('renderCommunityPage', e);
+        toast(`Couldn't show the community. ${window.__futnetOwner ? 'Error: ' + (e && e.message || e) : 'Try again.'}`, 'error');
+    }
+}
+function renderCommunityPageInner() {
     const el = root();
     const id = S.activeId;
     if (!el || !id || document.getElementById('tab-hub')?.classList.contains('hidden')) return;

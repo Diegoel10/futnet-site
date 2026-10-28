@@ -20,6 +20,25 @@ window.isFutnetOwner = async function () {
     return OWNER_EMAIL_SHA256.includes(await sha256(mail));
 };
 
+// Owner only: any error on the page shows up as a red message, so problems can be reported with a screenshot.
+(function watchForOwner() {
+    let tries = 0;
+    const check = async () => {
+        tries++;
+        if (auth.currentUser) { window.__futnetOwner = await window.isFutnetOwner(); return; }
+        if (tries < 120) setTimeout(check, 1000);
+    };
+    setTimeout(check, 500);
+    let last = 0;
+    const show = (msg) => {
+        if (!window.__futnetOwner || !window.showToast || Date.now() - last < 3000) return;
+        last = Date.now();
+        window.showToast('⚠️ (only you see this) ' + String(msg || 'Unknown error').slice(0, 160), 'error');
+    };
+    window.addEventListener('error', (e) => show(e && (e.message || (e.error && e.error.message))));
+    window.addEventListener('unhandledrejection', (e) => show(e && e.reason && (e.reason.message || e.reason)));
+})();
+
 /** Shows the owner tools button inside #owner-tools-slot (profile page) when this is the owner. */
 window.renderOwnerTools = async function () {
     const slot = document.getElementById('owner-tools-slot');
