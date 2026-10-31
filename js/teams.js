@@ -36,9 +36,6 @@ const DEFAULT_AV = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-c
 export const LEVELS = [['casual', 'Casual'], ['intermediate', 'Intermediate'], ['competitive', 'Competitive']];
 export const JOIN_MODES = [['ask', 'Ask to join', 'Players ask, a captain approves'], ['open', 'Open', 'Anyone can join right away'], ['invite', 'Invite only', 'Only captains add players']];
 export const COLORS = ['#00F296', '#0EA5E9', '#2563EB', '#7C3AED', '#DB2777', '#DC2626', '#EA580C', '#FACC15', '#16A34A', '#FFFFFF', '#9CA3AF', '#111827'];
-export const SHAPES = ['shield', 'circle', 'diamond', 'hexagon'];
-export const PATTERNS = ['plain', 'stripes', 'half', 'band', 'hoops'];
-export const ICONS = ['⚽', '⭐', '⚡', '🔥', '🦁', '🦅', '🐺', '👑', '🐉', '🌊', '🐍', '🛡️'];
 export const POSITIONS = ['GK', 'DEF', 'MID', 'FWD'];
 export const FORMATS = {
     '4v4': ['2-1', '1-2', '1-1-1'],
@@ -95,11 +92,32 @@ export function formationSpots(formation) {
 }
 
 // ---------------------------------------------------------------- crest (logo maker), an SVG
-const SHAPE_PATH = {
+// logo: { type: 'crest', shape, style: 'filled'|'outline', pattern, icon, text: 'short'|'none', ring: true|false }
+// The phones draw the same shapes from the same numbers (100 x 100 box).
+export const SHAPE_PATH = {
     shield: 'M50 4 L92 16 V48 C92 74 72 90 50 98 C28 90 8 74 8 48 V16 Z',
+    classic: 'M8 6 H92 V52 C92 76 72 90 50 98 C28 90 8 76 8 52 Z',
+    badge: 'M50 3 C64 10 80 10 94 6 V50 C94 76 74 92 50 98 C26 92 6 76 6 50 V6 C20 10 36 10 50 3 Z',
     circle: 'M50 4 A46 46 0 1 1 49.9 4 Z',
+    square: 'M20 6 H80 Q94 6 94 20 V80 Q94 94 80 94 H20 Q6 94 6 80 V20 Q6 6 20 6 Z',
     diamond: 'M50 3 L97 50 L50 97 L3 50 Z',
     hexagon: 'M50 3 L91 26 V74 L50 97 L9 74 V26 Z',
+    octagon: 'M31 4 H69 L96 31 V69 L69 96 H31 L4 69 V31 Z',
+    pennant: 'M8 6 H92 L50 98 Z',
+    star: 'M50 3 L62 36 L97 37 L69 58 L79 93 L50 72 L21 93 L31 58 L3 37 L38 36 Z',
+};
+export const SHAPES = Object.keys(SHAPE_PATH);
+export const PATTERNS = ['plain', 'stripes', 'half', 'band', 'hoops', 'quarters', 'chevron', 'cross', 'sash'];
+export const ICONS = ['⚽', '⭐', '⚡', '🔥', '🦁', '🦅', '🐺', '👑', '🐉', '🌊', '🐍', '🛡️', '🐂', '🦈', '🐯', '🐻', '🦂', '🌴', '☀️', '🌙', '💀', '🏆', '⚔️', '🎯'];
+const PATTERN_SVG = {
+    stripes: (s) => [20, 44, 68].map(x => `<rect x="${x}" y="0" width="12" height="100" fill="${s}"/>`).join(''),
+    half: (s) => `<rect x="50" y="0" width="50" height="100" fill="${s}"/>`,
+    band: (s) => `<polygon points="0,70 70,0 100,0 100,10 10,100 0,100" fill="${s}"/>`,
+    hoops: (s) => [22, 50, 78].map(y => `<rect x="0" y="${y - 6}" width="100" height="12" fill="${s}"/>`).join(''),
+    quarters: (s) => `<rect x="50" y="0" width="50" height="50" fill="${s}"/><rect x="0" y="50" width="50" height="50" fill="${s}"/>`,
+    chevron: (s) => `<polygon points="0,30 50,60 100,30 100,48 50,78 0,48" fill="${s}"/>`,
+    cross: (s) => `<rect x="42" y="0" width="16" height="100" fill="${s}"/><rect x="0" y="40" width="100" height="16" fill="${s}"/>`,
+    sash: (s) => `<polygon points="0,0 22,0 100,78 100,100 78,100 0,22" fill="${s}"/>`,
 };
 function textOn(hex) {
     const h = String(hex || '#000').replace('#', '');
@@ -110,23 +128,24 @@ export function crestSvg(team, size = 64) {
     const lg = (team && team.logo) || {};
     const p = (team.colors && team.colors.primary) || '#00F296', s = (team.colors && team.colors.secondary) || '#0B141A';
     const shape = SHAPE_PATH[lg.shape] ? lg.shape : 'shield';
+    const path = SHAPE_PATH[shape];
+    const outline = lg.style === 'outline';
     const id = 'c' + Math.random().toString(36).slice(2, 8);
-    let pattern = '';
-    if (lg.pattern === 'stripes') pattern = [20, 44, 68].map(x => `<rect x="${x}" y="0" width="12" height="100" fill="${s}"/>`).join('');
-    else if (lg.pattern === 'half') pattern = `<rect x="50" y="0" width="50" height="100" fill="${s}"/>`;
-    else if (lg.pattern === 'band') pattern = `<polygon points="0,70 70,0 100,0 100,10 10,100 0,100" fill="${s}"/>`;
-    else if (lg.pattern === 'hoops') pattern = [22, 50, 78].map(y => `<rect x="0" y="${y - 6}" width="100" height="12" fill="${s}"/>`).join('');
-    const short = esc(String(team.short || shortName(team.name)).slice(0, 4));
-    const icon = lg.icon ? `<text x="50" y="44" text-anchor="middle" font-size="26">${esc(lg.icon)}</text>` : '';
+    const pat = !outline && PATTERN_SVG[lg.pattern] ? PATTERN_SVG[lg.pattern](s) : '';
+    const short = lg.text === 'none' ? '' : esc(String(team.short || shortName(team.name)).slice(0, 4));
+    const icon = lg.icon ? `<text x="50" y="${short ? 44 : 62}" text-anchor="middle" font-size="${short ? 26 : 40}">${esc(lg.icon)}</text>` : '';
     const ty = lg.icon ? 72 : 60;
     const fs = short.length > 3 ? 19 : 23;
+    const txtFill = outline ? p : textOn(lg.pattern === 'half' || lg.pattern === 'quarters' ? p : p);
+    const halo = !outline && pat ? (textOn(p) === '#FFFFFF' ? '#0B141A' : '#FFFFFF') : 'none';
+    const ring = lg.ring ? `<path d="${path}" fill="none" stroke="${outline ? s : '#FFFFFF'}" stroke-width="2" transform="translate(50 50) scale(0.84) translate(-50 -50)"/>` : '';
     return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-        <defs><clipPath id="${id}"><path d="${SHAPE_PATH[shape]}"/></clipPath></defs>
-        <g clip-path="url(#${id})"><rect width="100" height="100" fill="${p}"/>${pattern}</g>
-        <path d="${SHAPE_PATH[shape]}" fill="none" stroke="${s}" stroke-width="4"/>
-        ${icon}
-        <text x="50" y="${ty}" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="${fs}"
-            fill="${textOn(lg.pattern === 'half' ? s : p)}" stroke="${lg.pattern && lg.pattern !== 'plain' ? (textOn(p) === '#FFFFFF' ? '#0B141A' : '#FFFFFF') : 'none'}" stroke-width="${lg.pattern && lg.pattern !== 'plain' ? 1.2 : 0}" paint-order="stroke">${short}</text>
+        <defs><clipPath id="${id}"><path d="${path}"/></clipPath></defs>
+        ${outline ? `<path d="${path}" fill="rgba(0,0,0,0.35)"/>` : `<g clip-path="url(#${id})"><rect width="100" height="100" fill="${p}"/>${pat}</g>`}
+        <path d="${path}" fill="none" stroke="${outline ? p : s}" stroke-width="${outline ? 6 : 4}" stroke-linejoin="round"/>
+        ${ring}${icon}
+        ${short ? `<text x="50" y="${ty}" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="${fs}"
+            fill="${txtFill}" stroke="${halo}" stroke-width="${halo === 'none' ? 0 : 1.2}" paint-order="stroke">${short}</text>` : ''}
     </svg>`;
 }
 /** The team's logo: its photo, else the crest. */
@@ -138,7 +157,9 @@ export function teamLogoHtml(team, size = 48) {
 window.teamLogoHtml = teamLogoHtml;
 function randomCrest() {
     const pick = (a) => a[Math.floor(Math.random() * a.length)];
-    return { type: 'crest', shape: pick(SHAPES), pattern: pick(PATTERNS), icon: Math.random() < 0.6 ? pick(ICONS) : '' };
+    const outline = Math.random() < 0.25;
+    return { type: 'crest', shape: pick(SHAPES), style: outline ? 'outline' : 'filled', pattern: outline ? 'plain' : pick(PATTERNS),
+        icon: Math.random() < 0.6 ? pick(ICONS) : '', text: 'short', ring: Math.random() < 0.3 };
 }
 
 // ---------------------------------------------------------------- live data
@@ -210,20 +231,26 @@ function teamCard(t, right = '') {
 export function renderTeamsTab() {
     const el = root(); if (!el) return;
     if (!me()) { el.innerHTML = '<p class="text-xs text-white/50 text-center py-10">Sign in to see teams.</p>'; return; }
+    const hasTeams = T.mine.length > 0;
+    // Your first team: go to "My teams".
+    if (hasTeams && T._noTeams) { T._noTeams = false; T.section = 'mine'; }
+    if (!hasTeams) T._noTeams = true;
+    // "My teams" only shows once you're on a team.
+    if (!hasTeams && T.section === 'mine') { T.section = 'find'; if (!T.all.length && !T._loadingAll) { T._loadingAll = true; loadAll().then(() => { T._loadingAll = false; }); } }
     const sec = T.section;
-    const chip = (k, l) => `<button onclick="teamsSection('${k}')" class="px-3.5 py-2 rounded-xl text-xs font-black transition ${sec === k ? 'bg-[#00F296] text-slate-950' : 'bg-black/50 text-white/75 border border-white/10'}">${l}</button>`;
+    const chip = (k, l) => `<button onclick="teamsSection('${k}')" class="shrink-0 whitespace-nowrap px-3.5 py-2 rounded-xl text-xs font-black transition ${sec === k ? 'bg-[#00F296] text-slate-950' : 'bg-black/50 text-white/75 border border-white/10'}">${l}</button>`;
     let body = '';
     if (sec === 'find') {
         const q = T.search.trim().toLowerCase();
-        const list = T.all.filter(t => !q || `${t.name} ${t.city || ''}`.toLowerCase().includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-        body = `<input id="teams-search" class="${INPUT}" placeholder="Search teams by name or city" value="${esc(T.search)}" oninput="teamsSearch(this.value)">
+        const list = T.all.filter(t => !q || `${t.name} ${t.city || ''} ${t.state || ''} ${t.country || ''}`.toLowerCase().includes(q)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        body = `<input id="teams-search" class="${INPUT}" placeholder="Search teams by name, city, state or country" value="${esc(T.search)}" oninput="teamsSearch(this.value)">
             <div class="space-y-2">${list.length ? list.map(t => teamCard(t)).join('') : '<p class="text-xs text-white/45 text-center py-6">No teams found.</p>'}</div>`;
     } else if (sec === 'agents') {
         const a = T.myAgent;
         const mineToInvite = T.mine.filter(t => canManage(t));
         body = `<div class="${CARD} space-y-2">
                 <div class="flex items-center justify-between gap-3">
-                    <div><div class="text-sm font-black text-white">I'm a free agent</div><div class="text-[11px] text-white/55">Captains looking for players can find you and invite you.</div></div>
+                    <div><div class="text-sm font-black text-white">I am looking for a team</div><div class="text-[11px] text-white/55">Captains looking for players can find you and invite you.</div></div>
                     <label class="relative inline-flex items-center cursor-pointer shrink-0"><input type="checkbox" ${a && a.on ? 'checked' : ''} onchange="toggleFreeAgent(this.checked)" class="sr-only peer">
                         <span class="w-11 h-6 bg-white/15 rounded-full peer-checked:bg-[#00F296] transition"></span><span class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition peer-checked:translate-x-5"></span></label>
                 </div>
@@ -242,29 +269,60 @@ export function renderTeamsTab() {
                     </div>
                     ${mineToInvite.length ? `<button onclick="inviteFreeAgent('${jsq(x.uid)}','${jsq(x.name)}')" class="${BTN} shrink-0">Invite</button>` : ''}
                 </div>`).join('') || '<p class="text-xs text-white/45 text-center py-6">No free agents right now.</p>'}</div>`;
+    } else if (sec === 'leaders') {
+        body = leadersHtml();
     } else {
-        body = `${T.invites.length ? `<div class="text-[10px] font-black text-amber-300 uppercase tracking-wider">Invites (${T.invites.length})</div>
+        body = `<div class="space-y-2">${T.mine.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map(t => teamCard(t)).join('')}</div>`;
+    }
+    const invites = T.invites.length ? `<div class="text-[10px] font-black text-amber-300 uppercase tracking-wider">Invites (${T.invites.length})</div>
             <div class="space-y-2">${T.invites.map(iv => `<div class="flex items-center gap-3 bg-amber-400/10 border border-amber-400/40 rounded-2xl p-3">
                 <div class="flex-1 min-w-0"><div class="text-sm font-black text-white truncate">${esc(iv.teamName || 'A team')}</div>
                 <div class="text-[11px] text-white/60">${esc(iv.byName || 'A captain')} invited you to join</div></div>
                 <button onclick="answerInvite('${jsq(iv.id)}', false)" class="${DARK}">Decline</button>
-                <button onclick="answerInvite('${jsq(iv.id)}', true)" class="${BTN}">Join</button></div>`).join('')}</div>` : ''}
-            <div class="space-y-2">${T.mine.length ? T.mine.sort((a, b) => String(a.name).localeCompare(String(b.name))).map(t => teamCard(t)).join('')
-                : `<div class="${CARD} text-center space-y-3 py-8"><div class="text-4xl">🛡️</div><div class="text-sm font-black text-white">No team yet</div>
-                    <p class="text-[11px] text-white/55">Create your team, add your players, set your lineup, then play VS Mode games against other teams.</p>
-                    <button onclick="openCreateTeam()" class="${BTN}">+ Create a team</button></div>`}</div>`;
-    }
+                <button onclick="answerInvite('${jsq(iv.id)}', true)" class="${BTN}">Join</button></div>`).join('')}</div>` : '';
+    const noTeam = hasTeams ? '' : `<div class="${CARD} text-center space-y-3 py-6"><div class="text-4xl">🛡️</div><div class="text-sm font-black text-white">No team yet</div>
+                    <p class="text-[11px] text-white/55">Create your team, add your players, set your lineup, then play VS Mode games against other teams. Or find a team below.</p>
+                    <button onclick="openCreateTeam()" class="${BTN}">+ Create a team</button></div>`;
     el.innerHTML = `<div class="space-y-4">
         <div class="${CARD} flex items-center justify-between gap-3">
             <div><h2 class="text-xl font-black text-white">Teams</h2><p class="text-white/65 text-xs">Your teams, players and lineups. VS Mode is coming next.</p></div>
             <button onclick="openCreateTeam()" class="${BTN} shrink-0">+ Create team</button>
         </div>
-        <div class="flex gap-2 overflow-x-auto">${chip('mine', 'My teams')}${chip('find', 'Find teams')}${chip('agents', 'Free agents')}</div>
+        ${invites}${noTeam}
+        <div class="flex gap-2 overflow-x-auto">${hasTeams ? chip('mine', 'My teams') : ''}${chip('find', 'Find teams')}${chip('agents', 'Free agents')}${chip('leaders', '🏆 Leaderboards')}</div>
         ${body}
     </div>`;
     if (sec === 'find') { const i = document.getElementById('teams-search'); if (i && document.activeElement !== i && T._typing) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
 }
-window.teamsSection = (k) => { T.section = k; if (k === 'find') loadAll(); if (k === 'agents') loadAgents(); renderTeamsTab(); };
+window.teamsSection = (k) => { T.section = k; if (k === 'find' || k === 'leaders') loadAll(); if (k === 'agents') loadAgents(); renderTeamsTab(); };
+
+// ---- Leaderboards: team standings (3 points a win, 1 a draw). Records come from VS Mode games.
+//      team.record = { w, d, l, gf, ga }  (saved by the server when a VS game ends)
+export function standings(teams) {
+    return teams.map(t => {
+        const r = t.record || {};
+        const w = +r.w || 0, d = +r.d || 0, l = +r.l || 0, gf = +r.gf || 0, ga = +r.ga || 0;
+        return { t, w, d, l, gf, ga, p: w + d + l, pts: w * 3 + d, gd: gf - ga };
+    }).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || b.w - a.w || (b.t.members || []).length - (a.t.members || []).length || String(a.t.name).localeCompare(String(b.t.name)));
+}
+function leadersHtml() {
+    const lv = T.leadLevel || 'all';
+    const list = standings(T.all.filter(t => lv === 'all' || t.level === lv)).slice(0, 50);
+    const played = list.some(r => r.p > 0);
+    const chip = (k, l) => `<button onclick="teamsLeadLevel('${k}')" class="px-3 py-1.5 rounded-lg text-[11px] font-black ${lv === k ? 'bg-white text-slate-950' : 'bg-white/10 text-white/75'}">${l}</button>`;
+    return `<div class="flex gap-1.5 overflow-x-auto">${chip('all', 'All')}${LEVELS.map(([k, l]) => chip(k, l)).join('')}</div>
+        ${played ? '' : '<p class="text-[11px] text-white/55">Standings fill up as teams play VS Mode games (coming next). 3 points for a win, 1 for a draw.</p>'}
+        <div class="${CARD} !p-0 overflow-hidden">
+            <div class="grid grid-cols-[28px_1fr_28px_28px_28px_28px_36px_36px] gap-1 px-3 py-2 text-[9px] font-black uppercase text-white/45 border-b border-white/10">
+                <span>#</span><span>Team</span><span class="text-center">P</span><span class="text-center">W</span><span class="text-center">D</span><span class="text-center">L</span><span class="text-center">GD</span><span class="text-center text-[#00F296]">Pts</span></div>
+            ${list.map((r, i) => `<div onclick="openTeam('${jsq(r.t.id)}')" class="grid grid-cols-[28px_1fr_28px_28px_28px_28px_36px_36px] gap-1 px-3 py-2 items-center text-xs border-b border-white/5 cursor-pointer hover:bg-white/5">
+                <span class="font-black ${i < 3 && played ? 'text-[#FACC15]' : 'text-white/50'}">${i + 1}</span>
+                <span class="flex items-center gap-2 min-w-0">${teamLogoHtml(r.t, 26)}<span class="font-bold truncate">${esc(r.t.name)}</span></span>
+                <span class="text-center text-white/70">${r.p}</span><span class="text-center text-white/70">${r.w}</span><span class="text-center text-white/70">${r.d}</span><span class="text-center text-white/70">${r.l}</span>
+                <span class="text-center text-white/70">${r.gd > 0 ? '+' : ''}${r.gd}</span><span class="text-center font-black text-[#00F296]">${r.pts}</span></div>`).join('') || '<p class="text-xs text-white/45 text-center py-6">No teams yet.</p>'}
+        </div>`;
+}
+window.teamsLeadLevel = (k) => { T.leadLevel = k; renderTeamsTab(); };
 window.teamsSearch = (v) => { T.search = v; T._typing = true; renderTeamsTab(); T._typing = false; const i = document.getElementById('teams-search'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } };
 
 // ---------------------------------------------------------------- create / edit team
@@ -282,7 +340,7 @@ function sheet(id, title, body) {
     document.body.appendChild(m);
     return m;
 }
-const F = { editing: null, name: '', short: '', shortTouched: false, primary: '#00F296', secondary: '#0B141A', level: 'casual', joinMode: 'ask', city: '', logo: null, photoFile: null, nameOk: null, ideas: [] };
+const F = { editing: null, name: '', short: '', shortTouched: false, primary: '#00F296', secondary: '#0B141A', level: 'casual', joinMode: 'ask', city: '', state: '', country: '', rosterPrivate: false, lineupPrivate: false, logo: null, photoFile: null, nameOk: null, ideas: [] };
 window.__teamForm = F;
 
 window.openCreateTeam = function (teamId) {
@@ -290,10 +348,14 @@ window.openCreateTeam = function (teamId) {
     Object.assign(F, t ? {
         editing: t.id, name: t.name || '', short: t.short || shortName(t.name), shortTouched: true,
         primary: (t.colors && t.colors.primary) || '#00F296', secondary: (t.colors && t.colors.secondary) || '#0B141A',
-        level: t.level || 'casual', joinMode: t.joinMode || 'ask', city: t.city || '', logo: t.logo || randomCrest(), photoFile: null, nameOk: true, ideas: [],
+        level: t.level || 'casual', joinMode: t.joinMode || 'ask', city: t.city || '', state: t.state || '', country: t.country || '',
+        rosterPrivate: t.rosterPrivate === true, lineupPrivate: t.lineupPrivate === true,
+        logo: t.logo || randomCrest(), photoFile: null, nameOk: true, ideas: [],
     } : {
         editing: null, name: '', short: '', shortTouched: false, primary: '#00F296', secondary: '#0B141A', level: 'casual', joinMode: 'ask',
-        city: (window.userProfile && window.userProfile.city) || '', logo: randomCrest(), photoFile: null, nameOk: null, ideas: [],
+        city: (window.userProfile && window.userProfile.city) || '', state: (window.userProfile && window.userProfile.state) || '',
+        country: (window.userProfile && window.userProfile.country) || 'USA', rosterPrivate: false, lineupPrivate: false,
+        logo: randomCrest(), photoFile: null, nameOk: null, ideas: [],
     });
     sheet('team-form', t ? 'Edit team' : 'Create a team', formBody());
     drawFormPreview();
@@ -306,29 +368,33 @@ function formBody() {
         <div class="flex items-center gap-4">
             <div id="tf-preview" class="shrink-0"></div>
             <div class="flex-1 space-y-2">
-                <button type="button" onclick="teamFormShuffle()" class="${DARK} w-full"><i class="fa-solid fa-shuffle mr-1"></i> Make one for me</button>
                 <button type="button" onclick="document.getElementById('tf-photo').click()" class="${DARK} w-full"><i class="fa-regular fa-image mr-1"></i> Upload a logo</button>
+                <button type="button" onclick="openLogoStudio()" class="${DARK} w-full"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Create a logo</button>
                 <input id="tf-photo" type="file" accept="image/*" class="hidden" onchange="teamFormPhoto(this)">
             </div>
         </div>
-        <div id="tf-crest-opts" class="space-y-2 ${F.logo && F.logo.type === 'photo' ? 'hidden' : ''}">
-            <div class="flex flex-wrap gap-1.5">${SHAPES.map(s => `<button type="button" onclick="teamFormCrest('shape','${s}')" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold ${F.logo && F.logo.shape === s ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white/80'}">${s}</button>`).join('')}</div>
-            <div class="flex flex-wrap gap-1.5">${PATTERNS.map(s => `<button type="button" onclick="teamFormCrest('pattern','${s}')" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold ${F.logo && F.logo.pattern === s ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white/80'}">${s}</button>`).join('')}</div>
-            <div class="flex flex-wrap gap-1">${['', ...ICONS].map(s => `<button type="button" onclick="teamFormCrest('icon','${s}')" class="w-9 h-9 rounded-lg text-lg ${F.logo && (F.logo.icon || '') === s ? 'bg-[#00F296]/30 border border-[#00F296]' : 'bg-white/5'}">${s || '<span class="text-[10px] text-white/60">none</span>'}</button>`).join('')}</div>
-        </div>
         <div>${lbl('Team name *')}<input id="tf-name" class="${INPUT}" maxlength="40" value="${esc(F.name)}" placeholder="e.g. Coconut Creek United" oninput="teamFormName(this.value)">
             <div id="tf-name-msg" class="text-[11px] mt-1.5"></div></div>
+        <div class="w-28">${lbl('Short name')}<input id="tf-short" class="${INPUT} uppercase" maxlength="4" value="${esc(F.short)}" oninput="teamFormShort(this.value)"></div>
+        <div>${lbl('City')}<input id="tf-city" class="${INPUT}" maxlength="40" value="${esc(F.city)}" placeholder="City" oninput="window.__teamForm.city=this.value"></div>
         <div class="flex gap-3">
-            <div class="w-28">${lbl('Short name')}<input id="tf-short" class="${INPUT} uppercase" maxlength="4" value="${esc(F.short)}" oninput="teamFormShort(this.value)"></div>
-            <div class="flex-1">${lbl('City')}<input id="tf-city" class="${INPUT}" maxlength="40" value="${esc(F.city)}" placeholder="City" oninput="window.__teamForm.city=this.value"></div>
+            <div class="flex-1">${lbl('State')}<input id="tf-state" class="${INPUT}" maxlength="30" value="${esc(F.state)}" placeholder="State" oninput="window.__teamForm.state=this.value"></div>
+            <div class="flex-1">${lbl('Country')}<input id="tf-country" class="${INPUT}" maxlength="30" value="${esc(F.country)}" placeholder="Country" oninput="window.__teamForm.country=this.value"></div>
         </div>
         <div>${lbl('Main color')}${sw('primary')}</div>
         <div>${lbl('Second color')}${sw('secondary')}</div>
         <div>${lbl('Level')}<div class="grid grid-cols-3 gap-1.5">${LEVELS.map(([k, l]) => `<button type="button" onclick="teamFormSet('level','${k}')" class="py-2.5 rounded-xl text-[11px] font-black ${F.level === k ? 'bg-[#00F296] text-slate-950' : 'bg-white/5 text-white/80 border border-white/10'}">${l}</button>`).join('')}</div></div>
         <div>${lbl('Who can join?')}<div class="space-y-1.5">${JOIN_MODES.map(([k, l, d]) => `<button type="button" onclick="teamFormSet('joinMode','${k}')" class="w-full text-left rounded-xl px-3 py-2.5 border ${F.joinMode === k ? 'border-[#00F296] bg-[#00F296]/10' : 'border-white/10 bg-white/5'}">
             <div class="text-xs font-black">${l}</div><div class="text-[10px] text-white/55">${d}</div></button>`).join('')}</div></div>
+        <details class="rounded-xl border border-white/10 bg-white/5 px-3 py-2" ${F.rosterPrivate || F.lineupPrivate ? 'open' : ''}>
+            <summary class="text-xs font-black cursor-pointer py-1">Advanced settings</summary>
+            ${[['rosterPrivate', 'Private roster', "Only your players see who's on the team"], ['lineupPrivate', 'Private lineup', 'Only your players see the lineup']].map(([k, l, d]) => `
+            <label class="flex items-center justify-between gap-3 py-2 cursor-pointer">
+                <span><span class="block text-xs font-bold">${l}</span><span class="block text-[10px] text-white/55">${d}</span></span>
+                <input type="checkbox" ${F[k] ? 'checked' : ''} onchange="window.__teamForm.${k}=this.checked" class="w-5 h-5 accent-[#00F296]"></label>`).join('')}
+        </details>
         <button id="tf-save" onclick="saveTeam()" class="${BTN} w-full py-3 text-sm">${F.editing ? 'Save changes' : 'Create team'}</button>
-        ${F.editing && T.open && T.open.ownerId === myUid() ? `<button onclick="deleteTeam('${jsq(F.editing)}')" class="w-full text-xs font-bold text-red-400 py-2">Delete team</button>` : ''}`;
+        ${F.editing && T.open && T.open.ownerId === myUid() ? `<button onclick="deleteTeam('${jsq(F.editing)}')" class="w-full rounded-xl border border-red-500/50 text-xs font-bold text-red-400 py-3"><i class="fa-solid fa-trash mr-1"></i> Delete team</button>` : ''}`;
 }
 function redrawForm() {
     const m = document.getElementById('team-form'); if (!m) return;
@@ -344,6 +410,51 @@ window.teamFormColor = (k, c) => { F[k] = c; redrawForm(); };
 window.teamFormSet = (k, v) => { F[k] = v; redrawForm(); };
 window.teamFormShuffle = () => { F.logo = randomCrest(); F.photoFile = null; redrawForm(); };
 window.teamFormCrest = (k, v) => { if (!F.logo || F.logo.type !== 'crest') F.logo = randomCrest(); F.logo[k] = v; redrawForm(); };
+
+// ---- Create a logo: its own screen with all the tools
+window.openLogoStudio = function () {
+    if (!F.logo || F.logo.type !== 'crest') F.logo = randomCrest();
+    F.photoFile = null;
+    drawStudio();
+};
+function studioPick(k, v) {
+    F.logo = { ...F.logo, [k]: v };
+    if (k === 'style' && v === 'outline') F.logo.pattern = 'plain';
+    drawStudio();
+}
+window.studioPick = (k, v) => studioPick(k, v === 'true' ? true : v === 'false' ? false : v);
+window.studioColor = (k, c) => { F[k] = c; drawStudio(); };
+window.studioShuffle = () => { F.logo = randomCrest(); drawStudio(); };
+window.studioDone = () => { document.getElementById('logo-studio')?.remove(); redrawForm(); };
+function drawStudio() {
+    const base = previewTeam();
+    const mini = (logo) => crestSvg({ ...base, logo: { ...F.logo, ...logo } }, 44);
+    const on = (k, v) => (F.logo[k] ?? '') === v;
+    const tile = (k, v, inner, label) => `<button type="button" onclick="studioPick('${k}','${v}')" class="flex flex-col items-center gap-1 rounded-xl p-1.5 border ${on(k, v) ? 'border-[#00F296] bg-[#00F296]/15' : 'border-white/10 bg-white/5'}">${inner}${label ? `<span class="text-[9px] font-bold text-white/70 capitalize">${label}</span>` : ''}</button>`;
+    const lbl = (t) => `<div class="text-[10px] font-black uppercase tracking-wider text-white/55 mb-1.5">${t}</div>`;
+    const sw = (key) => `<div class="flex flex-wrap gap-1.5">${COLORS.map(c => `<button type="button" onclick="studioColor('${key}','${c}')" class="w-8 h-8 rounded-full border-2 ${F[key] === c ? 'border-[#00F296] scale-110' : 'border-white/20'}" style="background:${c}"></button>`).join('')}</div>`;
+    const html = `
+        <div class="flex flex-col items-center gap-3">
+            ${crestSvg(base, 150)}
+            <button type="button" onclick="studioShuffle()" class="${DARK}"><i class="fa-solid fa-shuffle mr-1"></i> Surprise me</button>
+        </div>
+        <div>${lbl('Style')}<div class="grid grid-cols-2 gap-2">${tile('style', 'filled', mini({ style: 'filled' }), 'Filled')}${tile('style', 'outline', mini({ style: 'outline', pattern: 'plain' }), 'Outline (not filled)')}</div></div>
+        <div>${lbl('Shape')}<div class="grid grid-cols-5 gap-1.5">${SHAPES.map(s => tile('shape', s, mini({ shape: s }), s)).join('')}</div></div>
+        ${F.logo.style === 'outline' ? '' : `<div>${lbl('Pattern')}<div class="grid grid-cols-5 gap-1.5">${PATTERNS.map(p => tile('pattern', p, mini({ pattern: p }), p)).join('')}</div></div>`}
+        <div>${lbl('Main color')}${sw('primary')}</div>
+        <div>${lbl('Second color')}${sw('secondary')}</div>
+        <div>${lbl('Icon')}<div class="grid grid-cols-7 gap-1">${['', ...ICONS].map(i => `<button type="button" onclick="studioPick('icon','${i}')" class="h-10 rounded-lg text-xl ${(F.logo.icon || '') === i ? 'bg-[#00F296]/30 border border-[#00F296]' : 'bg-white/5'}">${i || '<span class="text-[10px] text-white/60">none</span>'}</button>`).join('')}</div></div>
+        <div>${lbl('Letters')}<div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="studioPick('text','short')" class="py-2.5 rounded-xl text-xs font-black ${F.logo.text !== 'none' ? 'bg-[#00F296] text-slate-950' : 'bg-white/5 border border-white/10'}">Show ${esc(base.short)}</button>
+            <button type="button" onclick="studioPick('text','none')" class="py-2.5 rounded-xl text-xs font-black ${F.logo.text === 'none' ? 'bg-[#00F296] text-slate-950' : 'bg-white/5 border border-white/10'}">No letters</button></div></div>
+        <label class="flex items-center justify-between gap-3 bg-white/5 rounded-xl px-3 py-3 cursor-pointer">
+            <span class="text-xs font-bold">Inner ring</span>
+            <input type="checkbox" ${F.logo.ring ? 'checked' : ''} onchange="studioPick('ring', this.checked ? 'true' : 'false')" class="w-5 h-5 accent-[#00F296]"></label>
+        <button onclick="studioDone()" class="${BTN} w-full py-3 text-sm">Use this logo</button>`;
+    const open = document.getElementById('logo-studio');
+    if (open) { const sc = open.firstElementChild.scrollTop; open.querySelector('.p-5').innerHTML = html; open.firstElementChild.scrollTop = sc; }
+    else { const m = sheet('logo-studio', 'Create a logo', html); m.style.zIndex = '160'; }
+}
 window.teamFormPhoto = (input) => {
     const f = input.files && input.files[0]; if (!f) return;
     F.photoFile = f; F.logo = { type: 'photo', url: URL.createObjectURL(f) };
@@ -402,6 +513,8 @@ window.saveTeam = async function () {
         }
         const data = {
             name, nameKey: key, short: (F.short || shortName(name)).slice(0, 4), city: String(F.city || '').trim().slice(0, 40),
+            state: String(F.state || '').trim().slice(0, 30), country: String(F.country || '').trim().slice(0, 30),
+            rosterPrivate: !!F.rosterPrivate, lineupPrivate: !!F.lineupPrivate,
             colors: { primary: F.primary, secondary: F.secondary }, level: F.level, joinMode: F.joinMode, logo, updatedAt: serverTimestamp(),
         };
         const ref = F.editing ? D('teams', F.editing) : doc(C('teams'));
@@ -472,7 +585,7 @@ function renderTeamPage() {
     if (!m) { m = document.createElement('div'); m.id = 'team-page'; m.className = 'fixed inset-0 z-[130] bg-[#01060A]/95 backdrop-blur-sm overflow-y-auto text-white'; document.body.appendChild(m); }
     const boss = canManage(t), member = isMember(t);
     const tab = T.openTab;
-    const tabs = [['roster', `Roster (${(t.members || []).length})`], ['lineup', 'Lineup']];
+    const tabs = [['roster', t.rosterPrivate && !member ? 'Roster 🔒' : `Roster (${(t.members || []).length})`], ['lineup', t.lineupPrivate && !member ? 'Lineup 🔒' : 'Lineup']];
     if (boss) tabs.push(['requests', `Requests${T.requests.length ? ' (' + T.requests.length + ')' : ''}`]);
     let action = '';
     if (!member) {
@@ -498,12 +611,19 @@ function renderTeamPage() {
         </div>
         ${action}
         <div class="flex gap-2">${tabs.map(([k, l]) => `<button onclick="teamTab('${k}')" class="flex-1 py-2.5 rounded-xl text-xs font-black ${tab === k ? 'bg-[#00F296] text-slate-950' : 'bg-black/50 text-white/75 border border-white/10'}">${l}</button>`).join('')}</div>
-        ${tab === 'lineup' ? lineupHtml(t, boss) : tab === 'requests' && boss ? requestsHtml(t) : rosterHtml(t, boss)}
+        ${tab === 'lineup' ? (t.lineupPrivate && !member ? privateNote('lineup') : lineupHtml(t, boss))
+            : tab === 'requests' && boss ? requestsHtml(t) : (t.rosterPrivate && !member ? privateNote('roster') : rosterHtml(t, boss))}
         ${member && t.ownerId !== myUid() ? `<button onclick="leaveTeam()" class="w-full text-xs font-bold text-red-400 py-2">Leave team</button>` : ''}
+        ${t.ownerId === myUid() ? `<button onclick="deleteTeam('${jsq(t.id)}')" class="w-full rounded-xl border border-red-500/40 text-xs font-bold text-red-400 py-3"><i class="fa-solid fa-trash mr-1"></i> Delete team</button>` : ''}
     </div>`;
 }
 window.teamTab = (k) => { T.openTab = k; renderTeamPage(); };
 
+function privateNote(what) {
+    return `<div class="${CARD} text-center space-y-2 py-8"><div class="text-3xl">🔒</div>
+        <div class="text-sm font-black text-white">This team keeps its ${what} private</div>
+        <p class="text-[11px] text-white/55">Only the team's players can see it.</p></div>`;
+}
 const roleLabel = (r) => r === 'captain' ? 'Captain' : r === 'co' ? 'Co-captain' : '';
 function rosterHtml(t, boss) {
     const list = (t.members || []).slice().sort((a, b) => (a.role === 'captain' ? -1 : b.role === 'captain' ? 1 : 0) || (a.role === 'co' ? -1 : b.role === 'co' ? 1 : 0)
