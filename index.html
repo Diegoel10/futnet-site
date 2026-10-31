@@ -601,10 +601,11 @@
                             <div id="active-chat-box" class="hidden flex flex-col h-full overflow-hidden">
                                 <div class="p-4 border-b border-white/10 flex items-center gap-3 bg-black/30 shrink-0">
                                     <img id="active-chat-avatar" src="" class="w-9 h-9 rounded-full object-cover border border-emerald-500/50">
-                                    <div>
+                                    <div class="flex-1 min-w-0">
                                         <h3 id="active-chat-name" class="text-xs font-black text-white"></h3>
                                         <p id="active-chat-subtitle" class="text-[10px] text-emerald-400 font-semibold hidden"></p>
                                     </div>
+                                    <div id="active-chat-tools" class="shrink-0 flex items-center gap-2"></div>
                                 </div>
                                 <div id="active-chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3"></div>
                                 <form onsubmit="handleSendActiveChatMessage(event)" class="p-3 border-t border-white/10 flex gap-2 bg-black/30 shrink-0">
@@ -672,6 +673,8 @@
         import './js/chat.js';
         import './js/notify.js';
         import './js/communities.js';
+        import './js/safety.js';
+        import './js/teams.js';
         import './js/profile.js';
         import './js/leaderboard.js';
         import './js/spot-offers.js';

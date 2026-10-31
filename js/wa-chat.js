@@ -175,7 +175,15 @@ window.waMsgMenu = function(key) {
         <button type="button" class="item" data-a="reply"><i class="fa-solid fa-reply w-5"></i> Reply</button>
         ${m.text ? '<button type="button" class="item" data-a="copy"><i class="fa-regular fa-copy w-5"></i> Copy</button>' : ''}
         ${m.mine && m.text ? '<button type="button" class="item" data-a="edit"><i class="fa-solid fa-pen w-5"></i> Edit</button>' : ''}
-        ${m.mine || m.canModerate ? '<button type="button" class="item danger" data-a="delete"><i class="fa-regular fa-trash-can w-5"></i> Delete</button>' : ''}`);
+        ${m.mine || m.canModerate ? '<button type="button" class="item danger" data-a="delete"><i class="fa-regular fa-trash-can w-5"></i> Delete</button>' : ''}
+        ${!m.mine && m.uid && window.openBlockReport ? '<button type="button" class="item" data-a="report"><i class="fa-solid fa-flag w-5"></i> Report or block</button>' : ''}`);
+    w.querySelector('[data-a="report"]')?.addEventListener('click', () => {
+        closeMenu();
+        const [kind, scopeId] = String(key).split('|');
+        window.openBlockReport(m.uid, m.realName || m.name, {
+            kind: kind === 'game' ? 'comment' : 'message', id: String(key).split('|').slice(2).join('|'), text: m.text || '',
+            eventId: kind === 'game' ? scopeId : '', communityId: kind === 'community' ? scopeId : '' });
+    });
     w.querySelectorAll('[data-e]').forEach(b => b.onclick = () => runAction(key, 'react', b.dataset.e));
     w.querySelector('[data-a="reply"]')?.addEventListener('click', () => window.waReply(key));
     w.querySelector('[data-a="copy"]')?.addEventListener('click', () => {
@@ -393,9 +401,20 @@ export function renderWhatsApp(messages, opts = {}) {
     let html = '';
     let lastDay = '';
     let prev = null;
+    let hiddenRun = '';
     messages.forEach((m, i) => {
         const ms = m.ms || 0;
         const mine = !!myUid && String(m.uid) === myUid;
+        // Someone you blocked: one quiet line instead of their messages (several in a row count once).
+        if (!mine && m.uid && window.isBlocked && window.isBlocked(m.uid)) {
+            if (hiddenRun !== String(m.uid)) {
+                html += `<div class="wa-hidden" style="text-align:center;margin:4px 0"><span style="display:inline-block;font-size:11px;font-style:italic;color:#8696A0;background:rgba(17,27,33,.75);border-radius:8px;padding:3px 10px"><i class="fa-solid fa-ban" style="margin-right:5px"></i>Hidden: messages from a player you blocked</span></div>`;
+                hiddenRun = String(m.uid);
+            }
+            prev = null;
+            return;
+        }
+        hiddenRun = '';
         if (ms) {
             const k = dayKey(ms);
             if (k !== lastDay) { html += `<div class="wa-day"><span>${esc(dayLabel(ms))}</span></div>`; lastDay = k; prev = null; }

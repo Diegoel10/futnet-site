@@ -2,16 +2,39 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["89HLC7E682.com.diego.newsocceranyone"],
+        "appIDs": [
+          "89HLC7E682.com.diego.newsocceranyone"
+        ],
         "components": [
-          { "#": "event=*", "comment": "Game links: futnet.site/#event=..." },
-          { "#": "community=*", "comment": "Community / invite links: futnet.site/#community=..." },
-          { "?": { "event": "*" }, "comment": "Older game links: futnet.site/?event=..." }
+          {
+            "/": "/g/*",
+            "comment": "Game share links: futnet.site/g/<game id>"
+          },
+          {
+            "/": "/c/*",
+            "comment": "Community share links: futnet.site/c/<link name>"
+          },
+          {
+            "#": "event=*",
+            "comment": "Game links: futnet.site/#event=..."
+          },
+          {
+            "#": "community=*",
+            "comment": "Community / invite links: futnet.site/#community=..."
+          },
+          {
+            "?": {
+              "event": "*"
+            },
+            "comment": "Older game links: futnet.site/?event=..."
+          }
         ]
       }
     ]
   },
   "webcredentials": {
-    "apps": ["89HLC7E682.com.diego.newsocceranyone"]
+    "apps": [
+      "89HLC7E682.com.diego.newsocceranyone"
+    ]
   }
 }

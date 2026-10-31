@@ -34,6 +34,13 @@ service firebase.storage {
       allow delete: if isOwner(uid);
     }
 
+    // Team logos (teams/logo/{uid}/...)
+    match /teams/{folder}/{uid}/{file=**} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && request.resource.contentType.matches('image/.*') && request.resource.size < 10 * 1024 * 1024;
+      allow delete: if isOwner(uid);
+    }
+
     // Everything else stays closed.
     match /{allPaths=**} {
       allow read, write: if false;

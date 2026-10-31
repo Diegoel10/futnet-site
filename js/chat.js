@@ -105,6 +105,7 @@ function buildChatRows() {
     (window.chatsThreads || []).forEach(th => {
         const msgs = th.messages || [];
         if (!msgs.length) return;
+        if (window.isBlocked && window.isBlocked(th.id)) return;   // chats with people you blocked are hidden
         const last = msgs[msgs.length - 1];
         // Older messages from the phones had no date: use the newest message in the chat that has one.
         let ms = msOf(last);
@@ -374,6 +375,10 @@ window.openChatThread = function(id) {
     const avatarEl = document.getElementById('active-chat-avatar');
     if (nameEl) nameEl.innerText = th.name;
     if (avatarEl) avatarEl.src = photoOf(th.id, th.name, th.avatar);
+    // ⋯ in the header: Block / Report this person
+    const tools = document.getElementById('active-chat-tools');
+    if (tools) tools.innerHTML = window.openBlockReport ? `<button type="button" aria-label="More" onclick="openBlockReport('${esc(th.id)}', this.dataset.n, { kind: 'chat' })" data-n="${esc(th.name)}"
+        class="w-9 h-9 rounded-full flex items-center justify-center text-[#AEBAC1] hover:text-white"><i class="fa-solid fa-ellipsis-vertical text-lg"></i></button>` : '';
 
     // Mark unread messages as read when opening thread and update sender copy
     window.markThreadAsReadLocally(th);
@@ -518,17 +523,18 @@ window.renderActiveChatMessages = function() {
 
     const myUid = window.currentUser?.uid;
     const myName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || '';
-    // Real send time; older messages without one take the time of the message before them,
-    // then a stable sort by time so every device shows the same order.
+    // Messages stay in the order they were saved (the true order: each one is added to the end of the chat).
+    // Their time comes from the sender's device, and a phone with its clock a few minutes off used to put
+    // a reply ABOVE the message it answers. Now a time is never shown earlier than the message before it.
     let prevMs = 0;
     const list = th.messages.map((m, i) => {
         const mine = (m.senderUid && m.senderUid === myUid) || (!m.senderUid && myName && m.sender && m.sender.toLowerCase() === myName.toLowerCase());
         const real = msOf(m) || 0;
-        const ms = real || prevMs;
+        const ms = Math.max(real || prevMs, prevMs);
         if (ms) prevMs = ms;
-        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms, time: m.time, timeText: real ? '' : (m.time || ''), isRead: m.isRead === true, media: m.media,
+        return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms, time: m.time, timeText: ms ? '' : (m.time || ''), isRead: m.isRead === true, media: m.media,
             deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions, replyTo: m.replyTo, _i: i };
-    }).sort((a, b) => (a.ms - b.ms) || (a._i - b._i));
+    });
     const atBottom = isNearBottom();
     container.classList.add('wa-wall');
     container.classList.remove('space-y-3', 'p-4');

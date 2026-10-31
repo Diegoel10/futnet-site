@@ -110,6 +110,43 @@ async function notify(recipients, payload, { exclude = [], key = "" } = {}) {
   return targets.length;
 }
 
+// ---------------------------------------------------------------------------
+// Block / Mute (users/{uid}/settings/safety, written by the website and the apps)
+//   blocked: { uid: { name, at } }   mutes: { "game_<eventId>" | "cchat_<communityId>": untilMs }
+// ---------------------------------------------------------------------------
+async function safetyOf(uid) {
+  try {
+    const d = (await col("users").doc(uid).collection("settings").doc("safety").get()).data() || {};
+    return { blocked: d.blocked && typeof d.blocked === "object" ? d.blocked : {}, mutes: d.mutes && typeof d.mutes === "object" ? d.mutes : {} };
+  } catch (e) { return { blocked: {}, mutes: {} }; }
+}
+/** Which mute switch a notification belongs to (game comments, community chat). */
+function muteKeyOf(n) {
+  if (n.type === "game_comment" && n.eventId) return `game_${n.eventId}`;
+  if (n.type === "chat_community" && n.communityId) return `cchat_${n.communityId}`;
+  return "";
+}
+// Who blocked a person: kept by the server only (outside the app's data), so nobody can read it.
+const blockIndex = (uid) => db.collection("futnetPrivate").doc("blockIndex").collection("by").doc(String(uid));
+async function blockersOf(uid) {
+  try { return arr(((await blockIndex(uid).get()).data() || {}).by); } catch (e) { return []; }
+}
+/** "Heads up: Juan, who you blocked, joined Sunday Futsal." to the people in `group` who blocked `newUid`. */
+async function headsUpBlocked(newUid, group, where, extra) {
+  if (!newUid) return;
+  const inGroup = new Set(group);
+  const blockers = (await blockersOf(newUid)).filter((u) => u !== newUid && inGroup.has(u));
+  if (!blockers.length) return;
+  const name = await nameOf(newUid);
+  await notify(blockers, {
+    type: "safety_heads_up",
+    eventId: extra.eventId || "",
+    communityId: extra.communityId || "",
+    title: "Heads up 👀",
+    body: `${name}, who you blocked, joined ${where}.`,
+  }, { key: `headsup_${extra.eventId || extra.communityId}_${newUid}` });
+}
+
 /** Which on/off switch in the user's settings a notification type belongs to. */
 function categoryOf(type) {
   if (type.startsWith("chat")) return "chat";
@@ -150,6 +187,18 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
   // The person turned this kind of notification off: keep it in the in-app list, no push.
   const prefs = dir.notificationPrefs || {};
   if (prefs[categoryOf(type)] === false) {
+    await snap.ref.update({ muted: true });
+    return;
+  }
+
+  // Someone they blocked, or a chat they muted: keep the record, no push.
+  const safety = await safetyOf(recipientUid);
+  if (n.senderUid && safety.blocked[n.senderUid]) {
+    await snap.ref.update({ muted: true, blocked: true });
+    return;
+  }
+  const mk = muteKeyOf(n);
+  if (mk && Number(safety.mutes[mk] || 0) > Date.now()) {
     await snap.ref.update({ muted: true });
     return;
   }
@@ -448,6 +497,16 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
     }, { exclude: joined, key: `join_${eventId}_${joined.sort().join("_")}` });
   }
 
+  // a1) Someone joined (or the waitlist): heads up to the people already there who blocked them
+  const wasThere = new Set([...arr(before.attendees), ...arr(before.waitingList)].map(uidOf));
+  const newcomers = uniq([...arr(after.attendees), ...arr(after.waitingList)].map(uidOf)).filter((u) => u && !wasThere.has(u));
+  if (newcomers.length) {
+    const group = uniq([...participants(after), organizer]);
+    for (const u of newcomers) {
+      try { await headsUpBlocked(u, group, title, { eventId }); } catch (e) { logger.warn("heads up", eventId, u, e.message); }
+    }
+  }
+
   // a2) Players who cancelled (left on their own, not removed by the organizer) -> tell the organizer
   const afterIn = new Set(arr(after.attendees).map(uidOf));
   const declinedNow = new Map(arr(after.declinedList).map((d) => [uidOf(d), d]));
@@ -651,6 +710,12 @@ exports.onCommunityMemberAdded = onDocumentCreated(`${BASE}/communities/{communi
     title: "New member 🎉",
     body: `${member.name || (await nameOf(uid))} joined ${cName}.`,
   }, { exclude: [uid, member.approvedBy], key: `newmember_${communityId}_${uid}` });   // not the admin who approved them
+
+  // People in the community who blocked the newcomer get a private heads up
+  try {
+    const { all } = await communityMembers(communityId);
+    await headsUpBlocked(uid, all, cName, { communityId });
+  } catch (e) { logger.warn("heads up", communityId, uid, e.message); }
 
   // Tell the person, when an admin approved their request
   if (member.approvedBy || member.approvedAt || member.status === "approved" || member.viaRequest === true) {
@@ -2848,4 +2913,98 @@ exports.buildPeopleList = onCall({ timeoutSeconds: 540, memory: "512MiB" }, asyn
   await col("meta").doc("people").set({ builtAt: Date.now(), count: total });
   logger.info(`people list built: ${total} players`);
   return { ok: true, count: total };
+});
+
+// ---------------------------------------------------------------------------
+// 21. Block / Report
+// ---------------------------------------------------------------------------
+
+// Keeps the server's "who blocked whom" list up to date (used for the heads up when someone joins).
+exports.onSafetyWritten = onDocumentWritten(`${BASE}/users/{uid}/settings/safety`, async (event) => {
+  const uid = event.params.uid;
+  const keys = (snap) => (snap && snap.exists ? Object.keys((snap.data() || {}).blocked || {}) : []);
+  const before = keys(event.data.before), after = keys(event.data.after);
+  const added = after.filter((u) => !before.includes(u));
+  const removed = before.filter((u) => !after.includes(u));
+  for (const t of added) await blockIndex(t).set({ by: FV.arrayUnion(uid) }, { merge: true });
+  for (const t of removed) await blockIndex(t).set({ by: FV.arrayRemove(uid) }, { merge: true });
+});
+
+const REPORT_REASONS = {
+  spam: "spam or scam", harassment: "bullying or harassment", hate: "hate speech or threats",
+  inappropriate: "inappropriate content", fake: "fake profile", other: "something else",
+};
+// A player reported someone: the FutNet Admin account gets a push (the report itself is in artifacts/{app}/reports).
+exports.onReportCreated = onDocumentCreated(`${BASE}/reports/{reportId}`, async (event) => {
+  const r = (event.data && event.data.data()) || {};
+  const adminUid = await futnetAdminUid();
+  if (!adminUid) return;
+  const what = r.kind && r.kind !== "profile" && r.kind !== "chat" ? ` (${r.kind})` : "";
+  await notify([adminUid], {
+    type: "report",
+    title: "🚩 New report",
+    body: `${r.reporterName || "A player"} reported ${r.targetName || "a player"}${what}: ${REPORT_REASONS[r.reason] || "something else"}${r.note ? ` · "${clip(r.note, 80)}"` : ""}`,
+    eventId: r.eventId || "",
+    communityId: r.communityId || "",
+  }, { key: `report_${event.params.reportId}` });
+});
+
+// ---------------------------------------------------------------------------
+// 22. Teams: join requests, invites, "you were added" (website and apps write the same records)
+// ---------------------------------------------------------------------------
+function teamBosses(t) {
+  return uniq([t.ownerId, ...arr(t.members).filter((m) => m && m.uid && (m.role === "captain" || m.role === "co")).map((m) => m.uid)]);
+}
+
+exports.onTeamRequest = onDocumentCreated(`${BASE}/teams/{teamId}/requests/{uid}`, async (event) => {
+  const r = (event.data && event.data.data()) || {};
+  const { teamId, uid } = event.params;
+  const t = (await col("teams").doc(teamId).get()).data();
+  if (!t) return;
+  await notify(teamBosses(t), {
+    type: "team_request",
+    senderUid: uid,
+    title: `${t.name || "Your team"}: join request 🛡️`,
+    body: `${r.name || (await nameOf(uid))} wants to join. Open the team to add them.`,
+  }, { exclude: [uid], key: `teamreq_${teamId}_${uid}_${Math.floor(Date.now() / 3600000)}` });
+});
+
+exports.onTeamInvite = onDocumentCreated(`${BASE}/teamInvites/{inviteId}`, async (event) => {
+  const iv = (event.data && event.data.data()) || {};
+  if (!iv.uid) return;
+  await notify([iv.uid], {
+    type: "team_invite",
+    senderUid: iv.byUid || "",
+    title: "Team invite 🛡️",
+    body: `${iv.byName || "A captain"} invited you to join ${iv.teamName || "their team"}. Open Teams to answer.`,
+  }, { key: `teaminv_${event.params.inviteId}_${Math.floor(Date.now() / 3600000)}` });
+});
+
+exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+  const teamId = event.params.teamId;
+  const was = new Set(before ? arr(before.memberUids) : [after.ownerId]);
+  const added = arr(after.memberUids).filter((u) => u && !was.has(u));
+  if (!added.length) return;
+  const by = after.updatedBy || "";
+  for (const u of added) {
+    if (u === by) {
+      // Joined on their own (open team or an invite): tell the captains
+      await notify(teamBosses(after), {
+        type: "team_joined",
+        senderUid: u,
+        title: `${after.name || "Your team"} 🛡️`,
+        body: `${await nameOf(u)} joined the team.`,
+      }, { exclude: [u], key: `teamjoin_${teamId}_${u}` });
+    } else {
+      await notify([u], {
+        type: "team_added",
+        senderUid: by,
+        title: "You're on a team! 🛡️",
+        body: `${by ? await nameOf(by) : "A captain"} added you to ${after.name || "a team"}.`,
+      }, { key: `teamadd_${teamId}_${u}` });
+    }
+  }
 });

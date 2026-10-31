@@ -193,6 +193,7 @@ window.openProfileSettings = async function () {
         ${btn('fa-pen-to-square', 'Edit profile details', "document.getElementById('profile-settings-modal').remove(); openEditProfileModal()")}
         ${btn('fa-key', 'Sign-in details', "document.getElementById('profile-settings-modal').remove(); openSignInDetails()")}
         <div id="owner-tools-slot"></div>
+        <div id="safety-slot"></div>
         <div class="bg-[#07141E]/90 border border-[#00B4AE]/40 rounded-2xl px-3 py-1">
             <div class="text-[10px] font-black text-[#00B4AE] uppercase tracking-wider pt-2">Privacy</div>
             <div class="text-[11px] text-white/50">On = other players can't see it. You always see everything.</div>
@@ -208,6 +209,7 @@ window.openProfileSettings = async function () {
     </div>`;
     document.body.appendChild(m);
     if (window.renderOwnerTools) window.renderOwnerTools();
+    if (window.renderSafetySlot) window.renderSafetySlot();
 };
 window.savePrivacy = async function (key, hidden) {
     const uid = window.currentUser?.uid; if (!uid) return;

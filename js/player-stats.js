@@ -269,6 +269,7 @@ window.openPlayerStatsSheet = (uid, name, avatar, communityId = '') => {
                 <button onclick="document.getElementById('player-stats-sheet').remove(); window.openDirectChat && openDirectChat('${esc(uid)}', '${esc(p.name).replace(/'/g, "\\'")}', '')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs"><i class="fa-solid fa-comments mr-1"></i> Message</button>
             </div>`}
             ${playerPageTabsHtml()}
+            ${!isMe && window.blockReportLinkHtml ? window.blockReportLinkHtml(uid, p.name, { kind: 'profile', communityId }) : ''}
         </div>`;
     document.body.appendChild(m);
     // Player info / Stats / Events / Basic info (each can be hidden by the player in Settings > Privacy)

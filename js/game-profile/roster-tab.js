@@ -285,6 +285,7 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
                 <button onclick="document.getElementById('player-profile-popup').remove()" class="${DARK} flex-1 py-3">Close</button>
                 ${canManage && eventId ? `<button onclick="document.getElementById('player-profile-popup').remove(); openPlayerManagementModal('${jsArg(eventId)}', '${jsArg(uid)}', window._popupPerson.name)" class="${GREEN} flex-1 py-3"><i class="fa-solid fa-sliders"></i> Manage</button>` : ''}
             </div>
+            ${window.blockReportLinkHtml ? window.blockReportLinkHtml(uid, name, { kind: 'profile', eventId: eventId || '' }) : ''}
         </div>`;
     document.getElementById('player-popup-img').src = photo;
     document.getElementById('player-popup-name').innerHTML = escapeHtml(name) + (window.statusEmoji ? window.statusEmoji(uid) : '');

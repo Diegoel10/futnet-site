@@ -37,6 +37,7 @@ export function renderCommentsTab(event) {
     }, 0);
 
     return `
+        ${eventId && window.muteButtonHtml ? `<div class="flex justify-end mb-2">${window.muteButtonHtml('game_' + eventId, 'this match')}</div>` : ''}
         <div class="flex flex-col rounded-2xl overflow-hidden border border-white/10 shadow-inner">
             <div id="chat-messages-scroll" onscroll="window._commentsStickBottom = (this.scrollHeight - this.scrollTop - this.clientHeight < 120)"
                  class="wa-wall min-h-[300px] max-h-[55vh] overflow-y-auto py-2">

@@ -805,6 +805,9 @@ function communityGames(id) {
     return { up, prev };
 }
 
+window.renderCommunityPageSafe = () => renderCommunityPage();
+window._postText = (id) => { const p = (S.feed || []).find(x => x.id === id); return p ? String(p.text || (p.poll && p.poll.question) || '').slice(0, 500) : ''; };
+window.refreshCommunityChatView = () => { if (S.activeChatCommunity && String(window.activeChatThreadId || '') === 'community:' + S.activeChatCommunity) renderCommunityChatMessages(); };
 function renderCommunityPage() {
     try { renderCommunityPageInner(); }
     catch (e) {
@@ -1537,7 +1540,7 @@ function feedTab(c, isMember, isAdmin) {
             <span class="flex-1 text-xs text-white/50 bg-black/40 border border-white/10 rounded-full px-4 py-2.5">Share something with ${esc(c.name || 'the community')}...</span>
             <i class="fa-regular fa-image text-[#00F296] text-lg"></i>
         </button>` : (isMember ? `<p class="text-[11px] text-white/50 text-center">${suspFrom('feed') ? 'You are suspended from posting.' : 'Only admins can post in this community.'}</p>` : '')}
-        ${S.feed.length === 0 ? '<p class="text-xs text-white/50 italic text-center py-4">No posts yet.</p>' : S.feed.map(p => postCard(p, c, isAdmin)).join('')}
+        ${feedVisible().length === 0 ? '<p class="text-xs text-white/50 italic text-center py-4">No posts yet.</p>' : feedVisible().map(p => postCard(p, c, isAdmin)).join('')}
     </div>`;
 }
 
@@ -1557,6 +1560,9 @@ function mentionsIn(text) {
     return S.members.filter(m => memberName(m) !== 'Player' && t.includes('@' + memberName(m)) && m.uid !== me().uid).map(m => String(m.uid));
 }
 
+// Posts by people you blocked are hidden (and their comments under other posts).
+const blockedUid = (u) => !!(window.isBlocked && window.isBlocked(u));
+function feedVisible() { return (S.feed || []).filter(p => !blockedUid(p.authorId)); }
 function postCard(p, c, isAdmin) {
     const uid = me().uid;
     const liked = (p.likedBy || []).includes(uid);
@@ -1570,6 +1576,7 @@ function postCard(p, c, isAdmin) {
             ${avatarImg({ uid: p.authorId, name: p.authorName, avatar: p.authorAvatar }, 'w-8 h-8 rounded-full object-cover')}
             <div class="flex-1 min-w-0"><div class="text-xs font-black text-white truncate">${esc(p.authorName || 'Player')}</div><div class="text-[10px] text-white/40">${fmtAgo(tsMs(p.createdAt))}</div></div>
             ${canDelete ? `<button onclick="deleteCommunityPost('${jsArg(p.id)}')" class="text-white/40 hover:text-red-400 text-xs" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>` : ''}
+            ${p.authorId && p.authorId !== uid && window.openBlockReport ? `<button onclick="openBlockReport('${jsArg(p.authorId)}', '${jsArg(p.authorName || 'Player')}', { kind: 'post', id: '${jsArg(p.id)}', communityId: '${jsArg(c.id)}', text: (window._postText && window._postText('${jsArg(p.id)}')) || '' })" class="text-white/40 hover:text-white text-sm px-1" aria-label="More"><i class="fa-solid fa-ellipsis"></i></button>` : ''}
         </div>
         ${p.text ? `<p class="text-xs text-white/90 whitespace-pre-line break-words">${mentionText(p.text)}</p>` : ''}
         ${poll?.question ? `<div class="space-y-1.5"><div class="text-xs font-bold text-white">${esc(poll.question)}</div>
@@ -1589,7 +1596,7 @@ function postCard(p, c, isAdmin) {
             </span>
             <span class="text-white/60"><i class="fa-regular fa-comment mr-1"></i>${(p.comments || []).length}</span>
         </div>
-        ${(p.comments || []).map(cm => `<div class="text-[11px] bg-black/30 rounded-lg px-2.5 py-1.5"><span class="font-black text-white">${esc(cm.authorName || 'Player')}</span> <span class="text-white/80">${mentionText(cm.text)}</span></div>`).join('')}
+        ${(p.comments || []).filter(cm => !blockedUid(cm.authorId || cm.uid)).map(cm => `<div class="text-[11px] bg-black/30 rounded-lg px-2.5 py-1.5"><span class="font-black text-white">${esc(cm.authorName || 'Player')}</span> <span class="text-white/80">${mentionText(cm.text)}</span></div>`).join('')}
         ${!suspFrom('feed') ? `<div class="flex gap-2"><input id="cmt-${esc(p.id)}" class="${INPUT}" placeholder="Write a comment..." onkeydown="if(event.key==='Enter')addCommunityComment('${jsArg(p.id)}')"><button onclick="addCommunityComment('${jsArg(p.id)}')" class="${BTN_PRIMARY}">Send</button></div>` : ''}
     </div>`;
 }
@@ -2295,6 +2302,9 @@ window.openCommunityChatThread = function(tid) {
     const sub = document.getElementById('active-chat-subtitle');
     const subDefault = `${S.members && S.activeId === communityId && S.members.length ? S.members.length + ' members' : 'Community chat'}`;
     if (sub) { sub.innerText = subDefault; sub.classList.remove('hidden'); }
+    // 🔕 Mute this community chat (1-5 hours or always)
+    const tools = document.getElementById('active-chat-tools');
+    if (tools) tools.innerHTML = window.muteButtonHtml ? window.muteButtonHtml('cchat_' + communityId, 'this community chat') : '';
     // "Diego is typing…" / "Multiple people are typing…"
     S.chatTypingUnsub = watchTyping(tid, (names) => {
         if (window.activeChatThreadId !== tid) return;
