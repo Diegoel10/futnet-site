@@ -712,7 +712,12 @@ async function openCommunityInner(id, tab) {
     if (!window.currentUser) { toast('Still signing you in… try again in a second.', 'error'); return; }
     stopCommunityListeners();
     S.activeId = id; S.tab = tab || 'info'; S.members = []; S.requests = []; S.feed = [];
-    if (window.switchTab && document.getElementById('tab-hub')?.classList.contains('hidden')) window.switchTab('hub');
+    if (window.switchTab && document.getElementById('tab-hub')?.classList.contains('hidden')) window.switchTab('hub', !S.fromHistory);
+    // Back returns to the communities list (or wherever you came from).
+    if (!S.fromHistory && !(history.state && history.state.community === id)) {
+        try { history.pushState({ tab: 'hub', community: id }, '', location.href); } catch (e) { /* ignore */ }
+    }
+    S.fromHistory = false;
     let c = window.communitiesCache[id];
     if (!c) {
         try {
@@ -773,8 +778,17 @@ async function openCommunityInner(id, tab) {
 window.renderHubTab = () => (S.activeId ? renderCommunityPage() : window.renderCommunitiesHub());
 
 window.closeCommunity = function() {
+    // ← on the community = Back (so the phone's Back and this arrow do the same thing).
+    if (history.state && history.state.community && history.state.community === S.activeId) { history.back(); return; }
     S.activeId = null; stopCommunityListeners(); window.renderCommunitiesHub();
 };
+// Back / Forward in and out of a community.
+window.addEventListener('popstate', (e) => {
+    const st = e.state || {};
+    if (st.tab !== 'hub') return;
+    if (!st.community && S.activeId) { S.activeId = null; stopCommunityListeners(); }
+    else if (st.community && S.activeId !== st.community) { S.fromHistory = true; window.openCommunity(st.community, S.tab); }
+});
 
 window.setCommunityTab = (t) => { S.tab = t; renderCommunityPage(); };
 

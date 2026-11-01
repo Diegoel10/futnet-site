@@ -209,6 +209,7 @@ const INPUT = 'w-full bg-black/50 border border-teal-500/60 rounded-xl px-3 py-2
 const levelLabel = (k) => (LEVELS.find(l => l[0] === k) || LEVELS[0])[1];
 
 function root() { return document.getElementById('teams-root'); }
+window.refreshTeamsUi = () => refreshTeamsUi();
 function refreshTeamsUi() {
     if (T.open) { renderTeamPage(); return; }
     renderTeamsTab();
@@ -223,6 +224,7 @@ function teamCard(t, right = '') {
         <div class="flex-1 min-w-0">
             <div class="text-sm font-black text-white truncate">${esc(t.name)}</div>
             <div class="text-[11px] text-white/55 truncate">${esc(levelLabel(t.level))} · ${(t.members || []).length} player${(t.members || []).length === 1 ? '' : 's'}${t.city ? ' · ' + esc(t.city) : ''}</div>
+            ${(() => { const n = isMember(t) ? splitSchedule(t.schedule).upcoming[0] : null; return n ? `<div class="text-[11px] text-[#00F296] font-bold truncate">Next: ${n.home === false ? '@' : 'vs'} ${esc(n.opponent)} · ${esc(prettyDate(n.date))}${n.time ? ' ' + esc(prettyTime(n.time)) : ''}</div>` : ''; })()}
         </div>
         ${right || (role ? `<span class="text-[9px] font-black uppercase rounded-full px-2 py-1 ${role === 'Player' ? 'bg-white/10 text-white/70' : 'bg-[#00F296] text-slate-950'}">${role}</span>` : '')}
     </div>`;
@@ -285,10 +287,10 @@ export function renderTeamsTab() {
                     <button onclick="openCreateTeam()" class="${BTN}">+ Create a team</button></div>`;
     el.innerHTML = `<div class="space-y-4">
         <div class="${CARD} flex items-center justify-between gap-3">
-            <div><h2 class="text-xl font-black text-white">Teams</h2><p class="text-white/65 text-xs">Your teams, players and lineups. VS Mode is coming next.</p></div>
+            <div><h2 class="text-xl font-black text-white">Teams</h2><p class="text-white/65 text-xs">Your teams, players and lineups. Challenge other teams in VS Mode.</p></div>
             <button onclick="openCreateTeam()" class="${BTN} shrink-0">+ Create team</button>
         </div>
-        ${invites}${noTeam}
+        ${invites}${window.vsChallengesHtml ? window.vsChallengesHtml(T.mine.filter(t => canManage(t)).map(t => t.id)) : ''}${noTeam}
         <div class="flex gap-2 overflow-x-auto">${hasTeams ? chip('mine', 'My teams') : ''}${chip('find', 'Find teams')}${chip('agents', 'Free agents')}${chip('leaders', '🏆 Leaderboards')}</div>
         ${body}
     </div>`;
@@ -582,10 +584,10 @@ window.closeTeam = function () {
 function renderTeamPage() {
     const t = T.open; if (!t) return;
     let m = document.getElementById('team-page');
-    if (!m) { m = document.createElement('div'); m.id = 'team-page'; m.className = 'fixed inset-0 z-[130] bg-[#01060A]/95 backdrop-blur-sm overflow-y-auto text-white'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'team-page'; m.dataset.close = 'closeTeam'; m.className = 'fixed inset-0 z-[130] bg-[#01060A]/95 backdrop-blur-sm overflow-y-auto text-white'; document.body.appendChild(m); }
     const boss = canManage(t), member = isMember(t);
     const tab = T.openTab;
-    const tabs = [['roster', t.rosterPrivate && !member ? 'Roster 🔒' : `Roster (${(t.members || []).length})`], ['lineup', t.lineupPrivate && !member ? 'Lineup 🔒' : 'Lineup']];
+    const tabs = [['roster', t.rosterPrivate && !member ? 'Roster 🔒' : `Roster (${(t.members || []).length})`], ['schedule', 'Schedule'], ['lineup', t.lineupPrivate && !member ? 'Lineup 🔒' : 'Lineup']];
     if (boss) tabs.push(['requests', `Requests${T.requests.length ? ' (' + T.requests.length + ')' : ''}`]);
     let action = '';
     if (!member) {
@@ -610,14 +612,117 @@ function renderTeamPage() {
             </div>
         </div>
         ${action}
+        ${!member && window.vsChallengeButtonHtml ? window.vsChallengeButtonHtml(t) : ''}
+        ${boss && window.vsChallengesHtml ? window.vsChallengesHtml([t.id]) : ''}
         <div class="flex gap-2">${tabs.map(([k, l]) => `<button onclick="teamTab('${k}')" class="flex-1 py-2.5 rounded-xl text-xs font-black ${tab === k ? 'bg-[#00F296] text-slate-950' : 'bg-black/50 text-white/75 border border-white/10'}">${l}</button>`).join('')}</div>
-        ${tab === 'lineup' ? (t.lineupPrivate && !member ? privateNote('lineup') : lineupHtml(t, boss))
+        ${tab === 'schedule' ? scheduleHtml(t, boss) : tab === 'lineup' ? (t.lineupPrivate && !member ? privateNote('lineup') : lineupHtml(t, boss))
             : tab === 'requests' && boss ? requestsHtml(t) : (t.rosterPrivate && !member ? privateNote('roster') : rosterHtml(t, boss))}
         ${member && t.ownerId !== myUid() ? `<button onclick="leaveTeam()" class="w-full text-xs font-bold text-red-400 py-2">Leave team</button>` : ''}
         ${t.ownerId === myUid() ? `<button onclick="deleteTeam('${jsq(t.id)}')" class="w-full rounded-xl border border-red-500/40 text-xs font-bold text-red-400 py-3"><i class="fa-solid fa-trash mr-1"></i> Delete team</button>` : ''}
     </div>`;
 }
 window.teamTab = (k) => { T.openTab = k; renderTeamPage(); };
+
+// ---------------------------------------------------------------- schedule: the team's upcoming games
+// team.schedule = [{ id, opponent, opponentTeamId, date: 'YYYY-MM-DD', time: 'HH:MM', location, home, note, scoreFor, scoreAgainst }]
+// Captains add games against any team (on FutNet or not). VS Mode and tournament games will show here by themselves.
+const todayYmd = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function prettyDate(ymd) {
+    const [y, m, d] = String(ymd || '').split('-').map(Number);
+    if (!y || !m || !d) return ymd || '';
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function prettyTime(hm) {
+    const [h, m] = String(hm || '').split(':').map(Number);
+    if (isNaN(h)) return '';
+    return new Date(2000, 0, 1, h, m || 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+export function splitSchedule(list, today = todayYmd()) {
+    const all = (list || []).slice().sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`));
+    return { upcoming: all.filter(g => (g.date || '') >= today), past: all.filter(g => (g.date || '') < today).reverse() };
+}
+function scheduleHtml(t, boss) {
+    const { upcoming, past } = splitSchedule(t.schedule);
+    const opp = (g) => {
+        const ot = g.opponentTeamId && (T.all.find(x => x.id === g.opponentTeamId) || T.mine.find(x => x.id === g.opponentTeamId));
+        return `${ot ? teamLogoHtml(ot, 28) : '<span class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-xs">⚽</span>'}<span class="font-black truncate">${g.home === false ? '@ ' : 'vs '}${esc(g.opponent || 'TBD')}</span>`;
+    };
+    const row = (g, isPast) => {
+        const hasScore = g.scoreFor !== undefined && g.scoreFor !== '' && g.scoreFor !== null;
+        const res = hasScore ? (+g.scoreFor > +g.scoreAgainst ? ['W', 'bg-[#00F296] text-slate-950'] : +g.scoreFor < +g.scoreAgainst ? ['L', 'bg-red-500 text-white'] : ['D', 'bg-white/20 text-white']) : null;
+        return `<div ${boss ? `onclick="openScheduleGame('${jsq(g.id)}')"` : ''} class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-1 ${boss ? 'cursor-pointer hover:border-emerald-400/60' : ''}">
+            <div class="flex items-center gap-2 text-sm min-w-0">${opp(g)}
+                ${res ? `<span class="ml-auto shrink-0 flex items-center gap-1.5"><span class="text-sm font-black">${esc(g.scoreFor)}-${esc(g.scoreAgainst)}</span><span class="text-[10px] font-black rounded px-1.5 py-0.5 ${res[1]}">${res[0]}</span></span>`
+                    : isPast && boss ? '<span class="ml-auto text-[10px] font-bold text-amber-300 shrink-0">Add score</span>' : ''}</div>
+            <div class="text-[11px] text-white/60">${esc(prettyDate(g.date))}${g.time ? ' · ' + esc(prettyTime(g.time)) : ''}${g.location ? ' · ' + esc(g.location) : ''}</div>
+            ${g.note ? `<div class="text-[11px] text-white/50">${esc(g.note)}</div>` : ''}
+        </div>`;
+    };
+    return `<div class="space-y-3">
+        ${window.vsTeamHtml ? window.vsTeamHtml(t.id) : ''}
+        ${boss ? `<button onclick="openScheduleGame()" class="${BTN} w-full py-3"><i class="fa-solid fa-calendar-plus mr-1"></i> Add a game</button>` : ''}
+        <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Upcoming (${upcoming.length})</div>
+        ${upcoming.map(g => row(g, false)).join('') || '<p class="text-xs text-white/45 text-center py-4">No games on the schedule yet.</p>'}
+        ${past.length ? `<div class="text-[10px] font-black uppercase tracking-wider text-white/55 pt-2">Past results</div>${past.map(g => row(g, true)).join('')}` : ''}
+    </div>`;
+}
+window.openScheduleGame = function (gameId) {
+    const t = T.open; if (!t || !canManage(t)) return;
+    const g = (t.schedule || []).find(x => x.id === gameId) || { home: true };
+    const isPast = !!g.date && g.date < todayYmd();
+    if (!T.all.length) loadAll();
+    const others = T.all.filter(x => x.id !== t.id).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    window._schedHome = g.home !== false;
+    sheet('team-schedule', gameId ? 'Edit game' : 'Add a game', `
+        <div><div class="text-[10px] font-black uppercase text-white/55 mb-1.5">Opponent *</div>
+            <input id="ts-opp" list="ts-teams" class="${INPUT}" maxlength="40" value="${esc(g.opponent || '')}" placeholder="Team name (on FutNet or not)">
+            <datalist id="ts-teams">${others.map(x => `<option value="${esc(x.name)}"></option>`).join('')}</datalist></div>
+        <div class="flex gap-3">
+            <div class="flex-1"><div class="text-[10px] font-black uppercase text-white/55 mb-1.5">Date *</div><input id="ts-date" type="date" class="${INPUT}" value="${esc(g.date || '')}"></div>
+            <div class="flex-1"><div class="text-[10px] font-black uppercase text-white/55 mb-1.5">Time</div><input id="ts-time" type="time" class="${INPUT}" value="${esc(g.time || '')}"></div>
+        </div>
+        <div><div class="text-[10px] font-black uppercase text-white/55 mb-1.5">Where</div><input id="ts-loc" class="${INPUT}" maxlength="80" value="${esc(g.location || '')}" placeholder="Field or park"></div>
+        <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="ts-home" onclick="_schedHome=true;this.className=this.className.replace('bg-white/5','bg-[#00F296] text-slate-950');document.getElementById('ts-away').className=document.getElementById('ts-away').className.replace('bg-[#00F296] text-slate-950','bg-white/5')" class="py-2.5 rounded-xl text-xs font-black ${g.home !== false ? 'bg-[#00F296] text-slate-950' : 'bg-white/5'}">Home</button>
+            <button type="button" id="ts-away" onclick="_schedHome=false;this.className=this.className.replace('bg-white/5','bg-[#00F296] text-slate-950');document.getElementById('ts-home').className=document.getElementById('ts-home').className.replace('bg-[#00F296] text-slate-950','bg-white/5')" class="py-2.5 rounded-xl text-xs font-black ${g.home === false ? 'bg-[#00F296] text-slate-950' : 'bg-white/5'}">Away</button>
+        </div>
+        <div><div class="text-[10px] font-black uppercase text-white/55 mb-1.5">Note</div><input id="ts-note" class="${INPUT}" maxlength="120" value="${esc(g.note || '')}" placeholder="e.g. League match, bring white shirts"></div>
+        ${gameId && (isPast || g.scoreFor !== undefined) ? `<div><div class="text-[10px] font-black uppercase text-white/55 mb-1.5">Final score (us - them)</div>
+            <div class="flex items-center gap-2"><input id="ts-for" inputmode="numeric" class="${INPUT} text-center" maxlength="2" value="${esc(g.scoreFor ?? '')}"><span class="font-black">-</span>
+            <input id="ts-against" inputmode="numeric" class="${INPUT} text-center" maxlength="2" value="${esc(g.scoreAgainst ?? '')}"></div></div>` : ''}
+        <button onclick="saveScheduleGame('${jsq(gameId || '')}')" class="${BTN} w-full py-3">${gameId ? 'Save' : 'Add to schedule'}</button>
+        ${gameId ? `<button onclick="deleteScheduleGame('${jsq(gameId)}')" class="w-full text-xs font-bold text-red-400 py-2">Remove from schedule</button>` : ''}`);
+};
+window.saveScheduleGame = async function (gameId) {
+    const t = T.open; if (!t) return;
+    const val = (id) => String(document.getElementById(id)?.value || '').trim();
+    const opponent = val('ts-opp'), date = val('ts-date');
+    if (!opponent) { toast('Who are you playing?', 'error'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Pick the date.', 'error'); return; }
+    const match = T.all.find(x => x.id !== t.id && nameKey(x.name) === nameKey(opponent));
+    const g = { id: gameId || ('g_' + Date.now().toString(36)), opponent, opponentTeamId: match ? match.id : '', date, time: val('ts-time'),
+        location: val('ts-loc'), home: window._schedHome !== false, note: val('ts-note') };
+    const sf = document.getElementById('ts-for'), sa = document.getElementById('ts-against');
+    if (sf && sa && sf.value !== '' && sa.value !== '') { g.scoreFor = parseInt(sf.value, 10) || 0; g.scoreAgainst = parseInt(sa.value, 10) || 0; }
+    try {
+        await runTransaction(db, async (tx) => {
+            const ref = D('teams', t.id);
+            const s = await tx.get(ref); if (!s.exists()) throw new Error('GONE');
+            const list = (s.data().schedule || []).filter(x => x.id !== g.id);
+            list.push(g);
+            tx.update(ref, { schedule: list.slice(-100), updatedAt: serverTimestamp() });
+        });
+        document.getElementById('team-schedule')?.remove();
+        toast(gameId ? 'Saved.' : 'Game added to the schedule.');
+    } catch (e) { console.error(e); toast("Couldn't save the game.", 'error'); }
+};
+window.deleteScheduleGame = async function (gameId) {
+    const t = T.open; if (!t || !confirm('Remove this game from the schedule?')) return;
+    try {
+        await updateDoc(D('teams', t.id), { schedule: (t.schedule || []).filter(x => x.id !== gameId), updatedAt: serverTimestamp() });
+        document.getElementById('team-schedule')?.remove();
+    } catch (e) { toast("Couldn't remove it.", 'error'); }
+};
 
 function privateNote(what) {
     return `<div class="${CARD} text-center space-y-2 py-8"><div class="text-3xl">🔒</div>

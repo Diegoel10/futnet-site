@@ -3008,3 +3008,150 @@ exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// 23. VS Mode matches: challenges, joins, payments, results (teams' records), cancellations
+// ---------------------------------------------------------------------------
+async function teamCaptains(teamId) {
+  try { const t = (await col("teams").doc(teamId).get()).data(); return t ? teamBosses(t) : []; } catch (e) { return []; }
+}
+const vsTitle = (m) => {
+  const names = arr(m.teams).filter((t) => t.state !== "invited").map((t) => t.name);
+  return m.title || (names.length >= 2 ? names.slice(0, 2).join(" vs ") : `${names[0] || "VS"} Match`);
+};
+const vsWhen = (m) => `${m.date || ""} ${m.time || ""}`.trim();
+function vsResult(m) {
+  // { teamId: { w, d, l, gf, ga } } for a final 2-team match
+  const ids = Object.keys(m.score || {});
+  if (m.status !== "final" || ids.length !== 2) return {};
+  const [a, b] = ids, ga = +m.score[a] || 0, gb = +m.score[b] || 0;
+  const one = (f, g) => ({ w: f > g ? 1 : 0, d: f === g ? 1 : 0, l: f < g ? 1 : 0, gf: f, ga: g });
+  return { [a]: one(ga, gb), [b]: one(gb, ga) };
+}
+
+exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  const matchId = event.params.matchId;
+  if (!after) return;
+  const by = after.updatedBy || after.organizerId || "";
+  const stateOf = (m, id) => (arr(m && m.teams).find((t) => t.teamId === id) || {}).state || "";
+  const teamName = (id) => (arr(after.teams).find((t) => t.teamId === id) || {}).name || "A team";
+
+  // a) New challenge: the challenged team's captains
+  if (!before && after.challenge && after.challenge.status === "pending") {
+    const from = teamName(after.challenge.fromTeamId), to = teamName(after.challenge.toTeamId);
+    await notify(await teamCaptains(after.challenge.toTeamId), {
+      type: "vs_challenge", senderUid: after.organizerId,
+      title: `⚔️ ${from} challenged ${to}`,
+      body: `${vsWhen(after)} at ${after.location || "TBD"} · ${after.format || ""}. Open Teams to accept or decline.`,
+    }, { exclude: [after.organizerId], key: `vschal_${matchId}` });
+  }
+  // b) Challenge answered: the challenger
+  if (before && before.challenge && after.challenge && before.challenge.status === "pending" && after.challenge.status !== "pending") {
+    const yes = after.challenge.status === "accepted";
+    await notify(uniq([after.organizerId, ...(await teamCaptains(after.challenge.fromTeamId))]), {
+      type: "vs_challenge_answer", senderUid: by,
+      title: yes ? "Challenge accepted! ⚔️" : "Challenge declined",
+      body: `${teamName(after.challenge.toTeamId)} ${yes ? "accepted" : "declined"} your challenge for ${vsWhen(after)}.`,
+    }, { exclude: [by], key: `vsans_${matchId}` });
+  }
+  // c) Rematch / invited teams: their captains
+  const invitedNow = arr(after.teams).filter((t) => t.state === "invited" && (!before || stateOf(before, t.teamId) !== "invited") && !(after.challenge && after.challenge.toTeamId === t.teamId));
+  for (const t of invitedNow) {
+    await notify(await teamCaptains(t.teamId), {
+      type: "vs_invite", senderUid: after.organizerId,
+      title: `🔁 ${after.rematchOf ? "Rematch" : "VS Match"} invite for ${t.name}`,
+      body: `${vsWhen(after)} at ${after.location || "TBD"}. Open the match to say if you're in.`,
+    }, { exclude: [after.organizerId], key: `vsinv_${matchId}_${t.teamId}` });
+  }
+  if (!before) return;
+
+  // d) A team joined: the organizer
+  const was = new Set(arr(before.teams).map((t) => t.teamId));
+  for (const t of arr(after.teams).filter((x) => !was.has(x.teamId))) {
+    await notify([after.organizerId], {
+      type: "vs_team_joined", senderUid: by,
+      title: `${t.name} joined your VS Match ⚔️`, body: `${vsTitle(after)} · ${vsWhen(after)}`,
+    }, { exclude: [by], key: `vsjoin_${matchId}_${t.teamId}` });
+  }
+  // e) A team is confirmed (paid in full): its captains
+  for (const t of arr(after.teams).filter((x) => x.state === "confirmed" && stateOf(before, x.teamId) === "pending")) {
+    await notify(await teamCaptains(t.teamId), {
+      type: "vs_confirmed", senderUid: after.organizerId, sound: "cha_ching",
+      title: `${t.name} is confirmed ✅`, body: `Your spot in ${vsTitle(after)} (${vsWhen(after)}) is locked in.`,
+    }, { key: `vsconf_${matchId}_${t.teamId}` });
+  }
+  // f) Cancelled: everyone in it
+  if (before.status !== "cancelled" && after.status === "cancelled") {
+    const caps = uniq((await Promise.all(arr(after.teams).map((t) => teamCaptains(t.teamId)))).flat());
+    await notify(caps, {
+      type: "vs_cancelled", senderUid: by,
+      title: "VS Match cancelled ❌", body: `${vsTitle(after)} on ${vsWhen(after)} was cancelled.`,
+    }, { exclude: [by], key: `vscancel_${matchId}` });
+  }
+  // g) Final score: the teams' records (win/draw/loss, goals), and a push to the captains
+  const oldR = vsResult(before), newR = vsResult(after);
+  if (JSON.stringify(oldR) !== JSON.stringify(newR)) {
+    const ids = uniq([...Object.keys(oldR), ...Object.keys(newR)]);
+    for (const id of ids) {
+      const o = oldR[id] || {}, n = newR[id] || {};
+      const delta = {};
+      ["w", "d", "l", "gf", "ga"].forEach((k) => { const v = (n[k] || 0) - (o[k] || 0); if (v) delta[`record.${k}`] = FV.increment(v); });
+      if (Object.keys(delta).length) { try { await col("teams").doc(id).update(delta); } catch (e) { logger.warn("record", id, e.message); } }
+    }
+    if (after.status === "final" && before.status !== "final") {
+      const caps = uniq((await Promise.all(Object.keys(newR).map((t) => teamCaptains(t)))).flat());
+      const [a, b] = Object.keys(after.score || {});
+      await notify(caps, {
+        type: "vs_final", senderUid: by,
+        title: "Final score 🏁", body: `${teamName(a)} ${after.score[a]} - ${after.score[b]} ${teamName(b)}${after.forfeit ? " (forfeit)" : ""}`,
+      }, { exclude: [by], key: `vsfinal_${matchId}` });
+    }
+  }
+});
+
+// Appeal of a score: the organizer
+exports.onVsAppeal = onDocumentCreated(`${BASE}/vsMatches/{matchId}/appeals/{appealId}`, async (event) => {
+  const a = (event.data && event.data.data()) || {};
+  const m = (await col("vsMatches").doc(event.params.matchId).get()).data();
+  if (!m) return;
+  await notify([m.organizerId], {
+    type: "vs_appeal", senderUid: a.byUid || "",
+    title: "Score appeal ⚖️", body: `${a.byName || "A captain"}: "${clip(a.note, 120)}" (${vsTitle(m)})`,
+  }, { exclude: [a.byUid], key: `vsappeal_${event.params.appealId}` });
+});
+
+// Pay-by time: a reminder 3 hours before it, then teams that haven't paid in full lose their spot.
+exports.vsPaymentDeadlines = onSchedule({ schedule: "every 15 minutes", timeZone: DEFAULT_TZ, timeoutSeconds: 120 }, async () => {
+  const snap = await col("vsMatches").where("status", "==", "open").get();
+  const now = Date.now();
+  for (const d of snap.docs) {
+    const m = d.data();
+    if (!(+m.priceCents > 0)) continue;
+    const start = startOf({ date: m.date, time: m.time });
+    if (!start) continue;
+    const deadline = start - (+m.payByHours || 0) * 3600000;
+    const paid = (id) => arr(m.payments).filter((p) => p.teamId === id).reduce((s, p) => s + (+p.cents || 0), 0);
+    const unpaid = arr(m.teams).filter((t) => t.state === "pending" && paid(t.teamId) < m.priceCents);
+    if (!unpaid.length) continue;
+    if (now >= deadline - 3 * 3600000 && now < deadline) {
+      for (const t of unpaid) {
+        await notify(await teamCaptains(t.teamId), {
+          type: "vs_pay_reminder", senderUid: m.organizerId,
+          title: `⏰ Pay soon to keep your spot`,
+          body: `${t.name}: ${vsTitle(m)} needs the full fee in the next 3 hours or the spot opens up.`,
+        }, { key: `vspayrem_${d.id}_${t.teamId}` });
+      }
+    } else if (now >= deadline) {
+      const gone = new Set(unpaid.map((t) => t.teamId));
+      await d.ref.update({ teams: arr(m.teams).filter((t) => !gone.has(t.teamId)), teamIds: arr(m.teamIds).filter((id) => !gone.has(id)), updatedBy: "", updatedAt: FV.serverTimestamp() });
+      for (const t of unpaid) {
+        await notify(await teamCaptains(t.teamId), {
+          type: "vs_spot_lost", senderUid: m.organizerId,
+          title: "Spot released", body: `${t.name} didn't pay in time for ${vsTitle(m)}, so the spot opened up.`,
+        }, { key: `vslost_${d.id}_${t.teamId}` });
+      }
+    }
+  }
+});

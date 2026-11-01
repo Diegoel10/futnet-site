@@ -112,7 +112,7 @@ window.openAnalytics = async function (cid) {
     const c = (window.communitiesCache || {})[cid] || {};
     A.cid = cid; A.name = c.name || 'Community'; A.loading = true; A.open = null;
     let m = document.getElementById('analytics-modal');
-    if (!m) { m = document.createElement('div'); m.id = 'analytics-modal'; m.className = 'fixed inset-0 z-[200] bg-[#03080F] overflow-y-auto'; document.body.appendChild(m); }
+    if (!m) { m = document.createElement('div'); m.id = 'analytics-modal'; m.dataset.close = 'closeAnalytics'; m.className = 'fixed inset-0 z-[200] bg-[#03080F] overflow-y-auto'; document.body.appendChild(m); }
     draw();
     if (A.unsub) { try { A.unsub(); } catch (e) {} }
     A.unsub = onSnapshot(collection(db, 'artifacts', appId, 'communities', cid, 'views'), s => { A.views = s.docs.map(d => d.data()); A.loading = false; draw(); },

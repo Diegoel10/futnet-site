@@ -204,7 +204,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const originalSwitchTab = window.switchTab;
     if (originalSwitchTab) {
         window.switchTab = function(tabName) {
-            originalSwitchTab(tabName);
+            originalSwitchTab.apply(this, arguments);   // keeps the "don't add a history step" flag (Back button)
             if (tabName === 'leaderboard') {
                 renderLeaderboard('goals');
             }

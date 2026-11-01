@@ -463,9 +463,7 @@ window.openEventDetails = function(eventId) {
     window.expandedLeaderboardTeams = window.expandedLeaderboardTeams || {};
     window.expandedMatchCards = window.expandedMatchCards || {};
 
-    // Push state for browser back button support
-    history.pushState({ modalOpen: true, eventId: eventId }, "", `#event-${eventId}`);
-
+    // Back support: switchTab below adds the history step (Back returns to wherever you opened the game from).
     if (typeof window.switchTab === 'function') {
         window.switchTab('event-details-screen');
     }
@@ -507,16 +505,10 @@ async function offerCommunityJoin(ev) {
 }
 
 // Listen to browser back button to close event profile seamlessly
+// Back left the game page: forget the open game (the page's own Back handler shows the screen you came from).
 window.addEventListener('popstate', (event) => {
-    if (document.getElementById('standalone-team-builder-modal')) {
-        document.getElementById('standalone-team-builder-modal')?.remove();
-        return;
-    }
-    if (window.activeModalEventId) {
+    if (window.activeModalEventId && !(event.state && event.state.tab === 'event-details-screen')) {
         window.activeModalEventId = null;
-        if (typeof window.switchTab === 'function') {
-            window.switchTab('events');
-        }
     }
 });
 
@@ -1772,6 +1764,8 @@ function stripBigPhotos(value) {
 window.stripBigPhotos = stripBigPhotos;
 
 window.closeEventModal = function() {
+    // ← on the game page = Back: return to where the game was opened from (a community, Profile, Games…).
+    if (history.state && history.state.tab === 'event-details-screen' && history.length > 1) { history.back(); return; }
     window.activeModalEventId = null;
     if (typeof window.switchTab === 'function') {
         window.switchTab('events');

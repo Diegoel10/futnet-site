@@ -118,6 +118,20 @@
                     <i class="fa-solid fa-chevron-right text-white/40 text-xs"></i>
                 </button>
 
+                <!-- Create VS Match Option -->
+                <button onclick="closeCreateActionSheet(); openCreateVs();" class="w-full flex items-center justify-between p-4 bg-black/60 hover:bg-black border border-fuchsia-500/40 rounded-2xl transition shadow-lg group">
+                    <div class="flex items-center space-x-3.5">
+                        <div class="w-11 h-11 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/50 flex items-center justify-center text-fuchsia-300 text-lg">
+                            <i class="fa-solid fa-shield-halved"></i>
+                        </div>
+                        <div class="text-left">
+                            <div class="text-sm font-black text-white group-hover:text-fuchsia-300 transition">Create VS Match</div>
+                            <div class="text-[11px] text-white/60 font-medium">Team vs team: your team or teams you organize</div>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-white/40 text-xs"></i>
+                </button>
+
                 <!-- Create Community Option -->
                 <button onclick="closeCreateActionSheet(); showCommunityCreation();" class="w-full flex items-center justify-between p-4 bg-black/60 hover:bg-black border border-emerald-500/40 rounded-2xl transition shadow-lg group">
                     <div class="flex items-center space-x-3.5">
@@ -643,6 +657,7 @@
     <script type="module" src="js/public-preview.js"></script>
     <script type="module">
         import { auth, db, appId } from './js/firebase-config.js';
+        import './js/nav.js';
         import './js/auth.js';
         import './js/home.js';
         import './js/people.js';
@@ -657,6 +672,7 @@
         import './js/communities.js';
         import './js/safety.js';
         import './js/teams.js';
+        import './js/vs.js';
         import './js/profile.js';
         import './js/leaderboard.js';
         import './js/spot-offers.js';

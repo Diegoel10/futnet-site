@@ -272,6 +272,7 @@ window.openMoneyTracker = async function (cid) {
     if (!m) {
         m = document.createElement('div');
         m.id = 'money-tracker-modal';
+        m.dataset.close = 'closeMoneyTracker';   // Back button closes it properly
         m.className = 'fixed inset-0 z-[200] bg-[#03080F] overflow-y-auto';
         document.body.appendChild(m);
     }
