@@ -572,6 +572,7 @@ window.openTwoPageGameWizard = function(eventId, mode) {
         fee: event.fee !== undefined ? event.fee : 'Free',
         description: event.description || '',
         rules: event.rules || '',
+        refundNote: event.refundNote || '',
         allowPlusOnes: event.allowPlusOnes !== undefined ? event.allowPlusOnes : true,
         plusOneLimit: event.plusOneLimit !== undefined ? event.plusOneLimit : 1,
         // community game options
@@ -744,6 +745,11 @@ window.renderWizardPage2 = function() {
                 </div>
 
                 <div>
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">↩️ Refund policy</label>
+                    <textarea id="wiz-refund" rows="2" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white focus:outline-none focus:border-[#00F296]" placeholder="e.g. Full refund if you cancel 24 hours before.">${(d.refundNote || '').replace(/</g, '&lt;')}</textarea>
+                </div>
+
+                <div>
                     <label class="block font-black uppercase text-[10px] tracking-wider text-[#00F296] mb-1">➕ Allow Plus Ones?</label>
                     <div class="grid grid-cols-2 gap-2">
                         <button type="button" onclick="window._wizardData.allowPlusOnes=false; renderWizardPage2()" class="p-3 rounded-2xl border text-center transition ${!d.allowPlusOnes ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black border-transparent shadow' : 'bg-black/60 text-white/70 border-white/10'}">
@@ -786,6 +792,7 @@ window.submitTwoPageGameWizard = async function() {
     const d = window._wizardData;
     d.description = document.getElementById('wiz-desc')?.value.trim() || '';
     d.rules = document.getElementById('wiz-rules')?.value.trim() || '';
+    d.refundNote = document.getElementById('wiz-refund')?.value.trim() || '';
     d.plusOneLimit = parseInt(document.getElementById('wiz-plus-limit')?.value, 10) || 1;
     if (document.getElementById('wiz-p1-on')) {
         d.plusOneExtra = document.getElementById('wiz-p1-on').checked ? (parseInt(document.getElementById('wiz-p1-amt')?.value, 10) || 1) : 0;
@@ -825,6 +832,7 @@ window.submitTwoPageGameWizard = async function() {
             fee: d.fee,
             description: d.description,
             rules: d.rules,
+            refundNote: d.refundNote,
             allowPlusOnes: d.allowPlusOnes,
             plusOneLimit: d.plusOneLimit,
             ...communityFields,
@@ -868,6 +876,7 @@ window.submitTwoPageGameWizard = async function() {
                     fee: d.fee,
                     description: d.description,
                     rules: d.rules,
+                    refundNote: d.refundNote,
                     allowPlusOnes: d.allowPlusOnes,
                     plusOneLimit: d.plusOneLimit,
                     ...communityFields

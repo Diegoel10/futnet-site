@@ -55,6 +55,27 @@ async function healUnnamedPlayers(eventId) {
     });
 }
 
+
+/** "You're in" card: my guests on the waitlist, and the button to add them when a spot opens. */
+function guestWaitHtml(event, userId) {
+    const w = myGuestWait(event, userId);
+    if (!w || !(w.guests || []).length) return '';
+    const [n0, s0] = [Date.now(), startMsOf(event)];
+    const eligible = offerEligible(event, n0, s0).includes(userId);
+    const pos = waitingUids(event).indexOf(userId) + 1;
+    const exp = event.spotOffer && event.spotOffer.expiresAt;
+    const free = Math.max(0, capacityOfDraft(event) - (event.attendees || []).reduce((n, a) => n + 1 + ((a.guests || []).length), 0));
+    const names = (w.guests || []).map(g => g.name || 'Guest');
+    return `<div class="rounded-2xl p-3 text-left space-y-2 ${eligible ? 'bg-[#00F296]/10 border-2 border-[#00F296]' : 'bg-amber-400/10 border border-amber-400/50'}">
+        <div class="text-[11px] font-black uppercase tracking-wider ${eligible ? 'text-[#00F296]' : 'text-amber-300'}">${eligible ? '🎉 A spot opened for your guest' + (names.length > 1 ? 's' : '') : `⏳ Guests on the waitlist${pos ? ` · ${pos}${pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'} in line` : ''}`}</div>
+        <div class="space-y-1">${names.map((n, i) => `<div class="flex items-center justify-between gap-2 text-xs font-bold"><span>${escapeHtml(n)}</span><button onclick="removeWaitlistGuest('${event.id}', ${i})" class="text-[10px] text-red-400 font-bold">Remove</button></div>`).join('')}</div>
+        ${eligible ? `${exp && !(event.spotOffer && event.spotOffer.lastCall) ? `<div class="text-[11px] text-white/75">Confirm within <b class="text-[#00F296]" data-countdown="${Number(exp)}">--:--</b> or it goes to the next person.</div>` : ''}
+            <button onclick="claimGuestSpots('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider">Add ${free >= names.length ? (names.length > 1 ? 'them' : escapeHtml(names[0])) : `${free} of them`}${creditGame(event) ? ' & pay' : ''}</button>`
+            : `<label class="flex items-center justify-between gap-3 cursor-pointer"><span class="text-[11px] text-white/80">Add them automatically when a spot opens${creditGame(event) ? ' (from your credit)' : ''}</span>
+                <input type="checkbox" ${w.autoJoin ? 'checked' : ''} onchange="setWaitlistAuto('${event.id}', this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0"></label>`}
+    </div>`;
+}
+
 window.renderInfoTab = function(event) {
     setTimeout(() => { try { hydrateBalances(); } catch (e) {} }, 0);
     const rawPrice = event.fee !== undefined && event.fee !== null ? String(event.fee).replace('$', '').trim() : '';
@@ -164,6 +185,7 @@ window.renderInfoTab = function(event) {
                 ${when ? `<div class="text-[12px] font-semibold text-white/65">See you ${escapeHtml(when)}</div>` : ''}
                 ${guests.length ? `<div class="text-[12px] font-bold text-[#00F296]">+ ${guests.map(g => escapeHtml(g.name || 'Guest')).join(', ')}</div>` : ''}
             </div>
+            ${guestWaitHtml(event, userId)}
             <div class="grid ${allowPlusOnes ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5">
                 <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 text-red-400 font-black py-3 rounded-2xl text-xs border-2 border-red-500/70 uppercase tracking-wider">Cancel</button>
                 ${allowPlusOnes ? `<button onclick="openManageGuestsModal('${event.id}')" class="bg-[#00B4AE]/30 text-[#00F296] font-black py-3 rounded-2xl text-xs border-2 border-[#00B4AE] uppercase tracking-wider flex items-center justify-center gap-1.5">
@@ -227,7 +249,8 @@ window.renderInfoTab = function(event) {
             <p class="text-[13px] text-white/90 leading-relaxed font-medium pt-2 whitespace-pre-line">${text}</p>
         </details>`;
     const refund = creditGame(event);
-    const rulesText = escapeHtml(event.rules || 'Standard fair play rules apply. Be punctual and respectful.') + (refund ? '\n\n↩️ Refund policy: ' + escapeHtml(policyText(event)) : '');
+    const note = String(event.refundNote || '').trim();
+    const rulesText = escapeHtml(event.rules || 'Standard fair play rules apply. Be punctual and respectful.') + (refund ? '\n\n↩️ Refund policy: ' + escapeHtml(policyText(event)) : '') + (note ? '\n\n↩️ ' + (refund ? 'Also: ' : 'Refund policy: ') + escapeHtml(note) : '');
 
     return `
         <div class="space-y-3.5 font-sans text-white">
@@ -254,7 +277,7 @@ window.renderInfoTab = function(event) {
             ${factsHtml}
             ${goingHtml}
             ${section('fa-file-lines', 'GAME DETAILS', escapeHtml(event.description || 'Standard game. Come ready to play, have fun and respect the squad. 💪⚽'))}
-            ${section('fa-list-check', refund ? 'RULES & REFUND POLICY' : 'RULES', rulesText)}
+            ${section('fa-list-check', refund || note ? 'RULES & REFUND POLICY' : 'RULES', rulesText)}
             ${window.creatorAdminsHtml
                 ? window.creatorAdminsHtml({ creator: { uid: organizerId, name: organizerName, avatar: finalHostAvatar }, admins: window.communityAdminsList ? window.communityAdminsList(event.communityId) : [], cid: event.communityId || '' })
                 : ''}
@@ -276,7 +299,7 @@ function giInjectCss() {
     if (navigator.vibrate) { try { navigator.vibrate([30, 40, 60]); } catch (e) { /* no vibration */ } }
 }
 
-window.openManageGuestsModal = function(eventId) {
+window.openManageGuestsModal = function(eventId, o = {}) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !window.currentUser) return;
 
@@ -295,7 +318,7 @@ window.openManageGuestsModal = function(eventId) {
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-[32px] max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 class="text-xs font-black uppercase tracking-wider text-white">${guests.length ? 'MANAGE YOUR GUESTS' : 'BRING GUESTS'}</h3>
+                <h3 class="text-xs font-black uppercase tracking-wider text-white">${o.afterJoin ? "YOU'RE IN! ⚽ BRINGING GUESTS?" : guests.length ? 'MANAGE YOUR GUESTS' : 'BRING GUESTS'}</h3>
                 <button onclick="document.getElementById('manage-guests-modal').remove()" class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-white/70 hover:text-white font-bold"><i class="fa-solid fa-xmark text-xs"></i></button>
             </div>
             <p class="text-[11px] text-white/60 text-center">${guests.length ? `You can bring up to ${maxGuests} guest(s). Edit names or add new ones.` : 'How many guests are you bringing?'}</p>
@@ -314,9 +337,15 @@ window.openManageGuestsModal = function(eventId) {
                 <i class="fa-solid fa-plus"></i> Add Another Guest
             </button>
 
+            <div class="bg-amber-400/10 border border-amber-400/40 rounded-xl p-3 text-[11px] text-amber-100 leading-relaxed text-left">
+                ⚠️ <b>You're responsible for your guests</b>: their payment${creditGame(event) ? ' (taken from your credit)' : ''} and how they behave in the game.
+                ${(() => { const free = Math.max(0, capacityOfDraft(event) - (event.attendees || []).reduce((n, a) => n + 1 + ((a.guests || []).length), 0)); return free <= 3 ? `<div class="mt-1 text-white/80">${free ? `Only <b>${free}</b> spot${free === 1 ? '' : 's'} left.` : 'The game is full.'} Guests that don't fit can wait on the <b>waitlist</b>.</div>` : ''; })()}
+            </div>
+
             <button onclick="window.saveManagedGuests('${eventId}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider shadow-[0_0_15px_rgba(0,242,150,0.4)] transition">
-                Save Changes
+                ${o.afterJoin ? 'Add my guests' : 'Save Changes'}
             </button>
+            ${o.afterJoin ? `<button onclick="document.getElementById('manage-guests-modal').remove()" class="w-full text-white/70 font-bold py-1 text-xs">No, just me</button>` : ''}
         </div>
     `;
 };
@@ -343,20 +372,26 @@ window.addNewGuestInputRow = function() {
     container.appendChild(div);
 };
 
-window.saveManagedGuests = async function(eventId) {
+// Guests that don't fit go on the waitlist (the player picks which). Saved like the "partial join":
+// a waitlist entry with the player's uid, guestsOnly: true and those guests. When a spot opens the
+// player is asked (or, with "add automatically", the server adds them).
+//   opts = { playing: [names], waiting: [names] (the whole list of my waitlisted guests), claim: true (taking open spots) }
+const myGuestWait = (ev, uid) => (ev.waitingList || []).find(w => String(w.uid) === uid && (w.guestsOnly || (ev.attendees || []).some(a => String(a.uid) === uid)));
+window.myGuestWaitEntry = myGuestWait;
+window.saveManagedGuests = async function(eventId, opts) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (!event || !window.currentUser) return;
 
-    const container = document.getElementById('manage-guests-list-inputs');
-    if (!container) return;
-    const inputs = container.querySelectorAll('input[type="text"]');
     const newGuests = [];
-    inputs.forEach(inp => {
-        const val = inp.value.trim();
-        if (val) {
-            newGuests.push({ name: val, paid: 'Unpaid' });
-        }
-    });
+    if (opts && opts.playing) opts.playing.forEach(n => newGuests.push({ name: n, paid: 'Unpaid' }));
+    else {
+        const container = document.getElementById('manage-guests-list-inputs');
+        if (!container) return;
+        container.querySelectorAll('input[type="text"]').forEach(inp => {
+            const val = inp.value.trim();
+            if (val) newGuests.push({ name: val, paid: 'Unpaid' });
+        });
+    }
 
     const myUid = String(window.currentUser.uid);
     const mine0 = (event.attendees || []).find(a => String(a.uid) === myUid) || {};
@@ -392,6 +427,20 @@ window.saveManagedGuests = async function(eventId) {
         if (added > 0) {
             const free = capacityOfDraft(draft) - (draft.attendees || []).reduce((n, a) => n + 1 + ((a.guests || []).length), 0);
             if (added > free) { noRoom = Math.max(0, free); return false; }
+            // Taking open spots for guests from the waitlist: the people ahead of you in line come first.
+            if (opts && opts.claim) { const [n0, s0] = [Date.now(), startMsOf(draft)]; if (!mayTakeSpot(draft, myUid, n0, s0)) { noRoom = 0; return false; } }
+        }
+        if (opts && opts.waiting) {
+            const w0 = (draft.waitingList || []).find(w => String(w.uid) === myUid);
+            const list = opts.waiting.map(n => ({ name: n, paid: 'Unpaid' }));
+            draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== myUid);
+            if (list.length) {
+                const entry = { ...(w0 || {}), uid: myUid, name: me.name || 'Player', status: 'waiting', guestsOnly: true, guests: list, waitingSince: (w0 && w0.waitingSince) || Date.now() };
+                if (me.avatar && !entry.avatar) entry.avatar = me.avatar;
+                delete entry.paid; delete entry.creditPaidCents;
+                const at = w0 ? (event.waitingList || []).findIndex(w => String(w.uid) === myUid) : -1;
+                if (at >= 0) draft.waitingList.splice(Math.min(at, draft.waitingList.length), 0, entry); else draft.waitingList.push(entry);
+            }
         }
         if (orgMode && ctx) {
             const gc = me.guestCreditCents || 0;
@@ -428,17 +477,87 @@ window.saveManagedGuests = async function(eventId) {
     }, hooks);
     if (res.ok && res.aborted && short > 0) { window.showMustPayModal(event, need, have); return; }
     if (res.ok && res.aborted && noRoom >= 0 && newGuests.length > ((event.attendees || []).find(a => String(a.uid) === myUid)?.guests || []).length) {
-        window.showToast(noRoom ? `Only ${noRoom} spot(s) left. Remove a guest and try again.` : 'The game is full. No room for more guests.', 'error');
+        if (opts && opts.claim) { window.showToast(noRoom ? `Only ${noRoom} spot(s) open right now.` : 'Someone ahead of you in line gets the spot first. Your guests stay on the waitlist.', 'error'); return; }
+        // Not enough room: offer to put the extra guests on the waitlist (the player picks who).
+        const playingNow = ((event.attendees || []).find(a => String(a.uid) === myUid)?.guests || []).map(g => g.name);
+        const newOnes = newGuests.map(g => g.name).filter((n, i) => i >= playingNow.length || playingNow[i] !== n);
+        window.openGuestWaitlistSplit(eventId, newGuests.map(g => g.name), newOnes, Math.max(0, noRoom));
         return;
     }
     if (res.ok && !res.aborted) {
-        window.showToast(charged ? `Guests updated! ${dollars(charged)} was taken from your credit.` : refunded ? `Guests updated! ${dollars(refunded)} was returned to your credit.`
-            : (cashPlayer && creditGame(event) && addingNow > 0) ? `Guests updated! ${dollars(addingNow * perGuest)} will be taken from your credit.` : "Guests updated successfully!");
+        const waitN = opts && opts.waiting ? opts.waiting.length : 0;
+        window.showToast(opts && opts.claim ? `Your guest${addingNow === 1 ? ' is' : 's are'} in! ⚽${charged ? ` ${dollars(charged)} was taken from your credit.` : ''}`
+            : charged ? `Guests updated! ${dollars(charged)} was taken from your credit.${waitN ? ` ${waitN} on the waitlist.` : ''}` : refunded ? `Guests updated! ${dollars(refunded)} was returned to your credit.`
+            : (cashPlayer && creditGame(event) && addingNow > 0) ? `Guests updated! ${dollars(addingNow * perGuest)} will be taken from your credit.`
+            : waitN ? `Guests updated! ${waitN} guest${waitN === 1 ? ' is' : 's are'} on the waitlist. We'll ask you when a spot opens.` : "Guests updated successfully!");
         document.getElementById('manage-guests-modal')?.remove();
         window.renderEventDetailModalContent();
     } else if (res.ok) {
         window.showToast("Join the game first to add guests.", "error");
     }
+};
+
+/** "Only 3 spots left": pick which guests play now and which wait. */
+window.openGuestWaitlistSplit = function (eventId, allNames, newOnes, free) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const uid = String(window.currentUser.uid);
+    const already = (myGuestWait(ev, uid) || {}).guests || [];
+    const mustWait = Math.max(0, newOnes.length - free);
+    document.getElementById('manage-guests-modal')?.remove();
+    let m = document.getElementById('guest-split-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'guest-split-modal'; m.className = 'fixed inset-0 z-[215] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    window._gsplit = { eventId, allNames, newOnes, mustWait, already: already.map(g => g.name) };
+    const people = 1 + allNames.length;
+    m.innerHTML = `<div class="bg-[#040E13] border border-amber-400/50 rounded-[28px] max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+        <div class="flex items-center justify-between"><h3 class="text-sm font-black">${free ? `Only ${free} spot${free === 1 ? '' : 's'} left` : 'The game is full'}</h3>
+            <button onclick="document.getElementById('guest-split-modal').remove()" class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-white/70"><i class="fa-solid fa-xmark text-xs"></i></button></div>
+        <p class="text-[12px] text-white/75 leading-relaxed">${free
+            ? `That's <b>${people}</b> people counting you. <b>${free}</b> of your new guests can play now and <b>${mustWait}</b> will go on the <b>waitlist</b>. If a spot opens, we'll ask you before adding them.`
+            : `There are no spots right now. Your guest${mustWait === 1 ? '' : 's'} can go on the <b>waitlist</b>. If a spot opens, we'll ask you before adding them.`}</p>
+        ${free ? `<div class="text-[10px] font-black uppercase tracking-wider text-amber-300">Who goes on the waitlist? (pick ${mustWait})</div>` : ''}
+        <div class="space-y-1.5">${newOnes.map((n, i) => `<label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 cursor-pointer">
+            <input type="checkbox" class="gsplit w-5 h-5 accent-amber-400" value="${escapeHtml(n)}" ${i >= newOnes.length - mustWait ? 'checked' : ''} ${free ? '' : 'checked disabled'} onchange="guestSplitCount()">
+            <span class="flex-1 text-sm font-bold">${escapeHtml(n)}</span><span class="gsplit-tag text-[10px] font-black ${i >= newOnes.length - mustWait ? 'text-amber-300' : 'text-[#00F296]'}">${i >= newOnes.length - mustWait ? 'WAITLIST' : 'PLAYS'}</span></label>`).join('')}</div>
+        <button id="gsplit-go" onclick="confirmGuestSplit()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3.5 rounded-xl text-xs uppercase tracking-wider">${free ? 'OK, save' : `Put ${mustWait === 1 ? 'my guest' : 'them'} on the waitlist`}</button>
+        <button onclick="document.getElementById('guest-split-modal').remove()" class="w-full text-white/60 font-bold py-1 text-xs">Never mind</button>
+    </div>`;
+};
+window.guestSplitCount = function () {
+    const s = window._gsplit; if (!s) return;
+    const boxes = [...document.querySelectorAll('#guest-split-modal .gsplit')];
+    const n = boxes.filter(b => b.checked).length;
+    boxes.forEach(b => { const t = b.closest('label').querySelector('.gsplit-tag'); t.textContent = b.checked ? 'WAITLIST' : 'PLAYS'; t.className = 'gsplit-tag text-[10px] font-black ' + (b.checked ? 'text-amber-300' : 'text-[#00F296]'); });
+    const go = document.getElementById('gsplit-go'); if (go) { go.disabled = n < s.mustWait; go.style.opacity = n < s.mustWait ? '.5' : '1'; }
+};
+window.confirmGuestSplit = function () {
+    const s = window._gsplit; if (!s) return;
+    const wait = [...document.querySelectorAll('#guest-split-modal .gsplit')].filter(b => b.checked).map(b => b.value);
+    if (wait.length < s.mustWait) { window.showToast(`Pick ${s.mustWait} guest(s) for the waitlist.`, 'error'); return; }
+    const waitSet = new Set(wait);
+    const playing = [];
+    s.allNames.forEach(n => { if (waitSet.has(n) && s.newOnes.includes(n)) waitSet.delete(n); else playing.push(n); });
+    document.getElementById('guest-split-modal')?.remove();
+    window.saveManagedGuests(s.eventId, { playing, waiting: [...s.already, ...wait] });
+};
+/** A spot opened: take it for my waitlisted guests (as many as fit). */
+window.claimGuestSpots = function (eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev || !window.currentUser) return;
+    const uid = String(window.currentUser.uid);
+    const w = myGuestWait(ev, uid); if (!w) return;
+    const me = (ev.attendees || []).find(a => String(a.uid) === uid) || {};
+    const free = Math.max(0, capacityOfDraft(ev) - (ev.attendees || []).reduce((n, a) => n + 1 + ((a.guests || []).length), 0));
+    const names = (w.guests || []).map(g => g.name);
+    const take = names.slice(0, Math.max(1, free)), rest = names.slice(take.length);
+    window.saveManagedGuests(eventId, { playing: [...(me.guests || []).map(g => g.name), ...take], waiting: rest, claim: true });
+};
+window.removeWaitlistGuest = function (eventId, i) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev || !window.currentUser) return;
+    const uid = String(window.currentUser.uid);
+    const w = myGuestWait(ev, uid); if (!w) return;
+    const me = (ev.attendees || []).find(a => String(a.uid) === uid) || {};
+    const names = (w.guests || []).map(g => g.name);
+    if (!confirm(`Take ${names[i] || 'this guest'} off the waitlist?`)) return;
+    window.saveManagedGuests(eventId, { playing: (me.guests || []).map(g => g.name), waiting: names.filter((_, j) => j !== i) });
 };
 
 window.openEventDetails = function(eventId) {
@@ -763,9 +882,10 @@ window.showAcceptRulesModal = function(eventId) {
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-scroll mr-1"></i> Rules</div>
                 <p class="text-xs text-white/85 whitespace-pre-line leading-relaxed">${escapeHtml(ev.rules || 'Standard fair play rules apply. Be punctual and respectful.')}</p>
             </div>` : ''}
-            ${showRefund ? `<div class="bg-black/40 border border-white/10 rounded-xl p-3">
+            ${showRefund || String(ev.refundNote || '').trim() ? `<div class="bg-black/40 border border-white/10 rounded-xl p-3">
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1"><i class="fa-solid fa-rotate-left mr-1"></i> Refund policy</div>
-                <p class="text-xs text-white/85 leading-relaxed">${escapeHtml(policyText(ev))}</p>
+                ${showRefund ? `<p class="text-xs text-white/85 leading-relaxed">${escapeHtml(policyText(ev))}</p>` : ''}
+                ${String(ev.refundNote || '').trim() ? `<p class="text-xs text-white/85 leading-relaxed whitespace-pre-line ${showRefund ? 'mt-1.5' : ''}">${escapeHtml(ev.refundNote)}</p>` : ''}
             </div>` : ''}
             <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
                 <input id="accept-rules-check" type="checkbox" class="w-5 h-5 accent-[#00F296] shrink-0">
@@ -1264,7 +1384,7 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
             me.guests = accepted;
             acceptedCount = accepted.length;
             draft.attendees.push(me);
-            draft.waitingList.push({ ...me, status: 'waiting', guests: waitlisted });
+            draft.waitingList.push({ ...me, status: 'waiting', guestsOnly: true, guests: waitlisted, waitingSince: nowMs });
             outcome = 'partial';
         } else {
             me.status = 'waiting';
@@ -1314,6 +1434,9 @@ window.confirmJoinGameWithGuests = async function(eventId, guestsArray) {
         return;
     }
     if (res.ok) {
+        // Just joined on your own: ask about guests right away (if the game allows them).
+        const _evNow = (res.event || _creditEv || {});
+        if (outcome === 'in' && !guestsArray.length && !!_evNow.allowPlusOnes) setTimeout(() => window.openManageGuestsModal(eventId, { afterJoin: true }), 700);
         if (outcome === 'in' && chargedCents > 0) window.showToast(`Joined! ${dollars(chargedCents)} was taken from your community credit.`);
         else if (outcome === 'in') window.showToast(guestsArray.length > 0 ? "Successfully joined with your guest(s)!" : "Successfully joined game!");
         else if (outcome === 'partial') window.showToast(`Roster capacity reached! Accepted player + ${acceptedCount} guest(s); remaining guest(s) placed on waitlist.`, "info");
@@ -1772,13 +1895,62 @@ window.closeEventModal = function() {
     }
 };
 
-window.handleRSVPAction = async function(eventId, action) {
+/** Cancelling with guests: everyone out, or pick who's not coming (you can't leave your guests behind). */
+window.openCancelWithGuests = function (eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev || !window.currentUser) return;
+    const uid = String(window.currentUser.uid);
+    const me = (ev.attendees || []).find(a => String(a.uid) === uid) || {};
+    const playing = (me.guests || []).map(g => g.name || 'Guest');
+    const waiting = ((myGuestWait(ev, uid) || {}).guests || []).map(g => g.name || 'Guest');
+    let m = document.getElementById('cancel-guests-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'cancel-guests-modal'; m.className = 'fixed inset-0 z-[215] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md'; document.body.appendChild(m); }
+    const row = (key, label, tag) => `<label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 cursor-pointer">
+        <input type="checkbox" class="cg-pick w-5 h-5 accent-red-500" data-k="${escapeHtml(key)}" onchange="cancelGuestsPicked(this)">
+        <span class="flex-1 text-sm font-bold">${escapeHtml(label)}</span>${tag ? `<span class="text-[10px] font-black text-amber-300">${tag}</span>` : ''}</label>`;
+    m.innerHTML = `<div class="bg-[#040E13] border border-red-500/50 rounded-[28px] max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
+        <div class="flex items-center justify-between"><h3 class="text-sm font-black">Are your guests not coming either?</h3>
+            <button onclick="document.getElementById('cancel-guests-modal').remove()" class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-white/70"><i class="fa-solid fa-xmark text-xs"></i></button></div>
+        <p class="text-[12px] text-white/70 leading-relaxed">You're bringing ${[...playing, ...waiting].map(n => `<b>${escapeHtml(n)}</b>`).join(', ')}. You're responsible for your guests, so if you leave, they leave too.</p>
+        <button onclick="cancelEveryone('${escapeHtml(String(eventId))}')" class="w-full bg-red-600 text-white font-black py-3.5 rounded-xl text-xs uppercase tracking-wider">Nobody's coming: remove all</button>
+        <div class="text-[10px] font-black uppercase tracking-wider text-white/55 pt-1">Or pick who's not coming</div>
+        <div class="space-y-1.5">${row('__me', 'Me (and so my guests)', '')}${playing.map((n, i) => row('p' + i, n, '')).join('')}${waiting.map((n, i) => row('w' + i, n, 'WAITLIST')).join('')}</div>
+        <button id="cg-go" onclick="cancelPicked('${escapeHtml(String(eventId))}')" class="w-full bg-black/60 border border-red-500/60 text-red-300 font-black py-3 rounded-xl text-xs uppercase tracking-wider">Remove the ones I picked</button>
+        <button onclick="document.getElementById('cancel-guests-modal').remove()" class="w-full text-white/60 font-bold py-1 text-xs">Never mind, we're all coming</button>
+    </div>`;
+};
+window.cancelGuestsPicked = function (box) {
+    const boxes = [...document.querySelectorAll('#cancel-guests-modal .cg-pick')];
+    const meBox = boxes.find(b => b.dataset.k === '__me');
+    if (box === meBox) boxes.forEach(b => { if (b !== meBox) { b.checked = meBox.checked; b.disabled = meBox.checked; } });
+};
+window.cancelEveryone = function (eventId) {
+    document.getElementById('cancel-guests-modal')?.remove();
+    window.handleRSVPAction(eventId, 'cancel', { all: true });
+};
+window.cancelPicked = function (eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const uid = String(window.currentUser.uid);
+    const boxes = [...document.querySelectorAll('#cancel-guests-modal .cg-pick')];
+    const picked = new Set(boxes.filter(b => b.checked).map(b => b.dataset.k));
+    if (!picked.size) { window.showToast("Pick who's not coming.", 'error'); return; }
+    if (picked.has('__me')) { window.cancelEveryone(eventId); return; }
+    const me = (ev.attendees || []).find(a => String(a.uid) === uid) || {};
+    const playing = (me.guests || []).map(g => g.name).filter((_, i) => !picked.has('p' + i));
+    const waiting = ((myGuestWait(ev, uid) || {}).guests || []).map(g => g.name).filter((_, i) => !picked.has('w' + i));
+    document.getElementById('cancel-guests-modal')?.remove();
+    window.saveManagedGuests(eventId, { playing, waiting });
+};
+
+window.handleRSVPAction = async function(eventId, action, o = {}) {
     if (!window.currentUser || action !== 'cancel') return;
     const uid = String(window.currentUser.uid);
     const profile = window.userProfile || {};
     const fullName = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Player';
     const _ev = (window.eventsList || []).find(e => e.id === eventId);
     const _mine = _ev && (_ev.attendees || []).find(a => String(a.uid) === uid);
+    // Bringing guests? Ask first: "Are your guests not coming either?" (remove everyone, or pick who).
+    const _gw = _ev && _mine ? myGuestWait(_ev, uid) : null;
+    if (_mine && !o.all && (((_mine.guests || []).length) || (_gw && (_gw.guests || []).length))) { window.openCancelWithGuests(eventId); return; }
     const onlyWaiting = !_mine && _ev && (_ev.waitingList || []).some(w => String(w.uid) === uid);
     const hadCredit = !!(_ev && _ev.communityId && _mine && _mine.creditPaidCents > 0);
 

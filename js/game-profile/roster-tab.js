@@ -39,7 +39,9 @@ export function renderRosterTab(event) {
 
     let totalWaitlistHeads = 0;
     waitlistList.forEach(w => {
-        totalWaitlistHeads += 1;
+        // Only their guests wait (the player is already playing).
+        const guestsOnly = w.guestsOnly === true || confirmedList.some(a => String(a.uid) === String(w.uid));
+        totalWaitlistHeads += guestsOnly ? 0 : 1;
         if (w.guests && Array.isArray(w.guests)) {
             totalWaitlistHeads += w.guests.length;
         }
@@ -71,7 +73,8 @@ export function renderRosterTab(event) {
         if (pos) bits.push(`<span class="text-white/70">#${pos} in line</span>`);
         bits.push(att.autoJoin === true ? '<span class="text-[#00F296]">⚡ Put me in automatically</span>' : '<span class="text-amber-200">🙋 Ask me first</span>');
         if (creditGame(event) && !uid.startsWith('usr_')) {
-            const need = costCents(event, (att.guests || []).length);
+            const onlyGuests = att.guestsOnly === true || confirmedList.some(a => String(a.uid) === uid);
+            const need = onlyGuests ? costCents(event, (att.guests || []).length) - costCents(event, 0) : costCents(event, (att.guests || []).length);
             bits.push(`<span data-wait-balance="${escapeHtml(event.communityId)}|${escapeHtml(uid)}|${need}" class="text-white/50">💳 checking credit…</span>`);
         }
         if (offeredNow.includes(uid)) {
@@ -114,7 +117,9 @@ export function renderRosterTab(event) {
         const attendanceBadge = window.activeRosterSubTab === 0 && att.attendance === 'late' ? '<span class="text-[8px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded font-black border border-amber-400/40">Late</span>'
             : window.activeRosterSubTab === 0 && att.attendance === 'noshow' ? '<span class="text-[8px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-black border border-red-500/40">No-show</span>'
             : window.activeRosterSubTab === 2 && att.removedByAdmin ? '<span class="text-[8px] bg-white/10 text-white/60 px-2 py-0.5 rounded font-black border border-white/20">Removed</span>' : '';
-        const plusOnesBadge = att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
+        const guestsWaitOnly = window.activeRosterSubTab === 1 && (att.guestsOnly === true || confirmedList.some(a => String(a.uid) === String(att.uid)));
+        const plusOnesBadge = guestsWaitOnly ? `<span class="text-[9px] text-amber-300 font-bold mt-0.5 block">Playing · ${att.guests ? att.guests.length : 0} guest(s) waiting</span>`
+            : att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
 
         return `
             <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">

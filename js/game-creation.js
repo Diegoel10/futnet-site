@@ -232,6 +232,7 @@ window.handleCreateEvent = async function(e) {
 
     const description = document.getElementById('ce-description')?.value.trim() || '';
     const rules = document.getElementById('ce-rules')?.value.trim() || '';
+    const refundNote = document.getElementById('ce-refund')?.value.trim() || '';
     const allowPlusOnes = document.getElementById('ce-allow-plus-ones')?.value === 'yes';
     const plusOneLimit = allowPlusOnes ? (parseInt(document.getElementById('ce-plus-one-limit')?.value, 10) || 1) : 0;
 
@@ -267,6 +268,7 @@ window.handleCreateEvent = async function(e) {
         location: locationStr,
         description,
         rules,
+        refundNote,
         teamsCount,
         format,
         fee,

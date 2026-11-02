@@ -1421,6 +1421,7 @@ window.showCommunityGameCreation = function(communityId, opts = {}) {
         ${waitlistOptionsHtml('cg', tpl || {})}
         <div>${lbl('Description')}<textarea id="cg-desc" rows="2" class="${INPUT}">${esc(tpl?.description || '')}</textarea></div>
         <div>${lbl('Rules')}<textarea id="cg-rules" rows="2" class="${INPUT}">${esc(tpl?.rules || '')}</textarea></div>
+        <div>${lbl('Refund policy')}<textarea id="cg-refund" rows="2" class="${INPUT}" placeholder="e.g. Full refund if you cancel 24 hours before. No refunds after that.">${esc(tpl?.refundNote || '')}</textarea></div>
         ${toggleRow('cg-accept', 'Users must accept rules to be confirmed', 'Players see the rules and the refund policy and tap "I accept" before they join.', tpl ? tpl.requireAcceptance === true : true)}
         <div class="flex gap-3 items-end">
             <div class="flex-1">${lbl('Allow plus ones?')}${sel('cg-plus', ['No', 'Yes'], plusNow, 'onchange="refreshCgOptions()"')}</div>
@@ -1491,7 +1492,7 @@ window.submitCommunityGame = async function(communityId) {
         title: v('cg-title') || 'Soccer pick-up (default)',
         openToNonMembers, visibility: openToNonMembers ? 'Public' : 'Private', requireAcceptance,
         date, time, location: `${park} (${city}, ${state})`,
-        description: v('cg-desc'), rules: v('cg-rules'),
+        description: v('cg-desc'), rules: v('cg-rules'), refundNote: v('cg-refund'),
         teamsCount: parseInt(v('cg-teams'), 10) || 3, format: v('cg-format'),
         fee, price: parseFloat(fee.replace('$', '')) || 0,
         ...credit,

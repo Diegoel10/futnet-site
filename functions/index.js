@@ -1610,6 +1610,28 @@ async function autoPlace(eventId, after) {
     let waitingList = arr(g.waitingList).slice();
     for (const w of candidates) {
       const u = uidOf(w);
+      // Guests waiting for a player who is already playing: add them to that player's guests.
+      const at = attendees.findIndex((a) => uidOf(a) === u);
+      if (at >= 0) {
+        const gs = arr(w.guests);
+        const freeG = rules.capacityOf(g) - rules.headsOf(attendees);
+        if (!gs.length || freeG < gs.length) continue;
+        const att = { ...attendees[at], guests: arr(attendees[at].guests).slice() };
+        let cost = 0;
+        if (pay && att.role !== "Organizer") {
+          const paidSoFar = Number(att.creditPaidCents) || 0;
+          if (!(paidSoFar > 0)) continue;                 // paid outside the app: they get asked
+          cost = Math.max(0, rules.costFor(g, att.guests.length + gs.length) - paidSoFar);
+          if (balances[u] < cost) continue;
+          if (cost > 0) writeCredit(tx, cid, u, w.name, balances[u], -cost, "game", "Guest fee (auto-added from the waitlist)", g, eventId);
+          att.creditPaidCents = paidSoFar + cost;
+        }
+        att.guests.push(...gs.map((x) => (pay ? { ...x, paid: "Credit" } : x)));
+        attendees[at] = att;
+        placed.push({ uid: u, cost, guests: gs.map((x) => x.name || "your guest") });
+        waitingList = waitingList.filter((x) => uidOf(x) !== u);
+        continue;
+      }
       const heads = 1 + arr(w.guests).length;
       const free = rules.capacityOf(g) - rules.headsOf(attendees);
       if (free < heads) continue;                       // not enough room for them + their guests: ask instead
@@ -1633,8 +1655,10 @@ async function autoPlace(eventId, after) {
       type: "game_auto_joined",
       eventId,
       communityId: after.communityId || "",
-      title: "You're in! ⚽",
-      body: `A spot opened in ${after.title || "the game"} and we added you automatically${p.cost ? `. ${money(p.cost)} was taken from your credit` : ""}.`,
+      title: p.guests ? "Your guest is in! ⚽" : "You're in! ⚽",
+      body: p.guests
+        ? `A spot opened in ${after.title || "the game"} and we added ${p.guests.join(", ")} automatically${p.cost ? `. ${money(p.cost)} was taken from your credit` : ""}.`
+        : `A spot opened in ${after.title || "the game"} and we added you automatically${p.cost ? `. ${money(p.cost)} was taken from your credit` : ""}.`,
     }, { key: `autojoin_${eventId}_${p.uid}_${now}` });
   }
   if (placed.length) logger.info(`Auto-joined ${placed.length} player(s) from the waitlist of ${eventId}`);
@@ -1701,8 +1725,18 @@ async function updateSpotOffer(eventId, before, after) {
     const lastCall = patch.spotOffer.lastCall || rules.isLastCall(g, now, start);
     const autoNoFunds = new Set(arr(after.waitingList).filter((w) => w.autoJoin === true).map(uidOf));
     const why = (u) => (autoNoFunds.has(u) && rules.isCreditGame(after) ? "We couldn't add you automatically (not enough credit). " : "");
+    // Players who are already in, with guests waiting: "a spot opened for your guest".
+    const playing = new Set(arr(after.attendees).map(uidOf));
+    const guestHosts = fresh.filter((u) => playing.has(u));
+    if (guestHosts.length) {
+      await notify(guestHosts, {
+        type: "game_spot_offer", eventId, communityId: after.communityId || "",
+        title: "A spot opened for your guest! ⚽",
+        body: `A spot opened in ${after.title || "the game"}. Open the game and tap "Add" to bring your guest${lastCall ? " (first to confirm gets it)" : ` within ${mins === 60 ? "1 hour" : mins + " minutes"}`}.`,
+      }, { key: `spotofferg_${eventId}_${patch.spotOffer.startedAt}_${guestHosts.join("_")}`.slice(0, 900) });
+    }
     const groups = {};
-    fresh.forEach((u) => { (groups[why(u)] = groups[why(u)] || []).push(u); });
+    fresh.filter((u) => !playing.has(u)).forEach((u) => { (groups[why(u)] = groups[why(u)] || []).push(u); });
     for (const [prefix, who] of Object.entries(groups)) await notify(who, {
       type: "game_spot_offer",
       eventId,
@@ -3157,6 +3191,39 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
     }
   }
 
+  // 🧩 Squads: the captain left (who takes charge?), someone asked to join, the captain answered
+  const sqBefore = new Map(arr(before.squads).map((q) => [q.id, q]));
+  for (const q of arr(after.squads)) {
+    const was = sqBefore.get(q.id);
+    const members = arr(q.members).map((p) => p.uid);
+    if (was && was.captainUid && !q.captainUid && members.length) {
+      await notify(members, {
+        type: "vs_squad_captain", senderUid: by, matchId,
+        title: `${q.name || "Your squad"} needs a captain`,
+        body: `The captain has left. Would you like to take charge? Open ${vsTitle(after)} and tap "I'll take charge". A squad needs a captain to handle the payment.`,
+      }, { exclude: [by], key: `sqcap_${matchId}_${q.id}_${Date.now() - (Date.now() % 60000)}` });
+    }
+    const wasReq = new Set(arr(was && was.requests).map((p) => p.uid));
+    for (const p of arr(q.requests).filter((r) => !wasReq.has(r.uid))) {
+      if (q.captainUid) {
+        await notify([q.captainUid], {
+          type: "vs_squad_request", senderUid: p.uid, matchId,
+          title: `${p.name || "A player"} wants to join ${q.name || "your squad"} 🧩`, body: `Open ${vsTitle(after)} to say yes or no.`,
+        }, { key: `sqreq_${matchId}_${q.id}_${p.uid}_${p.at || 0}` });
+      }
+    }
+    const wasMembers = new Set(arr(was && was.members).map((p) => p.uid));
+    for (const uid of [...wasReq].filter((u) => !arr(q.requests).some((r) => r.uid === u))) {
+      if (uid === by) continue;   // they cancelled it themselves
+      const yes = members.includes(uid) && !wasMembers.has(uid);
+      await notify([uid], {
+        type: "vs_squad_answer", senderUid: by, matchId,
+        title: yes ? `You're in ${q.name || "the squad"}! 🧩` : `${q.name || "The squad"} is full for now`,
+        body: yes ? `${vsTitle(after)} · ${vsWhen(after)}. When the squad is full it takes a spot.` : `The captain didn't add you this time. You can join or start another squad in ${vsTitle(after)}.`,
+      }, { key: `sqans_${matchId}_${q.id}_${uid}_${yes ? 1 : 0}` });
+    }
+  }
+
   // 🔴 Livestream started: everyone in the match
   const ls = after.livestream, lsWas = before.livestream;
   const lsKey = (x) => (x && (x.videoId || x.embedUrl)) || "";
@@ -3231,7 +3298,11 @@ exports.onVsComment = onDocumentCreated(`${BASE}/vsMatches/{matchId}/comments/{c
   const matchId = event.params.matchId;
   const m = (await col("vsMatches").doc(matchId).get()).data();
   if (!m || !c.byUid) return;
-  await notify(await vsPeople(m), {
+  // 📣 "Notify players" from the organizer is a separate kind (muting the comments doesn't hide it).
+  await notify(await vsPeople(m), c.announce ? {
+    type: "vs_announce", senderUid: c.byUid, matchId,
+    title: `📣 ${vsTitle(m)}`, body: clip(c.text, 180),
+  } : {
     type: "vs_comment", senderUid: c.byUid, matchId,
     title: `💬 ${vsTitle(m)}`, body: `${String(c.byName || "Someone").split(" ")[0]}: ${clip(c.text, 120)}`,
   }, { exclude: [c.byUid], key: `vscom_${event.params.commentId}` });
