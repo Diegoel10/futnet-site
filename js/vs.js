@@ -15,6 +15,7 @@ import { db, appId } from './firebase-config.js';
 import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTransaction, serverTimestamp }
     from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { teamLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
+import { attachParkPicker, saveParkIfNew } from './parks.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const jsq = (v) => esc(String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
@@ -148,6 +149,22 @@ function teamPicker(name, teams, cur) {
         class="w-full flex items-center gap-3 rounded-xl px-3 py-2 border ${t.id === cur ? 'border-[#00F296] bg-[#00F296]/10' : 'border-white/10 bg-white/5'}">${teamLogoHtml(t, 30)}<span class="text-sm font-black truncate">${esc(t.name)}</span></button>`).join('')}</div>`;
 }
 
+// ---------------------------------------------------------------- where: park (suggestions like a normal game), city, state
+function whereFields(p, pre) {
+    setTimeout(() => attachParkPicker({ input: `${p}-park`, city: `${p}-city`, state: `${p}-state` }), 0);
+    return `<div>${LBL('Park / field *')}<div><input id="${p}-park" class="${INPUT}" maxlength="60" value="${esc(pre.park || (pre.location && !pre.park ? pre.location : '') || '')}" placeholder="Start typing a park name"></div></div>
+        <div class="flex gap-3">
+            <div class="flex-1">${LBL('City *')}<input id="${p}-city" class="${INPUT}" maxlength="40" value="${esc(pre.city || '')}" placeholder="City"></div>
+            <div class="w-24">${LBL('State')}<input id="${p}-state" class="${INPUT}" maxlength="20" value="${esc(pre.state || 'FL')}" placeholder="FL"></div>
+        </div>`;
+}
+function readWhere(p) {
+    const park = val(`${p}-park`), city = val(`${p}-city`), state = val(`${p}-state`) || 'FL';
+    if (!park || !city) return null;
+    saveParkIfNew(park, city, state);   // new field? it's suggested next time (same list as normal games)
+    return { park, city, state, location: `${park} (${city}, ${state})` };
+}
+
 // ---------------------------------------------------------------- Create VS Match (the + menu)
 window.openCreateVs = function (prefill = {}) {
     if (!myUid()) return;
@@ -164,7 +181,7 @@ window.openCreateVs = function (prefill = {}) {
             <div class="flex-1">${LBL('Date *')}<input id="vs-date" type="date" class="${INPUT}" value="${esc(prefill.date || '')}"></div>
             <div class="flex-1">${LBL('Time *')}<input id="vs-time" type="time" class="${INPUT}" value="${esc(prefill.time || '')}"></div>
         </div>
-        <div>${LBL('Where *')}<input id="vs-loc" class="${INPUT}" maxlength="80" value="${esc(prefill.location || '')}" placeholder="Field or park"></div>
+${whereFields('vs', prefill)}
         <div>${LBL('Format')}${seg('vs-format', SIZES.map(s => [s, s]), prefill.format || '7v7')}</div>
         <div>${LBL('How many teams?')}${seg('vs-count', [['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams']], String(prefill.teamsCount || 2))}</div>
         <div>${LBL('Level')}${seg('vs-level', LEVELS, prefill.level || 'casual')}</div>
@@ -183,8 +200,10 @@ window.openCreateVs = function (prefill = {}) {
 // "No, I just organize": hide the team list.
 window.__vsSeg = (name) => { if (name === 'vs-include') { const w = document.getElementById('vs-team-wrap'); if (w) w.style.display = segVal('vs-include') === 'no' ? 'none' : ''; } };
 window.saveCreateVs = async function () {
-    const date = val('vs-date'), time = val('vs-time'), location = val('vs-loc');
-    if (!date || !time || !location) { toast('Fill in the date, time and place.', 'error'); return; }
+    const date = val('vs-date'), time = val('vs-time');
+    const where = readWhere('vs');
+    if (!date || !time || !where) { toast('Fill in the date, time, park and city.', 'error'); return; }
+    const location = where.location;
     const include = (document.querySelector('[data-seg="vs-include"]') ? segVal('vs-include') : 'no') === 'yes';
     const teamId = segVal('vs-team') || val('vs-one-team');
     const mine = myCaptainTeams().find(t => t.id === teamId);
@@ -196,7 +215,7 @@ window.saveCreateVs = async function () {
     // Rematch: the teams from last time are invited back (they hold their spot until they answer).
     (pre.inviteTeams || []).forEach(t => { if (!teams.some(x => x.teamId === t.teamId)) teams.push({ ...t, state: 'invited', roster: [], joinedAt: Date.now() }); });
     const m = {
-        title: val('vs-title'), date, time, location, format: segVal('vs-format') || '7v7', level: segVal('vs-level') || 'casual',
+        title: val('vs-title'), date, time, location, park: where.park, city: where.city, state: where.state, format: segVal('vs-format') || '7v7', level: segVal('vs-level') || 'casual',
         teamsCount: parseInt(segVal('vs-count'), 10) || 2, priceCents: price,
         firstToPay: !!document.getElementById('vs-first')?.checked, partial: !!document.getElementById('vs-partial')?.checked,
         payByHours: parseInt(segVal('vs-payby'), 10) || 0, rosterLockHours: parseInt(segVal('vs-lock'), 10) || 0,
@@ -230,7 +249,7 @@ window.openChallenge = function (teamId) {
             <div class="flex-1">${LBL('Date *')}<input id="ch-date" type="date" class="${INPUT}"></div>
             <div class="flex-1">${LBL('Time *')}<input id="ch-time" type="time" class="${INPUT}"></div>
         </div>
-        <div>${LBL('Where *')}<input id="ch-loc" class="${INPUT}" maxlength="80" placeholder="Field or park"></div>
+${whereFields('ch', {})}
         <div>${LBL('Format')}${seg('ch-format', SIZES.map(s => [s, s]), '7v7')}</div>
         <div>${LBL('Price per team ($, 0 = free)')}<input id="ch-price" inputmode="decimal" class="${INPUT}" placeholder="0"></div>
         <div>${LBL('Message (optional)')}<input id="ch-msg" class="${INPUT}" maxlength="140" placeholder="e.g. Rematch from last week? 😤"></div>
@@ -239,13 +258,15 @@ window.openChallenge = function (teamId) {
 window.sendChallenge = async function (targetId) {
     const target = (TS().all || []).find(x => x.id === targetId) || (window.__teamsState && window.__teamsState.open);
     const mine = myCaptainTeams().find(t => t.id === (segVal('ch-team') || val('ch-one-team')));
-    const date = val('ch-date'), time = val('ch-time'), location = val('ch-loc');
+    const date = val('ch-date'), time = val('ch-time');
+    const where = readWhere('ch');
     if (!target || !mine) return;
-    if (!date || !time || !location) { toast('Fill in the date, time and place.', 'error'); return; }
+    if (!date || !time || !where) { toast('Fill in the date, time, park and city.', 'error'); return; }
+    const location = where.location;
     const price = Math.round((parseFloat(val('ch-price').replace(',', '.')) || 0) * 100);
     const teams = [teamEntry(mine, price > 0 ? 'pending' : 'confirmed'), teamEntry(target, 'invited')];
     const m = {
-        title: '', date, time, location, format: segVal('ch-format') || '7v7', level: target.level || mine.level || 'casual', teamsCount: 2,
+        title: '', date, time, location, park: where.park, city: where.city, state: where.state, format: segVal('ch-format') || '7v7', level: target.level || mine.level || 'casual', teamsCount: 2,
         priceCents: price, firstToPay: false, partial: false, payByHours: price > 0 ? 24 : 0, rosterLockHours: 0,
         organizerId: myUid(), organizerName: myName(), status: 'challenge', message: val('ch-msg'),
         challenge: { fromTeamId: mine.id, toTeamId: target.id, status: 'pending' },
@@ -541,7 +562,7 @@ window.rematchVs = function () {
     const m = V.open; if (!m) return;
     const mineIn = (m.teams || []).find(t => myCaptainTeams().some(x => x.id === t.teamId));
     window.openCreateVs({
-        rematchOf: m.id, title: m.title, location: m.location, time: m.time, format: m.format, level: m.level, teamsCount: m.teamsCount,
+        rematchOf: m.id, title: m.title, location: m.location, park: m.park, city: m.city, state: m.state, time: m.time, format: m.format, level: m.level, teamsCount: m.teamsCount,
         priceCents: m.priceCents, firstToPay: m.firstToPay, partial: m.partial, payByHours: m.payByHours, rosterLockHours: m.rosterLockHours,
         include: !!mineIn, teamId: mineIn ? mineIn.teamId : '',
         inviteTeams: confirmedTeams(m).filter(t => !mineIn || t.teamId !== mineIn.teamId).map(t => ({ teamId: t.teamId, name: t.name, short: t.short, logo: t.logo, colors: t.colors })),

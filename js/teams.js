@@ -781,17 +781,33 @@ window.openAddTeamPlayer = function () {
         </div>`);
     window.teamAddSearch('');
     setTimeout(() => document.getElementById('ta-search')?.focus(), 50);
+    loadMemberPool().then(() => window.teamAddSearch(document.getElementById('ta-search')?.value || ''));
 };
+// Also search the members of my communities (someone new can be missing from the players list for a while).
+async function loadMemberPool() {
+    T.memberPool = window.loadMyCommunityMembers ? await window.loadMyCommunityMembers() : [];
+}
+function searchPool() {
+    const map = new Map();
+    const nm = (u) => (window.fullName ? window.fullName(u) : (u.name || `${u.firstName || ''} ${u.lastName || ''}`)).trim();
+    [...(T.memberPool || []), ...(window.cachedDirectoryList || window.directoryList || [])].forEach(u => {
+        if (!u || !u.uid) return;
+        const prev = map.get(u.uid) || {};
+        // The players list is the newest copy; a community copy fills in what's missing.
+        map.set(u.uid, { ...prev, ...Object.fromEntries(Object.entries(u).filter(([, v]) => v !== '' && v != null)), name: nm(u) || prev.name || '' });
+    });
+    return [...map.values()];
+}
 window.teamAddSearch = function (q) {
     const box = document.getElementById('ta-results'); if (!box || !T.open) return;
     const have = new Set(T.open.memberUids || []);
     const ql = String(q || '').trim().toLowerCase();
-    const people = (window.cachedDirectoryList || window.directoryList || []).filter(u => u.uid && !have.has(u.uid) && !(window.isBlocked && window.isBlocked(u.uid)));
-    const nm = (u) => (u.name || `${u.firstName || ''} ${u.lastName || ''}`).trim() || 'Player';
+    const people = searchPool().filter(u => u.uid && u.uid !== myUid() ? !have.has(u.uid) && !(window.isBlocked && window.isBlocked(u.uid)) : false);
+    const nm = (u) => (window.fullName ? window.fullName(u) : (u.name || `${u.firstName || ''} ${u.lastName || ''}`)).trim() || 'Player';
     const list = (ql ? people.filter(u => `${nm(u)} ${u.nickname || ''}`.toLowerCase().includes(ql)) : people.slice(0, 0)).slice(0, 30);
     box.innerHTML = ql ? (list.map(u => `<button onclick="addAppPlayer('${jsq(u.uid)}','${jsq(nm(u))}')" class="w-full flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white/5 text-left">
         <img src="${esc(u.avatar || avatarOf(u.uid, nm(u)) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
-        <span class="flex-1 min-w-0"><span class="block text-sm font-bold truncate">${esc(nm(u))}</span><span class="block text-[11px] text-white/50">${esc(u.position || 'Player')}</span></span>
+        <span class="flex-1 min-w-0"><span class="block text-sm font-bold truncate">${esc(nm(u))}</span><span class="block text-[11px] text-white/50 truncate">${esc((window.personSubtitle && window.personSubtitle(u)) || u.position || 'Player')}</span></span>
         <i class="fa-solid fa-plus text-[#00F296]"></i></button>`).join('') || '<p class="text-xs text-white/45 py-3 text-center">Nobody found.</p>')
         : '<p class="text-[11px] text-white/45 py-2">Type a name to search.</p>';
 };

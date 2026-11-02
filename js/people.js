@@ -81,3 +81,42 @@ setInterval(() => {
     if (uid) start();
     else { stop(); window.directoryList = []; window.cachedDirectoryList = null; }
 }, 700);
+
+// ---------------------------------------------------------------- names for search lists
+/** Full name: first + last when the saved "name" is shorter (e.g. "Roberto" -> "Roberto Morisseau"). */
+window.fullName = function (p) {
+    if (!p) return '';
+    const name = String(p.name || p.displayName || '').trim();
+    const fl = `${p.firstName || ''} ${p.lastName || ''}`.trim();
+    const words = (s) => s ? s.split(/\s+/).length : 0;
+    return (words(fl) > words(name) ? fl : name) || fl || String(p.nickname || '').trim();
+};
+/** Members of every community I'm in (the players list can miss someone new). Builds uid -> [community names]. */
+let poolCache = null, poolAt = 0;
+window.loadMyCommunityMembers = async function () {
+    if (poolCache && Date.now() - poolAt < 5 * 60000) return poolCache;
+    const ids = Object.keys(window.myCommunityRoles || {});
+    const out = [], memberOf = {};
+    await Promise.all(ids.map(async (cid) => {
+        try {
+            const cname = ((window.communitiesCache || {})[cid] || {}).name || '';
+            (await getDocs(collection(db, 'artifacts', appId, 'communities', cid, 'members'))).docs.forEach(d => {
+                const m = { ...d.data(), uid: d.data().uid || d.id };
+                out.push(m);
+                if (cname) (memberOf[m.uid] = memberOf[m.uid] || []).includes(cname) || memberOf[m.uid].push(cname);
+            });
+        } catch (e) { /* skip */ }
+    }));
+    poolCache = out; poolAt = Date.now(); window.__memberOf = memberOf;
+    return out;
+};
+/** One line under a name so two "Robertos" can be told apart: position · "nickname" · city · communities in common. */
+window.personSubtitle = function (p) {
+    if (!p) return '';
+    const live = (window.cachedDirectoryList || window.directoryList || []).find(u => String(u.uid) === String(p.uid)) || {};
+    const pos = p.position || live.position || '';
+    const nick = p.nickname || live.nickname || '';
+    const city = p.city || live.city || '';
+    const comms = ((window.__memberOf || {})[p.uid] || []).slice(0, 2).join(', ');
+    return [pos, nick ? `"${nick}"` : '', city, comms ? `in ${comms}` : ''].filter(Boolean).join(' · ');
+};

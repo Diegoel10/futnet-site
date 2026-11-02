@@ -1919,6 +1919,27 @@ async function propagateIdentities(ids) {
     if (Object.keys(patch).length) { await r.ref.update(patch); changes++; }
   }
 
+  // 4b. Team rosters and free-agent cards
+  try {
+    const teams = ids.size <= 5
+      ? (await Promise.all([...ids.keys()].map((u) => col("teams").where("memberUids", "array-contains", u).get()))).flatMap((s) => s.docs)
+      : (await col("teams").get()).docs;
+    const seen = new Set();
+    for (const t of teams) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      const members = copyList((t.data() || {}).members);
+      if (fixEntries(members, ids)) { await t.ref.update({ members }); changes++; }
+    }
+    for (const [uid, who] of ids) {
+      const fa = col("freeAgents").doc(uid);
+      const s = await fa.get();
+      if (s.exists && ((s.data() || {}).name !== who.name || (who.avatar && (s.data() || {}).avatar !== who.avatar))) {
+        await fa.update({ name: who.name, ...(who.avatar ? { avatar: who.avatar } : {}) }); changes++;
+      }
+    }
+  } catch (e) { logger.warn("team names", e.message); }
+
   // 4. Chat threads (a thread's "id" is the other person's uid)
   const dir = await col("directory").get();
   for (const p of dir.docs) {
@@ -3154,4 +3175,37 @@ exports.vsPaymentDeadlines = onSchedule({ schedule: "every 15 minutes", timeZone
       }
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// 24. The light players list ("people") never misses anyone: every night, any player card
+//     that has no copy yet gets one (and someone joining a community gets theirs right away).
+// ---------------------------------------------------------------------------
+async function ensurePeopleCard(uid, fallback) {
+  if (!uid) return false;
+  const ref = col("people").doc(uid);
+  if ((await ref.get()).exists) return false;
+  // Their player card, or (accounts made without one) what they saved when joining the community.
+  const d = (await col("directory").doc(uid).get()).data() || (fallback && fallback.name ? { name: fallback.name, avatar: shareableAvatar(fallback.avatar) } : null);
+  if (!d) return false;
+  const card = lightCard(d);
+  if (!card.uid) card.uid = uid;
+  await ref.set(card);
+  return true;
+}
+exports.onMemberPeopleCard = onDocumentCreated(`${BASE}/communities/{communityId}/members/{uid}`, async (event) => {
+  try { await ensurePeopleCard(event.params.uid, (event.data && event.data.data()) || {}); } catch (e) { logger.warn("people card", e.message); }
+});
+exports.repairPeopleList = onSchedule({ schedule: "every day 04:30", timeZone: DEFAULT_TZ, timeoutSeconds: 540, memory: "512MiB" }, async () => {
+  const [dir, people] = await Promise.all([col("directory").get(), col("people").select().get()]);
+  const have = new Set(people.docs.map((d) => d.id));
+  let added = 0;
+  for (const d of dir.docs) {
+    if (have.has(d.id)) continue;
+    const card = lightCard(d.data());
+    if (!card.uid) card.uid = d.id;
+    await col("people").doc(d.id).set(card);
+    added++;
+  }
+  if (added) logger.info(`people list: added ${added} missing cards`);
 });

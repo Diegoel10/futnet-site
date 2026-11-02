@@ -2075,7 +2075,13 @@ function confirmBox(title, message, confirmLabel, danger, onYes) {
 }
 
 const memberByUid = (uid) => S.members.find(x => String(x.uid) === String(uid));
-const memberName = (m) => (m && m.name && m.name !== 'Player') ? m.name : (m?.name || 'Player');
+// The person's name as it is now (their player card), else what was saved when they joined.
+const memberName = (m) => {
+    const d = m && m.uid && Array.isArray(window.directoryList) ? window.directoryList.find(u => String(u.uid) === String(m.uid)) : null;
+    const live = d && window.fullName ? window.fullName(d) : '';
+    if (live && live !== 'Player') return live;
+    return (m && m.name && m.name !== 'Player') ? m.name : (m?.name || 'Player');
+};
 function canManageMember(c, m) {
     if (!m || !me()) return false;
     if (String(m.uid) === String(me().uid) || String(m.uid) === String(c.adminId)) return false;

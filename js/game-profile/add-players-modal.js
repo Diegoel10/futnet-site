@@ -5,12 +5,13 @@ import { collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/f
 import { creditGame } from '../credits.js';
 
 // Best name we have for a person, whatever app created their profile.
-const nameOf = (p) => String((p && (p.name || p.displayName || p.fullName ||
+const nameOf = (p) => String((p && ((window.fullName && window.fullName(p)) || p.name || p.displayName || p.fullName ||
     `${p.firstName || ''} ${p.lastName || ''}`.trim() || p.nickname || p.username)) || '').trim();
 
 // Community games: the community's members are always in the list (some profiles have no name saved
 // in the player directory, e.g. accounts made in the app; their member card has it).
 const _membersCache = {};
+let _myMembers = [];
 async function loadCommunityMembers(cid) {
     if (!cid) return [];
     if (_membersCache[cid]) return _membersCache[cid];
@@ -65,10 +66,10 @@ window.openAddPlayersScreen = async function(eventId) {
     `;
 
     renderAddPlayersList(eventId, "");
-    if (ev && ev.communityId) {
-        await loadCommunityMembers(ev.communityId);
-        renderAddPlayersList(eventId, document.getElementById('add-players-search')?.value || "");
-    }
+    if (ev && ev.communityId) await loadCommunityMembers(ev.communityId);
+    // Members of all my communities too (someone new can be missing from the players list for a while).
+    if (window.loadMyCommunityMembers) _myMembers = await window.loadMyCommunityMembers();
+    renderAddPlayersList(eventId, document.getElementById('add-players-search')?.value || "");
 };
 
 window.renderAddPlayersList = function(eventId, queryStr) {
@@ -93,9 +94,10 @@ window.renderAddPlayersList = function(eventId, queryStr) {
     const members = (event && event.communityId && _membersCache[event.communityId]) || [];
     const memberUids = new Set(members.map(m => String(m.uid)));
     const pool = [
+        ..._myMembers,
         ...members,
         ...(window.friendsList || []),
-        ...(window.directoryList || [])
+        ...(window.directoryList || [])   // last = newest name and photo win
     ];
     // People already in this game are still listed (grayed out, can't be picked) so nobody wonders where they went.
     const inGame = new Set(attendees.map(a => String(a.uid)));
@@ -107,9 +109,9 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         if (!p || !p.uid) return;
         const key = String(p.uid);
         const prev = uniquePoolMap.get(key);
-        const merged = { ...(prev || {}), ...p };
+        const merged = { ...(prev || {}), ...Object.fromEntries(Object.entries(p).filter(([, v]) => v !== '' && v != null)) };
         merged.name = nameOf(p) || (prev && prev.name) || '';
-        merged.avatar = (prev && prev.avatar) || p.avatar || p.photoURL || '';
+        merged.avatar = p.avatar || p.photoURL || (prev && prev.avatar) || '';
         merged._already = inGame.has(key) ? 'in' : (onWaitlist.has(key) ? 'wait' : '');
         uniquePoolMap.set(key, merged);
     });
@@ -137,7 +139,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         const name = p.name;
         if (!name) return false;
         if (!q) return true;
-        return fold(name).includes(q) || fold(p.nickname).includes(q);
+        return fold(`${name} ${p.firstName || ''} ${p.lastName || ''}`).includes(q) || fold(p.nickname).includes(q);
     });
 
     if (filtered.length === 0) {
@@ -179,6 +181,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
                             ${escapeHtml(name)}
                             ${badgeText}
                         </div>
+                        ${window.personSubtitle && window.personSubtitle(u) ? `<div class="text-[10px] text-white/50">${escapeHtml(window.personSubtitle(u))}</div>` : ''}
                     </div>
                 </div>
                 <input type="checkbox" value="${escapeHtml(u.uid)}" data-name="${escapeHtml(name)}" data-avatar="${escapeHtml(realAvatar)}" onchange="updateSelectedPlayerCounter()" class="add-player-checkbox w-4 h-4 accent-brand cursor-pointer">
