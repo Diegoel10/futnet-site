@@ -3076,6 +3076,17 @@ const vsTitle = (m) => {
   return m.title || (names.length >= 2 ? names.slice(0, 2).join(" vs ") : `${names[0] || "VS"} Match`);
 };
 const vsWhen = (m) => `${m.date || ""} ${m.time || ""}`.trim();
+/** Everyone in free-agent squads (older matches kept one list in `forming`). */
+const squadPeople = (m) => uniq([...arr(m && m.forming).map((p) => p.uid), ...arr(m && m.squads).flatMap((q) => arr(q.members).map((p) => p.uid))]);
+/** The organizer, every player on the teams in the match, and the squads. */
+async function vsPeople(m) {
+  const players = [];
+  for (const t of arr(m.teams)) {
+    if (!t.teamId || String(t.teamId).startsWith("x_")) continue;
+    try { const td = (await col("teams").doc(t.teamId).get()).data(); if (td) players.push(...arr(td.memberUids)); } catch (e) { /* ignore */ }
+  }
+  return uniq([m.organizerId, ...players, ...squadPeople(m)]);
+}
 function vsResult(m) {
   // { teamId: { w, d, l, gf, ga } } for a final 2-team match
   const ids = Object.keys(m.score || {});
@@ -3132,18 +3143,42 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
   if (!before) return;
 
   // 🧩 A free-agent squad that can't happen any more (teams took the spots, or the match ended): tell them, clear it.
-  const forming = arr(after.forming);
-  if (forming.length) {
+  const sqPeople = squadPeople(after);
+  if (sqPeople.length) {
     const taken = arr(after.teams).filter((t) => t.state === "confirmed" || (after.firstToPay === false && t.state === "pending")).length;
     const over = after.status !== "open" || taken >= (+after.teamsCount || 2);
     if (over) {
-      await notify(forming.map((p) => p.uid), {
+      await notify(sqPeople, {
         type: "vs_squad_off", senderUid: by,
         title: "The free-agent squad is off",
         body: `${after.status === "cancelled" ? "The match was cancelled" : "Teams took all the spots"} in ${vsTitle(after)} (${vsWhen(after)}), so the squad didn't happen. Nobody pays.`,
-      }, { key: `squadoff_${matchId}_${forming.length}_${forming[0].at || 0}` });
-      await event.data.after.ref.update({ forming: [] });
+      }, { key: `squadoff_${matchId}_${sqPeople.length}_${Date.now() - (Date.now() % 60000)}` });
+      await event.data.after.ref.update({ forming: [], squads: [] });
     }
+  }
+
+  // 🔴 Livestream started: everyone in the match
+  const ls = after.livestream, lsWas = before.livestream;
+  const lsKey = (x) => (x && (x.videoId || x.embedUrl)) || "";
+  if (ls && ls.status === "live" && !(lsWas && lsWas.status === "live" && lsKey(lsWas) === lsKey(ls))) {
+    await notify(await vsPeople(after), {
+      type: "vs_live", senderUid: by, matchId,
+      title: `🔴 LIVE now: ${vsTitle(after)}`, body: "Tap to watch the livestream and the live score.",
+    }, { exclude: [by], key: `vslive_${matchId}_${ls.startedAt || lsKey(ls).slice(-40)}` });
+  }
+  // 📅 The organizer changed the day, time or place: everyone in the match
+  if (after.status === "open" && (before.date !== after.date || before.time !== after.time || before.location !== after.location) && !(after.challenge && after.challenge.status === "pending")) {
+    await notify(await vsPeople(after), {
+      type: "vs_changed", senderUid: by, matchId,
+      title: `📅 ${vsTitle(after)} changed`, body: `Now ${vsWhen(after)} at ${after.location || "TBD"}.`,
+    }, { exclude: [by], key: `vschg_${matchId}_${after.date}_${after.time}_${clip(after.location, 30)}` });
+  }
+  // ➕ The organizer added a FutNet team: its captains
+  for (const t of arr(after.teams).filter((x) => x.addedBy && !String(x.teamId).startsWith("x_") && !arr(before.teams).some((y) => y.teamId === x.teamId))) {
+    await notify(await teamCaptains(t.teamId), {
+      type: "vs_team_added", senderUid: t.addedBy, matchId,
+      title: `${t.name} was added to a VS Match 🆚`, body: `${vsTitle(after)} · ${vsWhen(after)} at ${after.location || "TBD"}. Open it to pick who's coming.`,
+    }, { exclude: [t.addedBy], key: `vsadded_${matchId}_${t.teamId}` });
   }
 
   // d) A team joined: the organizer
@@ -3196,11 +3231,7 @@ exports.onVsComment = onDocumentCreated(`${BASE}/vsMatches/{matchId}/comments/{c
   const matchId = event.params.matchId;
   const m = (await col("vsMatches").doc(matchId).get()).data();
   if (!m || !c.byUid) return;
-  const players = [];
-  for (const t of arr(m.teams)) {
-    try { const td = (await col("teams").doc(t.teamId).get()).data(); if (td) players.push(...arr(td.memberUids)); } catch (e) { /* ignore */ }
-  }
-  await notify(uniq([m.organizerId, ...players, ...arr(m.forming).map((p) => p.uid)]), {
+  await notify(await vsPeople(m), {
     type: "vs_comment", senderUid: c.byUid, matchId,
     title: `💬 ${vsTitle(m)}`, body: `${String(c.byName || "Someone").split(" ")[0]}: ${clip(c.text, 120)}`,
   }, { exclude: [c.byUid], key: `vscom_${event.params.commentId}` });

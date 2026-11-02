@@ -4,7 +4,9 @@
 //     🔴 Live tab = video on top, then the live score (from match management), then the live chat
 //     (the game's comments: @mentions, replies, emoji reactions, photos).
 //   The server pushes "🔴 LIVE now" to the whole community. "End livestream" keeps the video as a replay.
-// Saved on the game: livestream = { url, videoId, status: 'live'|'ended', startedAt, startedBy, startedByName, endedAt? }
+// Saved on the game: livestream = { url, provider: 'youtube'|'facebook', videoId (YouTube), embedUrl (Facebook),
+//                                  status: 'live'|'ended', startedAt, startedBy, startedByName, endedAt? }
+// Facebook Live works too (YouTube needs 50 subscribers to stream from a phone): the video must be Public.
 import { mutateEvent, escapeHtml as esc, jsArg } from './game-profile/event-store.js';
 import { renderCommentsTab } from './game-profile/comments-tab.js';
 
@@ -28,7 +30,38 @@ export function youTubeId(url) {
     return /^[\w-]{11}$/.test(id) ? id : '';
 }
 
-export const liveOf = (ev) => (ev && ev.livestream && ev.livestream.videoId) ? ev.livestream : null;
+/** A Facebook video link (fb.watch, /videos/, /watch, /reel/, /share/v/ …), cleaned up, or ''. */
+export function facebookVideoUrl(url) {
+    const s = String(url || '').trim();
+    let u;
+    try { u = new URL(s.startsWith('http') ? s : 'https://' + s); } catch (e) { return ''; }
+    const host = u.hostname.replace(/^(www|m|web|mbasic)\./, '');
+    if (host === 'fb.watch') return u.pathname.length > 1 ? `https://fb.watch${u.pathname}` : '';
+    if (host !== 'facebook.com' && host !== 'fb.com') return '';
+    const p = u.pathname;
+    const ok = /\/videos?\//.test(p) || /^\/(watch|video\.php|reel|share\/v|share\/r)\b/.test(p) || /\/live(_videos)?\/?$/.test(p) && u.searchParams.get('v');
+    if (!ok) return '';
+    const v = u.searchParams.get('v');
+    return `https://www.facebook.com${p}${v ? '?v=' + encodeURIComponent(v) : ''}`;
+}
+/** What to play from a pasted link: YouTube or Facebook (or null). */
+export function liveSource(url) {
+    const yt = youTubeId(url);
+    if (yt) return { provider: 'youtube', videoId: yt, embedUrl: '' };
+    const fb = facebookVideoUrl(url);
+    if (fb) return { provider: 'facebook', videoId: '', embedUrl: `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(fb)}&show_text=false&autoplay=true&width=1280` };
+    return null;
+}
+window.liveSource = liveSource;
+/** Why a pasted link can't be played (shown to the admin). */
+export function liveLinkProblem(url) {
+    if (/youtube\.com\/(@|c\/|channel\/)/i.test(url)) return "That's a YouTube channel link. Open the live video itself and copy its link (Share → Copy link).";
+    if (/facebook\.com|fb\.watch/i.test(url)) return "That's not a Facebook video link. Open the live video on Facebook, tap Share → Copy link, and paste that. (Set the live video to Public so everyone can watch.)";
+    return 'Paste a YouTube or Facebook video link (like youtube.com/live/…, youtu.be/…, or facebook.com/…/videos/…).';
+}
+window.liveLinkProblem = liveLinkProblem;
+const liveKey = (ls) => (ls && (ls.videoId || ls.embedUrl)) || '';
+export const liveOf = (ev) => (ev && ev.livestream && liveKey(ev.livestream)) ? ev.livestream : null;
 export const isLive = (ev) => !!(liveOf(ev) && ev.livestream.status === 'live');
 
 // ------------------------------------------------------------------ admin: start / end
@@ -41,11 +74,11 @@ window.openStartLivestream = function (eventId) {
         <div class="flex items-center justify-between"><h4 class="text-sm font-black">🔴 Start livestream</h4>
             <button onclick="document.getElementById('livestream-modal').remove()" class="text-white/50 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
         <ol class="text-[11px] text-white/70 space-y-1 list-decimal pl-4">
-            <li>Start the YouTube Live on your camera (XbotGo) or the YouTube app.</li>
-            <li>On YouTube, open the live video and tap <b>Share → Copy link</b>.</li>
+            <li>Start the live on <b>YouTube</b> or <b>Facebook</b> (camera like XbotGo, or the app). On Facebook, set it to <b>Public</b>.</li>
+            <li>Open the live video and tap <b>Share → Copy link</b>.</li>
             <li>Paste it here.</li>
         </ol>
-        <input id="ls-url" type="url" inputmode="url" placeholder="https://youtube.com/live/…" autocomplete="off"
+        <input id="ls-url" type="url" inputmode="url" placeholder="YouTube or Facebook live link" autocomplete="off"
             class="w-full bg-black/60 border border-red-500/50 rounded-xl px-3 py-2.5 text-white text-base sm:text-sm focus:outline-none focus:border-red-400">
         <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
             <input id="ls-notify" type="checkbox" checked class="w-5 h-5 accent-red-500 shrink-0">
@@ -59,16 +92,13 @@ window.openStartLivestream = function (eventId) {
 
 window.startLivestream = async function (eventId) {
     const url = (document.getElementById('ls-url')?.value || '').trim();
-    const videoId = youTubeId(url);
-    if (!videoId) {
-        toast(/youtube\.com\/(@|c\/|channel\/)/i.test(url) ? 'That\'s a channel link. Open the live video itself and copy its link (Share → Copy link).' : 'Paste a YouTube video link (like youtube.com/live/… or youtu.be/…).', 'error');
-        return;
-    }
+    const src = liveSource(url);
+    if (!src) { toast(liveLinkProblem(url), 'error'); return; }
     const notify = document.getElementById('ls-notify') ? document.getElementById('ls-notify').checked : true;
     const b = document.getElementById('ls-go'); if (b) { b.disabled = true; b.textContent = 'Going live…'; }
     const me = window.currentUser;
     const res = await mutateEvent(eventId, (draft) => {
-        draft.livestream = { url, videoId, status: 'live', startedAt: Date.now(), startedBy: String(me?.uid || ''), startedByName: myName(), notify };
+        draft.livestream = { url, ...src, status: 'live', startedAt: Date.now(), startedBy: String(me?.uid || ''), startedByName: myName(), notify };
     });
     document.getElementById('livestream-modal')?.remove();
     if (!res.ok) return;
@@ -155,9 +185,9 @@ export function renderLiveTab(ev, isAdmin) {
             ${live ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span> LIVE</span>'
                 : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
             <span class="flex-1 text-xs text-white/60 truncate">${live ? `Streaming now · started by ${esc(ls.startedByName || 'an admin')}` : 'The livestream has ended. Watch the replay.'}</span>
-            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in YouTube</a>
+            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : 'YouTube'}</a>
         </div>
-        <div id="live-video-slot" data-video="${esc(ls.videoId)}" class="w-full aspect-video rounded-2xl bg-black border border-white/10"></div>
+        ${liveSlotHtml(ls)}
         ${scoreHtml(ev)}
         ${isAdmin ? `<div class="flex gap-2">${live ? `<button onclick="endLivestream('${jsArg(ev.id)}')" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>`
             : `<button onclick="openStartLivestream('${jsArg(ev.id)}')" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">Start a new livestream</button>
@@ -171,6 +201,14 @@ export function renderLiveTab(ev, isAdmin) {
 // redraws on every comment or goal; the iframe isn't touched, so the video never restarts.
 let player = null, playerVideo = '', loop = 0;
 function mountPlayer() { if (!loop) loop = requestAnimationFrame(tick); }
+/** The empty box the video is laid over (YouTube or Facebook). */
+export function liveSlotHtml(ls) {
+    return `<div id="live-video-slot" data-video="${esc(liveKey(ls))}" data-embed="${esc(ls.embedUrl || '')}" class="w-full aspect-video rounded-2xl bg-black border border-white/10"></div>`;
+}
+window.liveSlotHtml = liveSlotHtml;
+// VS Mode matches use the same player (their page sits on top of the app, so the video goes above it).
+window.mountLivePlayer = mountPlayer;
+window.youTubeId = youTubeId;
 function tick() {
     const slot = document.getElementById('live-video-slot');
     const visible = slot && slot.isConnected && slot.getClientRects().length > 0;
@@ -180,6 +218,7 @@ function tick() {
         return;
     }
     const vid = slot.dataset.video;
+    const src = slot.dataset.embed || `https://www.youtube.com/embed/${encodeURIComponent(vid)}?autoplay=1&playsinline=1&rel=0`;
     if (!player) {
         player = document.createElement('div');
         player.id = 'futnet-live-player';
@@ -188,9 +227,10 @@ function tick() {
     }
     if (playerVideo !== vid) {
         playerVideo = vid;
-        player.innerHTML = `<iframe src="https://www.youtube.com/embed/${encodeURIComponent(vid)}?autoplay=1&playsinline=1&rel=0" title="Livestream"
+        player.innerHTML = `<iframe src="${esc(src)}" title="Livestream"
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen style="width:100%;height:100%;border:0;display:block"></iframe>`;
     }
+    player.style.zIndex = slot.closest('#vs-page') ? '140' : '40';
     const r = slot.getBoundingClientRect();
     // Hide whatever part of the video scrolled above the top of the screen (under the header).
     const cut = Math.max(0, -r.top);

@@ -16,12 +16,22 @@ import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTran
     from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { teamLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
+import { liveSource, liveLinkProblem, liveSlotHtml } from './livestream.js';   // same YouTube / Facebook player as games
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const jsq = (v) => esc(String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
 const toast = (m, t) => window.showToast && window.showToast(m, t);
 const myUid = () => (window.currentUser && window.currentUser.uid) || '';
-const myName = () => { const p = window.userProfile || {}; return (p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim() || 'Player').trim(); };
+// My name: the profile, else my card in the players list, else my sign-in name.
+const myName = () => {
+    const p = window.userProfile || {};
+    const fromProfile = window.fullName ? window.fullName(p) : (p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim());
+    if (fromProfile) return fromProfile.trim();
+    const uid = (window.currentUser && window.currentUser.uid) || '';
+    const d = (window.cachedDirectoryList || window.directoryList || []).find(u => String(u.uid) === String(uid));
+    const fromCard = d ? (window.fullName ? window.fullName(d) : d.name) : '';
+    return String(fromCard || (window.currentUser && window.currentUser.displayName) || 'Player').trim();
+};
 const C = (name) => collection(db, 'artifacts', appId, name);
 const D = (...p) => doc(db, 'artifacts', appId, ...p);
 const TS = () => window.__teamsState || { mine: [], all: [] };
@@ -116,7 +126,8 @@ let started = '';
 setInterval(() => { const u = myUid(); if (u && started !== u) { started = u; start(); } if (!u && started) { started = ''; if (V.unsub) V.unsub(); V.list = []; } }, 1000);
 
 // ---------------------------------------------------------------- home screen cards
-function slotHtml(t, size = 46) {
+function slotHtml(t, size = 46, plus = false) {
+    if (!t && plus) return `<button onclick="openVsSpot()" class="flex flex-col items-center gap-1" style="width:${size + 30}px"><div class="rounded-2xl border-2 border-dashed border-[#00F296]/70 bg-[#00F296]/10 flex items-center justify-center text-[#00F296]" style="width:${size}px;height:${size}px"><i class="fa-solid fa-plus" style="font-size:${Math.round(size / 3)}px"></i><span class="sr-only">+</span></div><span class="text-[10px] font-black text-[#00F296]">Take this spot</span></button>`;
     if (!t) return `<div class="flex flex-col items-center gap-1" style="width:${size + 30}px"><div class="rounded-2xl border-2 border-dashed border-white/35 flex items-center justify-center text-[9px] font-black text-white/50 text-center leading-tight" style="width:${size}px;height:${size}px">Open<br>spot</div><span class="text-[10px] font-bold text-white/40">&nbsp;</span></div>`;
     return `<div class="flex flex-col items-center gap-1 min-w-0" style="width:${size + 30}px">${teamLogoHtml(t, size)}<span class="text-[10px] font-black text-white truncate max-w-full">${esc(t.name)}</span></div>`;
 }
@@ -134,7 +145,7 @@ export function vsTitleOf(m) {
 function myStake(m) {
     const ids = new Set((TS().mine || []).map(t => t.id));
     if ((m.teamIds || []).some(id => ids.has(id))) return 'team';
-    if ((m.forming || []).some(p => p.uid === myUid())) return 'squad';
+    if ((m.forming || []).some(p => p.uid === myUid()) || (m.squads || []).some(q => (q.members || []).some(p => p.uid === myUid()))) return 'squad';
     return '';
 }
 // ---------------------------------------------------------------- home screen card (looks like a normal game card)
@@ -154,18 +165,22 @@ export function vsCardHtml(m) {
     else if (m.status === 'challenge') status = chip('bg-fuchsia-500/20 border-fuchsia-400 text-fuchsia-100', 'fa-hourglass-half', 'Waiting for answer');
     else status = chip(left ? 'bg-[#00F296]/30 border-[#00F296] text-white' : 'bg-red-500/30 border-red-500 text-red-200', left ? 'fa-shield-halved' : 'fa-user-xmark', left ? `${spotsTaken(m)}/${n} teams` : 'Full');
     const mine = !over && stake ? chip('bg-[#00F296]/20 border-[#00F296] text-[#00F296]', 'fa-check', stake === 'squad' ? 'In the squad' : "You're in") : '';
+    const isLiveNow = m.live && m.live.running && m.status === 'open';
     const middle = m.status === 'final' && m.score && n === 2
-        ? `<div class="text-2xl font-black text-white px-1">${esc(m.score[slots[0]?.teamId] ?? 0)} - ${esc(m.score[slots[1]?.teamId] ?? 0)}</div>` : vsBadge(n === 2 ? 46 : 30);
+        ? `<div class="text-2xl font-black text-white px-1">${esc(m.score[slots[0]?.teamId] ?? 0)} - ${esc(m.score[slots[1]?.teamId] ?? 0)}</div>`
+        : isLiveNow && n === 2 ? `<div class="flex flex-col items-center"><div class="text-2xl font-black text-white px-1">${liveGoals(m, slots[0]?.teamId)} - ${liveGoals(m, slots[1]?.teamId)}</div><div class="text-[10px] font-black text-red-400">● LIVE <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(clockMs(m.live))}</span></div></div>`
+        : vsBadge(n === 2 ? 46 : 30);
     return `<div id="vs-card-${esc(m.id)}" data-vs-time="${esc(m.time || '')}" onclick="openVsMatch('${jsq(m.id)}')" class="relative bg-[#010A0F]/90 rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-fuchsia-500/60 hover:border-fuchsia-400 transition cursor-pointer p-4 space-y-3">
         <div class="absolute inset-0 pointer-events-none opacity-25" style="background:radial-gradient(circle at 50% 38%, #E8262B 0%, transparent 55%)"></div>
         <div class="relative z-10 space-y-3">
-            <div class="flex justify-center"><div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-fuchsia-400/60 text-fuchsia-200 text-[10px] font-black">${vsBadge(16)}<span>VS MODE${m.status === 'challenge' ? ' · CHALLENGE' : ''}</span></div></div>
+            <div class="flex justify-center gap-2"><div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-fuchsia-400/60 text-fuchsia-200 text-[10px] font-black">${vsBadge(16)}<span>VS MODE${m.status === 'challenge' ? ' · CHALLENGE' : ''}</span></div>${m.livestream && m.livestream.status === 'live' ? '<div class="flex items-center px-2.5 py-1 rounded-lg bg-red-600 text-white text-[10px] font-black">● LIVE</div>' : ''}</div>
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-xl border border-[#00B4AE]/80 text-white text-[10px] font-bold"><i class="fa-solid fa-users text-[10px]"></i><span>${esc(m.format || '7v7')} • ${n} Teams</span></div>
                 <div class="flex items-center gap-1 bg-black/50 px-2.5 py-1 rounded-xl border ${price ? 'border-[#00F296]/80' : 'border-[#00B4AE]/80'} text-white text-[10px] font-bold"><i class="fa-solid ${price ? 'fa-circle-dollar-to-slot' : 'fa-tag'} text-[10px]"></i><span>${price ? money(price) + ' per team' : 'Free'}</span></div>
             </div>
             <h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${esc(vsTitleOf(m))}</h3>
             <div class="flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0])}${middle}${slotHtml(slots[1])}` : slots.map(s => slotHtml(s, 36)).join(vsBadge(24))}</div>
+            ${isLiveNow && n > 2 ? (() => { const [a, b] = livePair(m); return a && b ? `<div class="text-center text-[11px] font-black"><span class="text-red-400">● LIVE</span> ${esc(a.name)} ${liveGoals(m, a.teamId)} - ${liveGoals(m, b.teamId)} ${esc(b.name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(clockMs(m.live))}</span></div>` : ''; })() : ''}
             <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                 <div class="flex items-center gap-2"><i class="fa-solid fa-calendar text-[#00F296] w-3.5"></i><span>${esc((window.fmtGameDate || prettyDate)(m.date || ''))}</span></div>
                 <div class="flex items-center gap-2"><i class="fa-solid fa-clock text-[#00F296] w-3.5"></i><span>${esc(prettyTime(m.time))}</span></div>
@@ -258,10 +273,11 @@ window.openCreateVs = function (prefill = {}) {
         : mine.length === 1 ? `<div class="flex items-center gap-3 rounded-xl px-3 py-2 border border-[#00F296] bg-[#00F296]/10">${teamLogoHtml(mine[0], 30)}<span class="text-sm font-black truncate">${esc(mine[0].name)}</span></div><input type="hidden" id="vs-one-team" value="${esc(t0)}">`
         : `<div class="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2"><p class="text-[11px] text-white/65">You don't have a team yet. Make one in a minute, then come right back here.</p>
             <button type="button" onclick="vsCreateTeamFirst()" class="${BTN} w-full">+ Create a team</button></div>`;
-    sheet('vs-create', prefill.rematchOf ? '🔁 Rematch' : `<span class="flex items-center gap-2">${vsBadge(30)} Create VS Match</span>`, `
-        <div class="space-y-2">${LBL('Involve a team?')}
+    const editing = !!prefill.editId;
+    sheet('vs-create', editing ? '✏️ Edit match' : prefill.rematchOf ? '🔁 Rematch' : `<span class="flex items-center gap-2">${vsBadge(30)} ${prefill.copied ? 'Copy of the match' : 'Create VS Match'}</span>`, `
+        ${editing ? '<p class="text-[11px] text-white/55">Teams, payments and the score stay as they are.</p>' : `<div class="space-y-2">${LBL('Involve a team?')}
             ${seg('vs-include', [['yes', 'Yes, my team plays'], ['no', 'No, I just organize']], inc)}
-            <div id="vs-team-wrap" style="${inc === 'no' ? 'display:none' : ''}">${teamPart}</div></div>
+            <div id="vs-team-wrap" style="${inc === 'no' ? 'display:none' : ''}">${teamPart}</div></div>`}
         <div>${LBL('Name (optional)')}<input id="vs-title" class="${INPUT}" maxlength="50" value="${esc(prefill.title || '')}" placeholder="e.g. Sunday Showdown"></div>
         <div class="grid grid-cols-2 gap-3">
             <div class="min-w-0">${LBL('Date *')}<input id="vs-date" type="date" class="${INPUT}" value="${esc(prefill.date || '')}"></div>
@@ -282,7 +298,8 @@ ${whereFields('vs', prefill)}
                 <div>${LBL('Lock rosters')}${seg('vs-lock', [['0', 'Never'], ['1', '1h before'], ['2', '2h before'], ['24', '24h before']], String(prefill.rosterLockHours ?? 0))}</div>
             </div>
         </details>
-        <button id="vs-save" onclick="saveCreateVs()" class="${BTN} w-full py-3 text-sm">Create match</button>`);
+        <button id="vs-save" onclick="saveCreateVs()" class="${BTN} w-full py-3 text-sm">${editing ? 'Save changes' : 'Create match'}</button>`);
+    if (prefill.copied) setTimeout(() => document.getElementById('vs-date')?.focus(), 50);
 };
 // "No, I just organize": hide the team part. Challenge form: re-check the time.
 window.__vsSeg = (name) => {
@@ -313,6 +330,20 @@ window.saveCreateVs = async function () {
     const where = readWhere('vs');
     if (!date || !time || !where) { toast('Fill in the date, time, park and city.', 'error'); return; }
     const location = where.location;
+    const pre0 = window._vsPrefill || {};
+    if (pre0.editId) {
+        const price0 = Math.round((parseFloat(val('vs-price').replace(',', '.')) || 0) * 100);
+        const fields = { title: val('vs-title'), date, time, location, park: where.park, city: where.city, state: where.state,
+            format: segVal('vs-format') || '7v7', level: segVal('vs-level') || 'casual', teamsCount: parseInt(segVal('vs-count'), 10) || 2, priceCents: price0,
+            firstToPay: !!document.getElementById('vs-first')?.checked, partial: !!document.getElementById('vs-partial')?.checked,
+            payByHours: parseInt(segVal('vs-payby'), 10) || 0, rosterLockHours: parseInt(segVal('vs-lock'), 10) || 0, squadsOn: !!document.getElementById('vs-squads')?.checked };
+        try {
+            await changeMatch(pre0.editId, (x) => { if (fields.teamsCount < spotsTaken(x)) throw new Error('TOO_FEW'); Object.assign(x, fields); x._edit = fields; settle(x); });
+            document.getElementById('vs-create')?.remove();
+            toast('Match updated. Everyone sees the change.');
+        } catch (e) { toast(String(e && e.message) === 'TOO_FEW' ? 'More teams are already in than that. Remove a team first.' : "Couldn't save the changes.", 'error'); }
+        return;
+    }
     const include = segVal('vs-include') === 'yes';
     const teamId = segVal('vs-team') || val('vs-one-team');
     const mine = myCaptainTeams().find(t => t.id === teamId);
@@ -588,9 +619,15 @@ function drawPage() {
         </div>`;
     };
     const slots = Array.from({ length: n }, (_, i) => (shown.filter(t => t.state !== 'invited' || m.status === 'challenge')[i]) || null);
+    const liveNow = m.live && !m.live.ended && m.status === 'open' && conf.length >= 2;
     const scoreMid = m.status === 'final' && m.score && n === 2 && conf.length >= 2
-        ? `<div class="text-4xl font-black px-2">${esc(m.score[conf[0].teamId] ?? 0)} - ${esc(m.score[conf[1].teamId] ?? 0)}</div>` : vsBadge(n === 2 ? 70 : 34);
-    const statusLine = m.status === 'cancelled' ? '❌ Cancelled' : m.status === 'final' ? `🏁 Final${m.forfeit ? ` · ${esc((shown.find(t => t.teamId === m.forfeit) || {}).name || '')} didn't show` : ''}`
+        ? `<div class="text-4xl font-black px-2">${esc(m.score[conf[0].teamId] ?? 0)} - ${esc(m.score[conf[1].teamId] ?? 0)}</div>`
+        : liveNow && n === 2 ? `<div class="flex flex-col items-center px-1"><div class="text-4xl font-black">${liveGoals(m, slots[0]?.teamId)} - ${liveGoals(m, slots[1]?.teamId)}</div><div class="text-[11px] font-black ${m.live.running ? 'text-red-400' : 'text-amber-300'}">${m.live.running ? '● LIVE' : 'PAUSED'} <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(clockMs(m.live))}</span></div></div>`
+        : vsBadge(n === 2 ? 70 : 34);
+    const canTakeSpot = m.status === 'open' && !isFull(m) && !(m.date && m.date < ymdToday()) && !!myUid();
+    const lp = liveNow ? livePair(m) : [];
+    const statusLine = liveNow && n > 2 ? `<span class="${m.live.running ? 'text-red-400' : 'text-amber-300'}">${m.live.running ? '● LIVE' : 'PAUSED'}</span> ${esc(lp[0].name)} ${liveGoals(m, lp[0].teamId)} - ${liveGoals(m, lp[1].teamId)} ${esc(lp[1].name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(clockMs(m.live))}</span>`
+        : m.status === 'cancelled' ? '❌ Cancelled' : m.status === 'final' ? `🏁 Final${m.forfeit ? ` · ${esc((shown.find(t => t.teamId === m.forfeit) || {}).name || '')} didn't show` : ''}`
         : m.status === 'challenge' ? 'Challenge · waiting for an answer' : isFull(m) ? '✅ All spots taken' : `${n - spotsTaken(m)} of ${n} spots open`;
     const mapsUrl = m.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(m.location) : '';
     const tabBtn = (k, label) => `<button onclick="vsTab('${k}')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === k ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${label}</button>`;
@@ -608,15 +645,27 @@ function drawPage() {
                 <div><div class="text-[9px] font-bold text-white/55 uppercase">Organized by</div><div class="text-sm font-black">${esc(m.organizerName || 'Organizer')}</div></div>
             </div>
             ${clash ? `<div class="bg-amber-400/10 border border-amber-400/40 rounded-xl p-3 text-[11px] text-amber-200">👕 Both teams wear similar colors. ${esc(conf[1].name)}, please bring your second color.</div>` : ''}
+            ${m.livestream && m.livestream.status === 'live' && tab !== 'live' ? `<button onclick="vsTab('live')" class="w-full bg-red-600 text-white rounded-2xl px-4 py-3 flex items-center gap-3"><span class="bg-white text-red-600 text-[10px] font-black px-2 py-0.5 rounded-full">● LIVE</span><span class="flex-1 text-left text-sm font-black">This match is live now</span><span class="text-xs font-black">Watch ›</span></button>` : ''}
+            ${m.live && conf.length >= 2 ? liveScoreHtml(m, false) : ''}
             ${canJoin ? `<button onclick="openJoinVs()" class="${BTN} w-full py-3 text-sm">Join with my team</button>` : ''}
             ${squadBoxHtml(m)}
         </div>`;
     const teamsTab = `<div class="space-y-2">${shown.map(teamRow).join('') || '<p class="text-xs text-white/45 text-center py-4">No teams yet.</p>'}
-            ${(m.forming || []).length ? `<div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-300 pt-2">Free-agent squad forming (${m.forming.length}/${perSideOf(m)})</div>${formingListHtml(m)}` : ''}</div>`;
+            ${squadsOf(m).map(q => `<div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-300 pt-2">🧩 ${esc(q.name)} forming (${q.members.length}/${perSideOf(m)})</div>${membersHtml(q.members)}`).join('')}</div>`;
+    const tool = (onclick, icon, label, cls = DARK) => `<button onclick="${onclick}" class="${cls} flex flex-col items-center gap-1 py-3"><span class="text-lg leading-none">${icon}</span><span>${label}</span></button>`;
     const admin = `<div class="space-y-3">
-            <p class="text-[11px] text-white/55">You organized this match. Mark payments in the Teams tab ("Got a payment").</p>
-            ${live ? `<div class="grid grid-cols-2 gap-2"><button onclick="openVsScore()" class="${BTN}">🏁 Final score</button><button onclick="cancelVs()" class="${DARK} text-red-400">Cancel match</button></div>` : ''}
-            ${m.status === 'final' ? `<div class="grid grid-cols-2 gap-2"><button onclick="openVsScore()" class="${DARK}">Fix the score</button><button onclick="rematchVs()" class="${BTN}">🔁 Rematch</button></div>` : ''}
+            ${conf.length >= 2 && m.status !== 'cancelled' ? `<div class="text-[10px] font-black uppercase tracking-wider text-white/55">⏱️ Match management</div>${liveScoreHtml(m, m.status === 'open')}` : '<p class="text-[11px] text-white/55">Match management (clock and goals) shows here once two teams are confirmed.</p>'}
+            <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Organizer tools</div>
+            <div class="grid grid-cols-3 gap-2">
+                ${live ? tool('editVs()', '✏️', 'Edit') : ''}
+                ${tool('copyVs()', '📋', 'Copy')}
+                ${live ? tool('openAddTeamManually()', '➕', 'Add team') : ''}
+                ${m.livestream && m.livestream.status === 'live' ? tool("vsTab('live')", '🔴', 'Watch live') : live ? tool('openVsLivestream()', '🔴', 'Go live') : ''}
+                ${live ? tool('openVsScore()', '🏁', 'Final score') : ''}
+                ${live ? tool('cancelVs()', '❌', 'Cancel', DARK + ' text-red-400') : ''}
+                ${m.status === 'final' ? tool('openVsScore()', '✏️', 'Fix score') + tool('rematchVs()', '🔁', 'Rematch', BTN) : ''}
+            </div>
+            <p class="text-[11px] text-white/55">Mark payments in the Teams tab ("Got a payment").</p>
             <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Money</div>
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs space-y-1">${shown.filter(t => t.state !== 'invited').map(t => `<div class="flex justify-between gap-2"><span class="truncate">${esc(t.name)}</span><span class="${price && paidCents(m, t.teamId) >= price ? 'text-[#00F296]' : 'text-white/70'} font-bold">${price ? `${money(paidCents(m, t.teamId))} / ${money(price)}` : 'Free'}</span></div>`).join('') || '<span class="text-white/45">No teams yet.</span>'}
                 ${price ? `<div class="flex justify-between gap-2 border-t border-white/10 pt-1 font-black"><span>Collected</span><span>${money((m.payments || []).reduce((s, p) => s + (+p.cents || 0), 0))}</span></div>` : ''}</div>
@@ -636,14 +685,14 @@ function drawPage() {
         </div>
         <div class="relative overflow-hidden bg-[#040E13]/95 border-2 border-fuchsia-500/40 rounded-3xl p-4 shadow-2xl">
             <div class="absolute inset-0 pointer-events-none opacity-30" style="background:radial-gradient(circle at 50% 45%, #E8262B 0%, transparent 60%)"></div>
-            <div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72)}${scoreMid}${slotHtml(slots[1], 72)}` : slots.map(x => slotHtml(x, 46)).join(vsBadge(28))}</div>
+            <div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72, canTakeSpot)}${scoreMid}${slotHtml(slots[1], 72, canTakeSpot)}` : slots.map(x => slotHtml(x, 46, canTakeSpot)).join(vsBadge(28))}</div>
             <div class="relative text-center text-[11px] font-black text-white/75 mt-2">${statusLine}</div>
         </div>
         <div class="bg-black/40 border-2 border-fuchsia-500/30 p-1.5 rounded-2xl flex items-center gap-1 overflow-x-auto shadow-md">
-            ${boss ? tabBtn('admin', '<i class="fa-solid fa-gear mr-1"></i> Admin') : ''}${tabBtn('info', 'Match Info')}${tabBtn('teams', `Teams (${spotsTaken(m)}/${n})`)}${tabBtn('comments', `Comments (${V.comments.length})`)}
+            ${boss ? tabBtn('admin', '<i class="fa-solid fa-gear mr-1"></i> Admin') : ''}${m.livestream && lsKey(m.livestream) ? `<button onclick="vsTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white' : 'text-red-300'}">${m.livestream.status === 'live' ? '🔴 Live' : '▶ Replay'}</button>` : ''}${tabBtn('info', 'Match Info')}${tabBtn('teams', `Teams (${spotsTaken(m)}/${n})`)}${tabBtn('comments', `Comments (${V.comments.length})`)}
         </div>
         <div class="bg-[#040E13]/95 border-2 border-fuchsia-500/30 rounded-3xl p-4 shadow-2xl">
-            ${tab === 'admin' ? admin : tab === 'teams' ? teamsTab : tab === 'comments' ? commentsHtml(m) : info}
+            ${tab === 'admin' ? admin : tab === 'live' ? liveTabHtml(m, boss) : tab === 'teams' ? teamsTab : tab === 'comments' ? commentsHtml(m) : info}
         </div>
         ${!boss && m.status === 'final' && myEntry ? `<button onclick="appealVs()" class="${DARK} w-full">Appeal the score</button>` : ''}
     </div>`;
@@ -657,93 +706,414 @@ window.shareVs = async function () {
     try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied! Paste it in WhatsApp or anywhere.'); } catch (e) { /* ignore */ }
 };
 
-// ---------------------------------------------------------------- 🧩 free agents form a squad
-//   m.squadsOn (organizer's choice), m.forming = [{ uid, name, avatar, position, at }]
-//   When it reaches a full team (7 for 7v7) while a spot is open, it becomes a temporary team
-//   (teams/{id} with temp: true) that takes a spot like any other team, with its own team chat.
-//   If teams fill the spots first, the squad is off (the server tells everyone in it).
-function formingListHtml(m) {
-    return `<div class="flex flex-wrap gap-1.5">${(m.forming || []).map(p => `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold">
-        <img src="${esc(p.avatar || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover">${esc(String(p.name || 'Player'))}${p.position ? ` <span class="text-white/50">${esc(p.position)}</span>` : ''}</span>`).join('')}</div>`;
+// ---------------------------------------------------------------- 🧩 free agents form squads
+//   m.squadsOn (organizer's choice), m.squads = [{ id, name, captainUid, members: [{ uid, name, avatar, position, at }], at }]
+//   Anyone can start a squad (they're its captain) and several can fill at once, so you pick who you play with.
+//   The first squad to reach a full team (7 for 7v7) while a spot is open becomes a temporary team
+//   (teams/{id} with temp: true) that takes the spot like any other team, with its own team chat.
+//   If teams fill the spots first, the squads are off (the server tells everyone in them).
+//   (Older matches kept one list in m.forming: it shows as a squad called "Free agents".)
+export function squadsOf(m) {
+    const list = (m.squads || []).map(q => ({ ...q, members: [...(q.members || [])] }));
+    if ((m.forming || []).length) list.unshift({ id: 'legacy', name: 'Free agents', captainUid: m.forming[0].uid, members: [...m.forming], at: 0 });
+    return list;
 }
+const mySquad = (m) => squadsOf(m).find(q => q.members.some(p => p.uid === myUid())) || null;
+/** A player's current name and photo (from the live players list; what was saved is the fallback). */
+function personName(uid, saved) {
+    const d = [...(window.cachedDirectoryList || []), ...(window.directoryList || [])].find(u => String(u.uid) === String(uid));
+    const n = d && window.fullName ? window.fullName(d) : (d && d.name);
+    return n || (uid === myUid() ? myName() : '') || saved || 'Player';
+}
+function personAvatar(uid, saved, name) {
+    if (uid === myUid()) { const p = window.userProfile || {}; if (p.avatar) return p.avatar; }
+    const r = window.resolvePlayerAvatar ? window.resolvePlayerAvatar({ uid, name, avatar: saved }) : '';
+    return r || saved || DEFAULT_AV;
+}
+function membersHtml(list) {
+    return `<div class="flex flex-wrap gap-1.5">${list.map((p, i) => { const nm = personName(p.uid, p.name); return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold">
+        <img src="${esc(personAvatar(p.uid, p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${esc(nm)}${i === 0 ? ' <span class="text-[9px] text-amber-300">C</span>' : ''}${p.position ? ` <span class="text-white/50">${esc(p.position)}</span>` : ''}</span>`; }).join('')}</div>`;
+}
+const squadOpen = (m) => m.squadsOn !== false && m.status === 'open' && !isFull(m) && !(m.date && m.date < ymdToday());
 function squadBoxHtml(m) {
-    if (!m.squadsOn || m.status !== 'open') return '';
+    const list = squadsOf(m);
+    const mine = mySquad(m);
+    if (!(m.squadsOn !== false && m.status === 'open') || (isFull(m) && !mine)) return '';
     const need = perSideOf(m);
-    const list = m.forming || [];
-    const inIt = list.some(p => p.uid === myUid());
     const onTeam = myStake(m) === 'team';
-    if (isFull(m) && !inIt) return '';
-    const pct = Math.min(100, Math.round(list.length * 100 / need));
+    const rows = list.map(q => {
+        const pct = Math.min(100, Math.round(q.members.length * 100 / need));
+        const inThis = q.members.some(p => p.uid === myUid());
+        return `<div class="bg-black/40 border ${inThis ? 'border-[#00F296]/60' : 'border-white/10'} rounded-xl p-2.5 space-y-2">
+            <div class="flex items-center justify-between gap-2"><div class="text-xs font-black truncate">🧩 ${esc(q.name)}</div><span class="text-[11px] font-black shrink-0">${q.members.length}/${need}</span></div>
+            <div class="h-1.5 rounded-full bg-white/10 overflow-hidden"><div class="h-full bg-fuchsia-400" style="width:${pct}%"></div></div>
+            ${membersHtml(q.members)}
+            ${!myUid() || onTeam ? '' : inThis ? `<button onclick="leaveVsSquad('${jsq(q.id)}')" class="${DARK} w-full">Leave this squad</button>`
+                : squadOpen(m) ? `<button onclick="joinVsSquad('${jsq(q.id)}')" class="w-full py-2 rounded-xl text-xs font-black text-white bg-gradient-to-r from-fuchsia-600 to-purple-600">${mine ? 'Switch to this squad' : 'Join this squad'}</button>` : ''}
+        </div>`;
+    }).join('');
     return `<div class="bg-fuchsia-500/10 border border-fuchsia-400/40 rounded-2xl p-3 space-y-2">
-        <div class="text-sm font-black">🧩 No team? Join as a free agent</div>
-        <p class="text-[11px] text-white/75 leading-relaxed">You only play if <b>${need} free agents</b> sign up <b>before teams take the open spots</b>. When the squad is full, you become a temporary team for this match, with your own group chat to sort out ${(+m.priceCents || 0) > 0 ? `the ${money(m.priceCents)} team fee` : 'the details'}. If teams fill the spots first, the squad is off and nobody pays.</p>
-        <div class="flex items-center gap-2"><div class="flex-1 h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full bg-fuchsia-400" style="width:${pct}%"></div></div><span class="text-[11px] font-black">${list.length}/${need}</span></div>
-        ${list.length ? formingListHtml(m) : ''}
-        ${!myUid() || onTeam ? '' : inIt ? `<button onclick="leaveVsSquad()" class="${DARK} w-full">Leave the squad</button>`
-            : `<button onclick="joinVsSquad()" class="w-full py-3 rounded-xl text-sm font-black text-white bg-gradient-to-r from-fuchsia-600 to-purple-600">Join as a free agent</button>`}
+        <div class="text-sm font-black">🧩 No team? Play as a free agent</div>
+        <p class="text-[11px] text-white/75 leading-relaxed">Start a squad (you're its captain) or join one. A squad only plays if it gets <b>${need} players before teams take the open spots</b>. When it's full, it becomes a temporary team for this match with its own group chat to sort out ${(+m.priceCents || 0) > 0 ? `the ${money(m.priceCents)} team fee` : 'the details'}. If teams fill the spots first, the squad is off and nobody pays.</p>
+        ${rows}
+        ${myUid() && !onTeam && squadOpen(m) ? `<button onclick="openStartSquad()" class="${DARK} w-full"><i class="fa-solid fa-plus mr-1"></i>Start a new squad</button>` : ''}
     </div>`;
 }
 const SQUAD_COLORS = [['#7C3AED', '#FFFFFF'], ['#F97316', '#0B141A'], ['#0EA5E9', '#FFFFFF'], ['#FACC15', '#0B141A'], ['#EC4899', '#FFFFFF'], ['#14B8A6', '#0B141A']];
-window.joinVsSquad = async function () {
-    const m = V.open; if (!m || !myUid()) return;
+function meAsMember() {
     const prof = window.userProfile || {};
-    const pos = String(prof.position || prof.preferredPosition || '').slice(0, 12);
+    return { uid: myUid(), name: myName(), avatar: myAvatar(), position: String(prof.position || prof.preferredPosition || '').slice(0, 12), at: Date.now() };
+}
+/** One transaction: change the squads, and if one is full while a spot is open, it becomes a team. */
+async function changeSquads(matchId, fn) {
     let formed = null;
-    try {
-        await runTransaction(db, async (tx) => {
-            const ref = D('vsMatches', m.id);
-            const s = await tx.get(ref);
-            if (!s.exists()) throw new Error('GONE');
-            const x = s.data();
-            if (x.status !== 'open' || !x.squadsOn) throw new Error('CLOSED');
-            if (isFull(x)) throw new Error('FULL');
-            const forming = [...(x.forming || [])];
-            if (forming.some(p => p.uid === myUid())) return;
-            forming.push({ uid: myUid(), name: myName(), avatar: myAvatar(), position: pos, at: Date.now() });
-            const patch = { forming, updatedBy: myUid(), updatedAt: serverTimestamp() };
-            const need = perSideOf(x);
-            if (forming.length >= need) {
-                // Full squad: it becomes a team for this match.
-                const squad = forming.slice(0, need);
-                const k = (+x.squadCount || 0) + 1;
-                const used = new Set((x.teams || []).map(t => String((t.colors || {}).primary || '').toLowerCase()));
-                const [primary, secondary] = SQUAD_COLORS.find(c => !used.has(c[0].toLowerCase())) || SQUAD_COLORS[0];
-                const tRef = doc(C('teams'));
-                const team = {
-                    name: k > 1 ? `Free Agents FC ${k}` : 'Free Agents FC', nameKey: '', short: 'FA', temp: true, forMatchId: m.id, forMatchDate: x.date || '',
-                    colors: { primary, secondary }, logo: { type: 'crest', shape: 'shield', style: 'filled', pattern: 'stripes', icon: '🧩', text: 'short', ring: false },
-                    level: x.level || 'casual', joinMode: 'invite', city: x.city || '', state: x.state || '', country: '',
-                    rosterPrivate: false, lineupPrivate: false, ownerId: squad[0].uid,
-                    members: squad.map((p, i) => ({ id: p.uid, uid: p.uid, name: p.name, number: '', position: p.position || '', role: i === 0 ? 'captain' : 'player' })),
-                    memberUids: squad.map(p => p.uid), lineups: [], schedule: [], communityIds: [], record: {},
-                    createdAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: myUid(),
-                };
-                tx.set(tRef, team);
-                const teams = (x.teams || []).map(t => ({ ...t }));
-                const entry = teamEntry({ ...team, id: tRef.id }, (+x.priceCents || 0) > 0 ? 'pending' : 'confirmed');
-                entry.roster = squad.map(p => p.uid);
-                teams.push(entry);
-                const settled = settle({ ...x, teams });
-                Object.assign(patch, { forming: forming.slice(need), teams: settled.teams, teamIds: settled.teams.map(t => t.teamId), squadCount: k });
-                formed = team.name;
-            }
-            tx.update(ref, patch);
-        });
-        toast(formed ? `Squad complete! You're "${formed}". Your squad chat is ready in Chats.` : "You're in the squad! We'll let you know if it fills up.");
-    } catch (e) {
-        const c = String(e && e.message);
-        toast(c === 'FULL' ? 'Sorry, teams took all the spots.' : c === 'CLOSED' ? 'This match is not taking free agents.' : "Couldn't join the squad.", 'error');
-    }
-};
-window.leaveVsSquad = async function () {
+    await runTransaction(db, async (tx) => {
+        const ref = D('vsMatches', matchId);
+        const s = await tx.get(ref);
+        if (!s.exists()) throw new Error('GONE');
+        const x = s.data();
+        let squads = squadsOf(x);
+        squads = fn(squads, x);
+        if (!squads) return;
+        squads = squads.filter(q => q.members.length);
+        squads.forEach(q => { if (!q.members.some(p => p.uid === q.captainUid)) q.captainUid = q.members[0].uid; });
+        const patch = { forming: [], updatedBy: myUid(), updatedAt: serverTimestamp() };
+        const need = perSideOf(x);
+        const full = squads.find(q => q.members.length >= need);
+        if (full && !isFull(x)) {
+            const players = full.members.slice(0, need);
+            const capIdx = Math.max(0, players.findIndex(p => p.uid === full.captainUid));
+            const k = (+x.squadCount || 0) + 1;
+            const used = new Set((x.teams || []).map(t => String((t.colors || {}).primary || '').toLowerCase()));
+            const [primary, secondary] = SQUAD_COLORS.find(c => !used.has(c[0].toLowerCase())) || SQUAD_COLORS[0];
+            const tRef = doc(C('teams'));
+            const name = full.name && full.name !== 'Free agents' ? full.name : (k > 1 ? `Free Agents FC ${k}` : 'Free Agents FC');
+            const team = {
+                name, nameKey: '', short: 'FA', temp: true, forMatchId: matchId, forMatchDate: x.date || '',
+                colors: { primary, secondary }, logo: { type: 'crest', shape: 'shield', style: 'filled', pattern: 'stripes', icon: '🧩', text: 'short', ring: false },
+                level: x.level || 'casual', joinMode: 'invite', city: x.city || '', state: x.state || '', country: '',
+                rosterPrivate: false, lineupPrivate: false, ownerId: players[capIdx].uid,
+                members: players.map((p, i) => ({ id: p.uid, uid: p.uid, name: p.name, number: '', position: p.position || '', role: i === capIdx ? 'captain' : 'player' })),
+                memberUids: players.map(p => p.uid), lineups: [], schedule: [], communityIds: [], record: {},
+                createdAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: myUid(),
+            };
+            tx.set(tRef, team);
+            const teams = (x.teams || []).map(t => ({ ...t }));
+            const entry = teamEntry({ ...team, id: tRef.id }, (+x.priceCents || 0) > 0 ? 'pending' : 'confirmed');
+            entry.roster = players.map(p => p.uid);
+            teams.push(entry);
+            const settled = settle({ ...x, teams });
+            const left = full.members.slice(need);
+            squads = squads.map(q => q.id === full.id ? { ...q, members: left } : q).filter(q => q.members.length);
+            Object.assign(patch, { teams: settled.teams, teamIds: settled.teams.map(t => t.teamId), squadCount: k });
+            formed = name;
+        }
+        patch.squads = squads.filter(q => q.id !== 'legacy').concat(squads.filter(q => q.id === 'legacy').map(q => ({ ...q, id: 'sq_legacy' })));
+        tx.update(ref, patch);
+    });
+    return formed;
+}
+const squadErr = (e) => { const c = String(e && e.message); toast(c === 'FULL' ? 'Sorry, teams took all the spots.' : c === 'CLOSED' ? 'This match is not taking free agents.' : c === 'ONTEAM' ? 'Your team is already in this match.' : "Couldn't do that.", 'error'); };
+window.openStartSquad = function () {
     const m = V.open; if (!m) return;
-    try { await changeMatch(m.id, (x) => { x.forming = (x.forming || []).filter(p => p.uid !== myUid()); }); toast('You left the squad.'); }
-    catch (e) { toast("Couldn't do that.", 'error'); }
+    const first = String(myName()).split(' ')[0] || 'My';
+    document.getElementById('vs-spot')?.remove();
+    sheet('vs-squad-new', '🧩 Start a free-agent squad', `
+        <p class="text-[11px] text-white/65 leading-relaxed">You'll be the captain. Other free agents pick which squad to join. When yours reaches <b>${perSideOf(m)} players</b> before teams take the spots, it plays this match as a team, with its own group chat.</p>
+        <div>${LBL('Squad name')}<input id="sq-name" class="${INPUT}" maxlength="30" value="${esc(first)}'s Squad"></div>
+        <button onclick="startVsSquad()" class="w-full py-3 rounded-xl text-sm font-black text-white bg-gradient-to-r from-fuchsia-600 to-purple-600">Start squad</button>`);
+};
+window.startVsSquad = async function () {
+    const m = V.open; if (!m || !myUid()) return;
+    const name = (val('sq-name') || `${String(myName()).split(' ')[0]}'s Squad`).slice(0, 30);
+    try {
+        const formed = await changeSquads(m.id, (squads, x) => {
+            if (x.status !== 'open' || x.squadsOn === false) throw new Error('CLOSED');
+            if (isFull(x)) throw new Error('FULL');
+            const out = squads.map(q => ({ ...q, members: q.members.filter(p => p.uid !== myUid()) }));
+            out.push({ id: 'sq_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, captainUid: myUid(), members: [meAsMember()], at: Date.now() });
+            return out;
+        });
+        document.getElementById('vs-squad-new')?.remove();
+        toast(formed ? `Squad complete! You're "${formed}".` : `"${name}" started. You're the captain: share the match so free agents join you.`);
+    } catch (e) { squadErr(e); }
+};
+window.joinVsSquad = async function (squadId) {
+    const m = V.open; if (!m || !myUid()) return;
+    try {
+        const formed = await changeSquads(m.id, (squads, x) => {
+            if (x.status !== 'open' || x.squadsOn === false) throw new Error('CLOSED');
+            if (isFull(x)) throw new Error('FULL');
+            if (!squads.some(q => q.id === squadId)) throw new Error('GONE');
+            return squads.map(q => {
+                const rest = q.members.filter(p => p.uid !== myUid());
+                return q.id === squadId ? { ...q, members: [...rest, meAsMember()] } : { ...q, members: rest };
+            });
+        });
+        document.getElementById('vs-spot')?.remove();
+        toast(formed ? `Squad complete! You're "${formed}". Your squad chat is ready in Chats.` : "You're in the squad! We'll let you know if it fills up.");
+    } catch (e) { squadErr(e); }
+};
+window.leaveVsSquad = async function (squadId) {
+    const m = V.open; if (!m) return;
+    try { await changeSquads(m.id, (squads) => squads.map(q => q.id === squadId ? { ...q, members: q.members.filter(p => p.uid !== myUid()) } : q)); toast('You left the squad.'); }
+    catch (e) { squadErr(e); }
 };
 window.vsSquadChat = function (teamId) {
     window.closeVsMatch();
     setTimeout(() => { if (window.openCommunityChat) window.openCommunityChat('team:' + teamId); }, 120);
 };
+
+// ---------------------------------------------------------------- the "+" on an open spot
+window.openVsSpot = function () {
+    const m = V.open; if (!m || m.status !== 'open' || isFull(m)) return;
+    const boss = m.organizerId === myUid();
+    const mine = myCaptainTeams().filter(t => !(m.teamIds || []).includes(t.id));
+    const onTeam = myStake(m) === 'team';
+    const squads = squadsOf(m);
+    const opt = (onclick, icon, title, sub, cls = 'bg-white/5 border-white/10') => `<button onclick="${onclick}" class="w-full text-left flex items-center gap-3 rounded-2xl border ${cls} p-3">
+        <span class="w-10 h-10 rounded-xl bg-black/50 flex items-center justify-center text-lg shrink-0">${icon}</span>
+        <span class="min-w-0"><span class="block text-sm font-black">${title}</span><span class="block text-[11px] text-white/60">${sub}</span></span></button>`;
+    sheet('vs-spot', 'Take this open spot', `
+        ${mine.length ? mine.map(t => opt(`document.getElementById('vs-spot').remove();vsJoinWith('${jsq(t.id)}')`, teamLogoHtml(t, 32), `Add ${esc(t.name)}`, 'Your team takes the spot')).join('')
+            : (!onTeam ? opt(`document.getElementById('vs-spot').remove();vsCreateTeamForSpot()`, '🛡️', 'Add a team', "Create your team, then it takes the spot") : '')}
+        ${m.squadsOn !== false && !onTeam ? opt('openStartSquad()', '🧩', 'Start a free-agent squad', "No team? You're the captain; free agents join you", 'bg-fuchsia-500/10 border-fuchsia-400/40') : ''}
+        ${m.squadsOn !== false && !onTeam && squads.length ? `<div class="text-[10px] font-black uppercase tracking-wider text-white/55 pt-1">Or join a squad</div>
+            ${squads.map(q => opt(`joinVsSquad('${jsq(q.id)}')`, '🧩', esc(q.name), `${q.members.length}/${perSideOf(m)} players · captain ${esc(personName(q.captainUid, (q.members[0] || {}).name))}`)).join('')}` : ''}
+        ${boss ? opt(`document.getElementById('vs-spot').remove();openAddTeamManually()`, '➕', 'Add a team yourself', 'Any FutNet team, or type the name of a team not on FutNet') : ''}`);
+};
+window.vsJoinWith = async function (teamId) {
+    const m = V.open; if (!m) return;
+    const team = myCaptainTeams().find(t => t.id === teamId); if (!team) return;
+    try {
+        await changeMatch(m.id, (x) => {
+            if (x.status !== 'open' || x.teams.some(t => t.teamId === team.id)) return false;
+            if (isFull(x) && (x.firstToPay === false || (+x.priceCents || 0) <= 0)) throw new Error('FULL');
+            x.teams.push(teamEntry(team, (+x.priceCents || 0) > 0 ? 'pending' : 'confirmed'));
+            settle(x);
+        });
+        toast(`${team.name} is in! Now pick who's coming.`);
+    } catch (e) { toast(String(e && e.message) === 'FULL' ? 'Sorry, the match just filled up.' : "Couldn't join.", 'error'); }
+};
+window.vsCreateTeamForSpot = function () {
+    const id = V.open && V.open.id;
+    window.__afterTeamCreated = (teamId) => {
+        let tries = 0;
+        const back = () => {
+            if (myCaptainTeams().some(t => t.id === teamId) || tries++ > 20) { window.openVsMatch(id); setTimeout(() => window.vsJoinWith(teamId), 300); }
+            else setTimeout(back, 250);
+        };
+        setTimeout(back, 150);
+    };
+    window.openCreateTeam && window.openCreateTeam();
+};
+
+// ---------------------------------------------------------------- organizer tools: add a team, edit, copy
+window.openAddTeamManually = async function () {
+    const m = V.open; if (!m) return;
+    if (!(TS().all || []).length) {
+        try { const { getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"); const s = await getDocs(C('teams')); (window.__teamsState || {}).all = s.docs.map(d => ({ ...d.data(), id: d.id })).filter(t => !t.temp); } catch (e) { /* ignore */ }
+    }
+    window._vsAddPick = '';
+    sheet('vs-add', '➕ Add a team', `
+        <input id="va-q" class="${INPUT}" placeholder="Search FutNet teams, or type a team name" oninput="vsAddSearch(this.value)" autocomplete="off">
+        <div id="va-list" class="space-y-1.5 max-h-72 overflow-y-auto"></div>
+        <p class="text-[10px] text-white/45">A FutNet team's captains get a notification. A team that's not on FutNet is added by name only.</p>`);
+    window.vsAddSearch('');
+    setTimeout(() => document.getElementById('va-q')?.focus(), 50);
+};
+window.vsAddSearch = function (q) {
+    const m = V.open; const box = document.getElementById('va-list'); if (!m || !box) return;
+    const k = String(q || '').trim().toLowerCase();
+    const list = (TS().all || []).filter(t => !t.temp && !(m.teamIds || []).includes(t.id) && (!k || `${t.name} ${t.city || ''}`.toLowerCase().includes(k))).slice(0, 25);
+    box.innerHTML = list.map(t => `<button onclick="vsAddTeam('${jsq(t.id)}')" class="w-full flex items-center gap-3 rounded-xl px-3 py-2 border border-white/10 bg-white/5 text-left">${teamLogoHtml(t, 30)}
+            <span class="min-w-0"><span class="block text-sm font-black truncate">${esc(t.name)}</span><span class="block text-[10px] text-white/50">${esc(t.city || '')}${t.city ? ' · ' : ''}${(t.members || []).length} players</span></span></button>`).join('')
+        + (k ? `<button onclick="vsAddTeam('', document.getElementById('va-q').value)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 border border-dashed border-[#00F296]/60 text-left"><span class="text-lg">✍️</span><span class="text-sm font-black">Add "${esc(q.trim())}" (not on FutNet)</span></button>` : '');
+};
+window.vsAddTeam = async function (teamId, typed) {
+    const m = V.open; if (!m) return;
+    let entry;
+    if (teamId) {
+        const t = (TS().all || []).find(x => x.id === teamId); if (!t) return;
+        entry = teamEntry(t, 'confirmed');
+    } else {
+        const name = String(typed || '').trim().slice(0, 40); if (!name) return;
+        const [primary, secondary] = SQUAD_COLORS[(m.teams || []).length % SQUAD_COLORS.length];
+        entry = { teamId: 'x_' + Date.now().toString(36), name, short: name.replace(/[^A-Za-z0-9 ]/g, '').split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 3).toUpperCase() || 'TM',
+            logo: { type: 'crest', shape: 'shield', style: 'filled', pattern: 'plain', icon: '', text: 'short' }, colors: { primary, secondary }, roster: [], joinedAt: Date.now(), offApp: true };
+    }
+    // Free match: in right away. Paid: it still needs its payment marked (the organizer added it).
+    entry.state = (+m.priceCents || 0) > 0 ? 'pending' : 'confirmed';
+    entry.addedBy = myUid();
+    try {
+        await changeMatch(m.id, (x) => {
+            if (x.teams.some(t => t.teamId === entry.teamId)) return false;
+            if (spotsTaken(x) >= (x.teamsCount || 2) && entry.state === 'confirmed') throw new Error('FULL');
+            x.teams.push(entry); settle(x);
+        });
+        document.getElementById('vs-add')?.remove();
+        toast(`${entry.name} added.`);
+    } catch (e) { toast(String(e && e.message) === 'FULL' ? 'All spots are taken. Remove a team first or add more teams in Edit.' : "Couldn't add the team.", 'error'); }
+};
+window.editVs = function () {
+    const m = V.open; if (!m) return;
+    window.openCreateVs({ ...m, editId: m.id });
+};
+window.copyVs = function () {
+    const m = V.open; if (!m) return;
+    const mineIn = (m.teams || []).find(t => myCaptainTeams().some(x => x.id === t.teamId));
+    window.openCreateVs({ title: m.title, park: m.park, city: m.city, state: m.state, location: m.location, time: m.time, format: m.format, level: m.level, teamsCount: m.teamsCount,
+        priceCents: m.priceCents, firstToPay: m.firstToPay, partial: m.partial, payByHours: m.payByHours, rosterLockHours: m.rosterLockHours, squadsOn: m.squadsOn !== false,
+        include: !!mineIn, teamId: mineIn ? mineIn.teamId : '', copied: true });
+};
+
+// ---------------------------------------------------------------- 🔴 livestream + ⏱️ live match (score and clock)
+//   m.livestream = { url, provider: 'youtube'|'facebook', videoId (YouTube), embedUrl (Facebook), status: 'live'|'ended', startedAt, startedByName }
+//   m.live = { running, startedAt, baseMs (time on the clock when it last paused), since (ms when it last started), goals: [{ teamId, by, at, minute }] }
+const lsKey = (ls) => (ls && (ls.videoId || ls.embedUrl)) || '';
+const lsSource = (u) => liveSource(u);
+export function clockMs(live, now = Date.now()) { if (!live) return 0; return (+live.baseMs || 0) + (live.running && live.since ? now - live.since : 0); }
+const clockText = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+const liveGoals = (m, teamId) => ((m.live && m.live.goals) || []).filter(g => g.teamId === teamId).length;
+/** The two teams on the field: the ones picked when the clock started (3-4 team matches), else the first two. */
+function livePair(m) {
+    const conf = confirmedTeams(m);
+    const L = m.live || {};
+    const a = conf.find(t => t.teamId === L.a), b = conf.find(t => t.teamId === L.b);
+    return a && b ? [a, b] : [conf[0], conf[1]];
+}
+window.openVsLivestream = function () {
+    const m = V.open; if (!m) return;
+    sheet('vs-ls', '🔴 Livestream this match', `
+        <ol class="text-[11px] text-white/70 space-y-1 list-decimal pl-4">
+            <li>Start the live on <b>YouTube</b> or <b>Facebook</b> (camera like XbotGo, or the app). On Facebook, set it to <b>Public</b>.</li>
+            <li>Open the live video and tap <b>Share → Copy link</b>.</li>
+            <li>Paste it here.</li></ol>
+        <input id="vls-url" type="url" inputmode="url" class="${INPUT}" placeholder="YouTube or Facebook live link">
+        <button onclick="startVsLivestream()" class="w-full bg-red-600 text-white font-black py-3 rounded-xl text-sm">Go live</button>`);
+};
+window.startVsLivestream = async function () {
+    const url = val('vls-url'); const src = lsSource(url);
+    if (!src) { toast(liveLinkProblem(url), 'error'); return; }
+    try {
+        await changeMatch(V.open.id, (x) => { x._edit = { livestream: { url, ...src, status: 'live', startedAt: Date.now(), startedBy: myUid(), startedByName: myName() } }; });
+        document.getElementById('vs-ls')?.remove(); V.tab = 'live'; toast("You're live! 🔴 Everyone in the match was notified."); drawPage();
+    } catch (e) { toast("Couldn't start the livestream.", 'error'); }
+};
+window.endVsLivestream = async function () {
+    if (!confirm('End the livestream? The video stays on the match as a replay.')) return;
+    try { await changeMatch(V.open.id, (x) => { if (!x.livestream) return false; x._edit = { livestream: { ...x.livestream, status: 'ended', endedAt: Date.now() } }; }); } catch (e) { /* ignore */ }
+};
+window.removeVsLivestream = async function () {
+    if (!confirm('Remove the video from this match?')) return;
+    try { await changeMatch(V.open.id, (x) => { x._edit = { livestream: null }; }); V.tab = 'info'; } catch (e) { /* ignore */ }
+};
+function liveTabHtml(m, boss) {
+    const ls = m.livestream;
+    if (!ls || !lsKey(ls)) return '<p class="text-xs text-white/50 text-center py-8">No livestream on this match.</p>';
+    const on = ls.status === 'live';
+    setTimeout(() => { if (window.mountLivePlayer) window.mountLivePlayer(); }, 0);
+    return `<div class="space-y-3">
+        <div class="flex items-center gap-2">${on ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">● LIVE</span>' : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
+            <span class="flex-1 text-xs text-white/60 truncate">${on ? `Streaming now · ${esc(ls.startedByName || '')}` : 'The livestream has ended. Watch the replay.'}</span>
+            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : 'YouTube'}</a></div>
+        ${liveSlotHtml(ls)}
+        ${liveScoreHtml(m, false)}
+        ${boss ? `<div class="flex gap-2">${on ? `<button onclick="endVsLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>`
+            : `<button onclick="openVsLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">Start a new livestream</button><button onclick="removeVsLivestream()" class="${DARK}">Remove video</button>`}</div>` : ''}
+    </div>`;
+}
+/** The live score + clock (everyone), with goal and clock buttons for the organizer. */
+function liveScoreHtml(m, controls) {
+    const conf = confirmedTeams(m);
+    if (conf.length < 2 || (!m.live && !controls)) return '';
+    const [a, b] = livePair(m);
+    const L = m.live || null;
+    const pick = controls && conf.length > 2 && (!L || L.ended)
+        ? `<div class="grid grid-cols-2 gap-2">${['vs-la', 'vs-lb'].map((id, i) => `<select id="${id}" class="${INPUT} !py-2">${conf.map((t, j) => `<option value="${esc(t.teamId)}" ${j === i ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`).join('')}</div>
+           <p class="text-[10px] text-white/45 -mt-1">Pick the two teams on the field.</p>` : '';
+    const games = (m.results || []).map(r => { const ta = conf.find(t => t.teamId === r.a) || {}, tb = conf.find(t => t.teamId === r.b) || {}; return `<div class="flex justify-between text-[11px] text-white/70"><span class="truncate">${esc(ta.name || '?')}</span><span class="font-black">${esc(r.ga)} - ${esc(r.gb)}</span><span class="truncate text-right">${esc(tb.name || '?')}</span></div>`; }).join('');
+    const clock = L ? `<span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(clockMs(L))}</span>` : '00:00';
+    const goalBtn = (t) => `<button onclick="vsGoal('${jsq(t.teamId)}')" class="${BTN} w-full">⚽ Goal</button>`;
+    return `<div class="bg-black/50 border border-white/10 rounded-2xl p-3 space-y-3">
+        <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-white/50"><span>${L && L.running ? '<span class="text-red-400">● Live</span>' : L && L.ended ? 'Full time' : L ? 'Paused' : 'Match management'}</span><span class="text-[#00F296] text-sm">${clock}</span></div>
+        <div class="flex items-center gap-2">
+            <div class="flex-1 min-w-0 flex flex-col items-center gap-1">${teamLogoHtml(a, 40)}<span class="text-[11px] font-black truncate max-w-full">${esc(a.name)}</span></div>
+            <div class="text-3xl font-black font-mono shrink-0">${liveGoals(m, a.teamId)} <span class="text-white/40">-</span> ${liveGoals(m, b.teamId)}</div>
+            <div class="flex-1 min-w-0 flex flex-col items-center gap-1">${teamLogoHtml(b, 40)}<span class="text-[11px] font-black truncate max-w-full">${esc(b.name)}</span></div>
+        </div>
+        ${games ? `<div class="space-y-0.5 border-t border-white/10 pt-2"><div class="text-[9px] font-black uppercase text-white/45">Games played</div>${games}</div>` : ''}
+        ${pick}
+        ${L && (L.goals || []).length ? `<div class="space-y-0.5 text-[11px] text-white/70">${L.goals.map(g => `<div class="${g.teamId === a.teamId ? 'text-left' : 'text-right'}">⚽ ${esc(g.by || 'Goal')} ${g.minute ? `<span class="text-white/40">${esc(g.minute)}'</span>` : ''}</div>`).join('')}</div>` : ''}
+        ${controls ? `${L && !L.ended ? `<div class="grid grid-cols-2 gap-2">${goalBtn(a)}${goalBtn(b)}</div>` : ''}
+            <div class="grid grid-cols-2 gap-2">
+                ${!L || L.ended ? `<button onclick="vsClock('start')" class="${BTN} col-span-2">▶ ${L ? 'Start again' : 'Start the match'}</button>`
+                    : `${L.running ? `<button onclick="vsClock('pause')" class="${DARK}">⏸ Pause</button>` : `<button onclick="vsClock('resume')" class="${BTN}">▶ Resume</button>`}
+                       <button onclick="vsClock('end')" class="${DARK} text-amber-300">🏁 Full time</button>
+                       ${(L.goals || []).length ? `<button onclick="vsUndoGoal()" class="${DARK} col-span-2">↩︎ Undo last goal</button>` : ''}`}
+            </div>` : ''}
+    </div>`;
+}
+window.vsClock = async function (what) {
+    const m = V.open; if (!m) return;
+    if (what === 'end' && !confirm('Full time? The score is saved as the final score.')) return;
+    try {
+        await changeMatch(m.id, (x) => {
+            const L = { goals: [], baseMs: 0, ...(x.live || {}) };
+            const now = Date.now();
+            if (what === 'start') {
+                const conf = confirmedTeams(x);
+                let a = val('vs-la') || (conf[0] && conf[0].teamId), b = val('vs-lb') || (conf[1] && conf[1].teamId);
+                if (a === b) throw new Error('SAME');
+                Object.assign(L, { running: true, since: now, baseMs: 0, startedAt: now, goals: [], ended: false, a, b });
+            }
+            if (what === 'pause' && L.running) Object.assign(L, { running: false, baseMs: clockMs(L, now), since: 0 });
+            if (what === 'resume' && !L.running) Object.assign(L, { running: true, since: now });
+            if (what === 'end') {
+                Object.assign(L, { running: false, baseMs: clockMs(L, now), since: 0, ended: true });
+                const [a, b] = livePair(x);
+                const ga = L.goals.filter(g => g.teamId === (a && a.teamId)).length, gb = L.goals.filter(g => g.teamId === (b && b.teamId)).length;
+                // 2 teams: that's the final score. 3-4 teams: the game is saved and the next one can start.
+                if (a && b && confirmedTeams(x).length <= 2) { x.score = { [a.teamId]: ga, [b.teamId]: gb }; x.forfeit = ''; x.status = 'final'; }
+                else if (a && b) x._results = [...(x.results || []), { a: a.teamId, b: b.teamId, ga, gb, at: now }];
+            }
+            x._edit = { live: L, ...(x._results ? { results: x._results } : {}) };
+        });
+    } catch (e) { toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : "Couldn't update the clock.", 'error'); }
+};
+window.vsGoal = function (teamId) {
+    const m = V.open; if (!m) return;
+    const entry = (m.teams || []).find(t => t.teamId === teamId) || {};
+    const full = teamFull(teamId);
+    const roster = (entry.roster || []).map(id => ((full && full.members) || []).find(p => p.id === id)).filter(Boolean);
+    const players = roster.length ? roster : ((full && full.members) || []);
+    sheet('vs-goal', `⚽ Goal for ${esc(entry.name || 'team')}`, `
+        <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Who scored? (optional)</div>
+        <div class="flex flex-wrap gap-1.5">${players.map(p => `<button onclick="saveVsGoal('${jsq(teamId)}', '${jsq(p.name)}')" class="rounded-full px-3 py-2 text-xs font-bold bg-white/10 border border-white/10">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name)}</button>`).join('')}</div>
+        <button onclick="saveVsGoal('${jsq(teamId)}', '')" class="${BTN} w-full py-3">Just add the goal</button>`);
+};
+window.saveVsGoal = async function (teamId, by) {
+    const m = V.open; if (!m) return;
+    try {
+        await changeMatch(m.id, (x) => {
+            const L = { goals: [], baseMs: 0, ...(x.live || {}) };
+            L.goals = [...(L.goals || []), { teamId, by: by || '', at: Date.now(), minute: L.startedAt ? Math.max(1, Math.ceil(clockMs(L) / 60000)) : 0 }];
+            x._edit = { live: L };
+        });
+        document.getElementById('vs-goal')?.remove();
+    } catch (e) { toast("Couldn't add the goal.", 'error'); }
+};
+window.vsUndoGoal = async function () {
+    const m = V.open; if (!m) return;
+    try { await changeMatch(m.id, (x) => { const L = { ...(x.live || {}) }; L.goals = (L.goals || []).slice(0, -1); x._edit = { live: L }; }); } catch (e) { /* ignore */ }
+};
+// The clock ticks on screen without saving every second.
+setInterval(() => {
+    document.querySelectorAll('[data-vs-clock]').forEach(el => {
+        const m = V.list.find(x => x.id === el.dataset.vsClock) || (V.open && V.open.id === el.dataset.vsClock ? V.open : null);
+        if (m && m.live) el.textContent = clockText(clockMs(m.live));
+    });
+}, 1000);
 
 // ---------------------------------------------------------------- comments (vsMatches/{id}/comments)
 V.comments = [];
