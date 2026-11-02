@@ -71,7 +71,7 @@ function watchCommunityChats() {
         const cid = t.communityId || String(t.id).slice(10);
         if (!cid || commUnsubs[cid]) return;
         commUnsubs[cid] = onSnapshot(
-            fsQuery(collection(db, 'artifacts', appId, 'communities', cid, 'messages'), orderBy('createdAt', 'desc'), limit(30)),
+            fsQuery(window.groupChatCollection ? window.groupChatCollection(cid) : collection(db, 'artifacts', appId, 'communities', cid, 'messages'), orderBy('createdAt', 'desc'), limit(30)),
             (snap) => {
                 commLast[cid] = snap.docs.map(d => ({ ...d.data(), id: d.id }));
                 if (window.activeChatThreadId === 'community:' + cid) markCommunityRead(cid);
@@ -125,7 +125,7 @@ function buildChatRows() {
         const last = list[0] || null;
         const readAt = lastReadOf(cid);
         rows.push({
-            id: t.id, isGroup: true, name: t.name || 'Community', avatar: t.avatar || '',
+            id: t.id, isGroup: true, isTeam: !!t.isTeam, name: t.name || 'Community', avatar: t.avatar || '',
             last, lastMine: last && last.senderUid === myUid, ms: last ? msOf(last) : 0,
             unread: list.filter(m => m.senderUid !== myUid && msOf(m) > readAt).length
         });
@@ -145,7 +145,7 @@ function chatRowHtml(r) {
             : (r.isGroup && r.lastMine ? 'You: ' : '');
         preview = `${ticks}${who}${mediaIcon(r.last)}${esc(previewText(r.last))}`;
     } else {
-        preview = r.isGroup ? '<span class="italic">Community chat · Say hello 👋</span>' : '';
+        preview = r.isGroup ? `<span class="italic">${r.isTeam ? 'Team chat' : 'Community chat'} · Say hello 👋</span>` : '';
     }
     const fallback = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     return `
@@ -153,7 +153,7 @@ function chatRowHtml(r) {
             <img src="${esc(r.avatar || fallback)}" onerror="this.src='${fallback}'" class="w-12 h-12 rounded-full object-cover shrink-0 bg-[#202C33]">
             <div class="flex-1 min-w-0 border-b border-white/5 pb-2.5 -mb-2.5">
                 <div class="flex items-baseline justify-between gap-2">
-                    <span class="text-[15px] font-semibold text-[#E9EDEF] truncate">${r.isGroup ? '<i class="fa-solid fa-people-group text-[11px] text-[#8696A0] mr-1.5"></i>' : ''}${esc(r.name)}</span>
+                    <span class="text-[15px] font-semibold text-[#E9EDEF] truncate">${r.isGroup ? `<i class="fa-solid ${r.isTeam ? 'fa-shield-halved' : 'fa-people-group'} text-[11px] text-[#8696A0] mr-1.5"></i>` : ''}${esc(r.name)}</span>
                     <span class="text-[11px] shrink-0 ${r.unread ? 'text-[#25D366] font-semibold' : 'text-[#8696A0]'}">${esc(time)}</span>
                 </div>
                 <div class="flex items-center justify-between gap-2 mt-0.5">

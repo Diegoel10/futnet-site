@@ -124,6 +124,8 @@ async function safetyOf(uid) {
 function muteKeyOf(n) {
   if (n.type === "game_comment" && n.eventId) return `game_${n.eventId}`;
   if (n.type === "chat_community" && n.communityId) return `cchat_${n.communityId}`;
+  if (n.type === "chat_team" && n.teamId) return `tchat_${n.teamId}`;
+  if (n.type === "vs_comment" && n.matchId) return `vs_${n.matchId}`;
   return "";
 }
 // Who blocked a person: kept by the server only (outside the app's data), so nobody can read it.
@@ -2144,6 +2146,28 @@ exports.messageAction = onCall(async (request) => {
     return { ok: true };
   }
 
+  if (kind === "community" && where.startsWith("team:")) {
+    // Team chats (and temporary free-agent squads): members only; captains can delete anyone's message.
+    const tRef = col("teams").doc(where.slice(5));
+    const tSnap = await tRef.get();
+    if (!tSnap.exists) throw new HttpsError("not-found", "Team not found.");
+    const t = tSnap.data() || {};
+    if (!arr(t.memberUids).includes(caller)) throw new HttpsError("permission-denied", "Only the team's players can do that.");
+    const isAdmin = teamBosses(t).includes(caller);
+    const mRef = tRef.collection("messages").doc(msgId);
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(mRef);
+      if (!s.exists) throw new HttpsError("not-found", "Message not found.");
+      const m = applyMessageAction({ ...s.data() }, caller, action, value, isAdmin);
+      const patch = { reactions: m.reactions || FV.delete() };
+      if (action === "edit") Object.assign(patch, { text: m.text, edited: true, editedAt: m.editedAt });
+      if (action === "delete") Object.assign(patch, { text: "", deleted: true, deletedBy: caller, media: FV.delete(), reactions: FV.delete(), poll: FV.delete() });
+      if (action === "vote") patch.poll = m.poll;
+      tx.update(mRef, patch);
+    });
+    return { ok: true };
+  }
+
   if (kind === "community") {
     const cRef = col("communities").doc(where);
     const [cSnap, memSnap] = await Promise.all([cRef.get(), cRef.collection("members").doc(caller).get()]);
@@ -3006,6 +3030,17 @@ exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event
   const after = event.data.after.exists ? event.data.after.data() : null;
   if (!after) return;
   const teamId = event.params.teamId;
+  // A free-agent squad just filled up: everyone in it hears they're playing (and about their chat).
+  if (!before && after.temp) {
+    let where = "";
+    try { const m = (await col("vsMatches").doc(after.forMatchId).get()).data(); if (m) where = ` on ${vsWhen(m)} at ${m.location || "TBD"}`; } catch (e) { /* ignore */ }
+    await notify(arr(after.memberUids), {
+      type: "vs_squad_ready", senderUid: after.updatedBy || "", teamId,
+      title: "Your squad is complete! 🧩",
+      body: `You're playing as ${after.name}${where}. Your squad chat is ready in Chats: sort out the fee and who's bringing what.`,
+    }, { key: `squad_${teamId}` });
+    return;
+  }
   const was = new Set(before ? arr(before.memberUids) : [after.ownerId]);
   const added = arr(after.memberUids).filter((u) => u && !was.has(u));
   if (!added.length) return;
@@ -3064,16 +3099,24 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
     const from = teamName(after.challenge.fromTeamId), to = teamName(after.challenge.toTeamId);
     await notify(await teamCaptains(after.challenge.toTeamId), {
       type: "vs_challenge", senderUid: after.organizerId,
-      title: `⚔️ ${from} challenged ${to}`,
+      title: `🆚 ${from} challenged ${to}`,
       body: `${vsWhen(after)} at ${after.location || "TBD"} · ${after.format || ""}. Open Teams to accept or decline.`,
     }, { exclude: [after.organizerId], key: `vschal_${matchId}` });
+  }
+  // a2) "Suggest another time": the team that now has to answer
+  if (before && before.challenge && after.challenge && after.challenge.status === "pending" && (+after.challenge.counter || 0) > (+before.challenge.counter || 0)) {
+    await notify(await teamCaptains(after.challenge.toTeamId), {
+      type: "vs_challenge", senderUid: by,
+      title: `🕒 ${teamName(after.challenge.fromTeamId)} suggested another time`,
+      body: `${vsWhen(after)} at ${after.location || "TBD"}${after.message ? ` · "${clip(after.message, 80)}"` : ""}. Open Teams to accept or decline.`,
+    }, { exclude: [by], key: `vscounter_${matchId}_${after.challenge.counter}` });
   }
   // b) Challenge answered: the challenger
   if (before && before.challenge && after.challenge && before.challenge.status === "pending" && after.challenge.status !== "pending") {
     const yes = after.challenge.status === "accepted";
     await notify(uniq([after.organizerId, ...(await teamCaptains(after.challenge.fromTeamId))]), {
       type: "vs_challenge_answer", senderUid: by,
-      title: yes ? "Challenge accepted! ⚔️" : "Challenge declined",
+      title: yes ? "Challenge accepted! 🆚" : "Challenge declined",
       body: `${teamName(after.challenge.toTeamId)} ${yes ? "accepted" : "declined"} your challenge for ${vsWhen(after)}.`,
     }, { exclude: [by], key: `vsans_${matchId}` });
   }
@@ -3088,12 +3131,27 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
   }
   if (!before) return;
 
+  // 🧩 A free-agent squad that can't happen any more (teams took the spots, or the match ended): tell them, clear it.
+  const forming = arr(after.forming);
+  if (forming.length) {
+    const taken = arr(after.teams).filter((t) => t.state === "confirmed" || (after.firstToPay === false && t.state === "pending")).length;
+    const over = after.status !== "open" || taken >= (+after.teamsCount || 2);
+    if (over) {
+      await notify(forming.map((p) => p.uid), {
+        type: "vs_squad_off", senderUid: by,
+        title: "The free-agent squad is off",
+        body: `${after.status === "cancelled" ? "The match was cancelled" : "Teams took all the spots"} in ${vsTitle(after)} (${vsWhen(after)}), so the squad didn't happen. Nobody pays.`,
+      }, { key: `squadoff_${matchId}_${forming.length}_${forming[0].at || 0}` });
+      await event.data.after.ref.update({ forming: [] });
+    }
+  }
+
   // d) A team joined: the organizer
   const was = new Set(arr(before.teams).map((t) => t.teamId));
   for (const t of arr(after.teams).filter((x) => !was.has(x.teamId))) {
     await notify([after.organizerId], {
       type: "vs_team_joined", senderUid: by,
-      title: `${t.name} joined your VS Match ⚔️`, body: `${vsTitle(after)} · ${vsWhen(after)}`,
+      title: `${t.name} joined your VS Match 🆚`, body: `${vsTitle(after)} · ${vsWhen(after)}`,
     }, { exclude: [by], key: `vsjoin_${matchId}_${t.teamId}` });
   }
   // e) A team is confirmed (paid in full): its captains
@@ -3130,6 +3188,44 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
       }, { exclude: [by], key: `vsfinal_${matchId}` });
     }
   }
+});
+
+// 💬 Match comments: the organizer and every player of the teams in it (and the squad forming)
+exports.onVsComment = onDocumentCreated(`${BASE}/vsMatches/{matchId}/comments/{commentId}`, async (event) => {
+  const c = (event.data && event.data.data()) || {};
+  const matchId = event.params.matchId;
+  const m = (await col("vsMatches").doc(matchId).get()).data();
+  if (!m || !c.byUid) return;
+  const players = [];
+  for (const t of arr(m.teams)) {
+    try { const td = (await col("teams").doc(t.teamId).get()).data(); if (td) players.push(...arr(td.memberUids)); } catch (e) { /* ignore */ }
+  }
+  await notify(uniq([m.organizerId, ...players, ...arr(m.forming).map((p) => p.uid)]), {
+    type: "vs_comment", senderUid: c.byUid, matchId,
+    title: `💬 ${vsTitle(m)}`, body: `${String(c.byName || "Someone").split(" ")[0]}: ${clip(c.text, 120)}`,
+  }, { exclude: [c.byUid], key: `vscom_${event.params.commentId}` });
+});
+
+// 💬 Team chat (and squad chat): every player on the team except the sender
+exports.onTeamChatMessage = onDocumentCreated(`${BASE}/teams/{teamId}/messages/{msgId}`, async (event) => {
+  const m = (event.data && event.data.data()) || {};
+  const { teamId, msgId } = event.params;
+  const by = m.senderUid || "";
+  if (!by) return;
+  const t = (await col("teams").doc(teamId).get()).data();
+  if (!t) return;
+  let text = clip(m.text, 120);
+  if (m.media && m.media.type) {
+    const icon = m.media.type === "video" ? "🎥" : "📷";
+    const isLabel = text === "📷 Photo" || text === "🎥 Video" || !text;
+    text = isLabel ? `${icon} ${m.media.type === "video" ? "Video" : "Photo"}` : `${icon} ${text}`;
+  }
+  await notify(arr(t.memberUids), {
+    type: "chat_team", senderUid: by, teamId,
+    chatId: `team_${teamId}`,
+    title: t.name || "Team chat",
+    body: `${String(m.sender || (await nameOf(by))).split(" ")[0]}: ${text || "New message"}`,
+  }, { exclude: [by], key: `tchat_${teamId}_${msgId}` });
 });
 
 // Appeal of a score: the organizer

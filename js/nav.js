@@ -64,3 +64,13 @@ window.addEventListener('popstate', (e) => {
 });
 
 window.__navStack = stack;
+
+// iPhone: date and time boxes have a built-in minimum width, so two side by side ran into each other.
+(function fixDateBoxes() {
+    if (document.getElementById('futnet-date-fix')) return;
+    const s = document.createElement('style');
+    s.id = 'futnet-date-fix';
+    s.textContent = `input[type=date],input[type=time]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;width:100%;display:block;box-sizing:border-box;min-height:2.6rem}
+input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and-time-value{text-align:left}`;
+    (document.head || document.documentElement).appendChild(s);
+})();

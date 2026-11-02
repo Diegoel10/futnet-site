@@ -2290,13 +2290,34 @@ window.deleteCommunity = async (id) => {
 
 // ------------------------------------------------------------------ COMMUNITY CHAT (shown inside the Chat tab)
 const threadId = (id) => 'community:' + id;
+// Team chats work exactly like community chats. Their id is "team:<teamId>" and the messages
+// live in teams/{teamId}/messages (temporary free-agent squads get one too).
+const isTeamChat = (cid) => String(cid || '').startsWith('team:');
+const teamOfChat = (cid) => ((window.__teamsState && window.__teamsState.mine) || []).find(t => t.id === String(cid).slice(5)) || null;
+const groupMsgs = (cid) => isTeamChat(cid) ? collection(db, 'artifacts', appId, 'teams', String(cid).slice(5), 'messages') : collection(db, 'artifacts', appId, 'communities', cid, 'messages');
+window.groupChatCollection = groupMsgs;
+function teamChatAvatar(t) {
+    if (t.logo && t.logo.type === 'photo' && t.logo.url) return t.logo.url;
+    try { return 'data:image/svg+xml;utf8,' + encodeURIComponent(window.teamCrestSvg(t, 96)); } catch (e) { return DEFAULT_THUMB; }
+}
+/** Who's in the chat and what it looks like (a community or a team). */
+function groupInfo(cid) {
+    if (isTeamChat(cid)) {
+        const t = teamOfChat(cid); if (!t) return null;
+        return { name: t.name, avatar: teamChatAvatar(t), sub: `Team chat · ${(t.memberUids || []).length} players`, team: t };
+    }
+    const c = window.communitiesCache[cid]; if (!c) return null;
+    return { name: c.name, avatar: safeImg(c.thumbnail, DEFAULT_THUMB), sub: '', community: c };
+}
 function rebuildChatThreads() {
+    const teams = ((window.__teamsState && window.__teamsState.mine) || []).map(t => ({ id: threadId('team:' + t.id), communityId: 'team:' + t.id, name: t.name, avatar: teamChatAvatar(t), isTeam: true }));
     window.communityChatThreads = Object.keys(window.myCommunityRoles).map(id => {
         const c = window.communitiesCache[id]; if (!c) return null;
         return { id: threadId(id), communityId: id, name: c.name, avatar: safeImg(c.thumbnail, DEFAULT_THUMB), isCommunity: true };
-    }).filter(Boolean);
+    }).filter(Boolean).concat(teams);
     if (window.renderChatsList) window.renderChatsList();
 }
+window.rebuildGroupChats = rebuildChatThreads;
 
 window.openCommunityChat = function(communityId) {
     window.switchTab('chat');
@@ -2306,7 +2327,8 @@ window.openCommunityChat = function(communityId) {
 
 window.openCommunityChatThread = function(tid) {
     const communityId = tid.replace(/^community:/, '');
-    const c = window.communitiesCache[communityId]; if (!c) return;
+    const g = groupInfo(communityId); if (!g) return;
+    const team = isTeamChat(communityId);
     if (S.chatUnsub) { S.chatUnsub(); S.chatUnsub = null; }
     if (S.chatTypingUnsub) { S.chatTypingUnsub(); S.chatTypingUnsub = null; }
     window.activeChatThreadId = tid;
@@ -2317,14 +2339,14 @@ window.openCommunityChatThread = function(tid) {
     const box = document.getElementById('active-chat-box');
     if (box) { box.classList.remove('hidden'); box.classList.add('flex', 'flex-col', 'h-full', 'overflow-hidden'); }
     if (window.showChatPaneMobile) window.showChatPaneMobile();   // phones: open full screen like WhatsApp
-    const n = document.getElementById('active-chat-name'); if (n) n.innerText = c.name;
-    const a = document.getElementById('active-chat-avatar'); if (a) a.src = safeImg(c.thumbnail, DEFAULT_THUMB);
+    const n = document.getElementById('active-chat-name'); if (n) n.innerText = g.name;
+    const a = document.getElementById('active-chat-avatar'); if (a) a.src = g.avatar;
     const sub = document.getElementById('active-chat-subtitle');
-    const subDefault = `${S.members && S.activeId === communityId && S.members.length ? S.members.length + ' members' : 'Community chat'}`;
+    const subDefault = team ? g.sub : `${S.members && S.activeId === communityId && S.members.length ? S.members.length + ' members' : 'Community chat'}`;
     if (sub) { sub.innerText = subDefault; sub.classList.remove('hidden'); }
     // 🔕 Mute this community chat (1-5 hours or always)
     const tools = document.getElementById('active-chat-tools');
-    if (tools) tools.innerHTML = window.muteButtonHtml ? window.muteButtonHtml('cchat_' + communityId, 'this community chat') : '';
+    if (tools) tools.innerHTML = window.muteButtonHtml ? (team ? window.muteButtonHtml('tchat_' + communityId.slice(5), 'this team chat') : window.muteButtonHtml('cchat_' + communityId, 'this community chat')) : '';
     // "Diego is typing…" / "Multiple people are typing…"
     S.chatTypingUnsub = watchTyping(tid, (names) => {
         if (window.activeChatThreadId !== tid) return;
@@ -2345,10 +2367,10 @@ window.openCommunityChatThread = function(tid) {
         if (window.activeChatThreadId === tid) renderCommunityChatMessages();
     };
     const u1 = onSnapshot(
-        query(collection(db, 'artifacts', appId, 'communities', communityId, 'messages'), orderBy('createdAt', 'desc'), limit(100)),
+        query(groupMsgs(communityId), orderBy('createdAt', 'desc'), limit(100)),
         (snap) => { fromSite = snap.docs.map(d => ({ ...d.data(), id: d.id })); merge(); },
-        (err) => { console.error('community chat', err); toast('Could not load community chat', 'error'); });
-    const u2 = onSnapshot(
+        (err) => { console.error('group chat', err); toast(team ? 'Could not load the team chat' : 'Could not load community chat', 'error'); });
+    const u2 = team ? () => {} : onSnapshot(
         query(collection(db, 'artifacts', appId, 'communities', communityId, 'chat'), orderBy('createdAt', 'desc'), limit(50)),
         (snap) => { fromOldApp = snap.docs.map(d => ({ ...d.data(), id: 'app_' + d.id })); merge(); }, () => {});
     S.chatUnsub = () => { u1(); u2(); };
@@ -2360,7 +2382,7 @@ function renderCommunityChatMessages() {
     container.classList.add('flex-1', 'overflow-y-auto', 'wa-wall', 'py-2');
     container.classList.remove('space-y-3', 'p-4');
     if (!S.chatMessages.length) {
-        container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-400 space-y-2"><i class="fa-solid fa-people-group text-3xl opacity-40"></i><p class="text-xs font-semibold">No messages yet. Say hello to the community! 👋</p></div>
+        container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-400 space-y-2"><i class="fa-solid fa-people-group text-3xl opacity-40"></i><p class="text-xs font-semibold">${isTeamChat(S.activeChatCommunity) ? 'No messages yet. Say hello to your team! 👋' : 'No messages yet. Say hello to the community! 👋'}</p></div>
             <div id="community-typing-bubble">${typingBubbleHtml(S.chatTyping || [])}</div>`;
         return;
     }
@@ -2374,7 +2396,7 @@ function renderCommunityChatMessages() {
     const atBottom = window.isChatNearBottom ? window.isChatNearBottom() : true;
     const cid = S.activeChatCommunity;
     container.innerHTML = renderWhatsApp(list, { myUid: uid, group: true, ticks: false, avatarOf: (u, n, a) => avatarOf({ uid: u, name: n, avatar: a }),
-        scope: { kind: 'community', id: cid, canModerate: myRole(cid) === 'admin' } })
+        scope: { kind: 'community', id: cid, canModerate: isTeamChat(cid) ? !!(teamOfChat(cid) && window.teamCanManage && window.teamCanManage(teamOfChat(cid))) : myRole(cid) === 'admin' } })
         + `<div id="community-typing-bubble">${typingBubbleHtml(S.chatTyping || [])}</div>`;
     if (atBottom || window._forceChatBottom) container.scrollTop = container.scrollHeight;
     window._forceChatBottom = false;
@@ -2391,11 +2413,13 @@ window.sendCommunityChatMessage = async function(text, media, poll) {
     const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const replyTo = window.waChat && window.waChat.takeReply ? window.waChat.takeReply('community', cid) : null;
     try {
-        // blocked while suspended
-        const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', cid, 'members', me().uid));
-        const _sc = ms.exists() ? suspendedScopes(ms.data()) : null;
-        if (_sc && _sc.chat) { toast(`You are suspended from chat until ${fmtDate(tsMs(ms.data().suspendedUntil))}.${ms.data().suspendReason ? ' Reason: ' + esc(ms.data().suspendReason) : ''}`, 'error'); return; }
-        await setDoc(doc(db, 'artifacts', appId, 'communities', cid, 'messages', msgId), {
+        // blocked while suspended (communities only)
+        if (!isTeamChat(cid)) {
+            const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', cid, 'members', me().uid));
+            const _sc = ms.exists() ? suspendedScopes(ms.data()) : null;
+            if (_sc && _sc.chat) { toast(`You are suspended from chat until ${fmtDate(tsMs(ms.data().suspendedUntil))}.${ms.data().suspendReason ? ' Reason: ' + esc(ms.data().suspendReason) : ''}`, 'error'); return; }
+        }
+        await setDoc(doc(groupMsgs(cid), msgId), {
             id: msgId, senderUid: me().uid, sender: myName(), avatar: /^https?:\/\//i.test(myAvatar()) && myAvatar().length < 400 ? myAvatar() : '',
             text, ...(media ? { media } : {}), ...(poll ? { poll } : {}), ...(replyTo ? { replyTo } : {}), createdAt: serverTimestamp()
         });

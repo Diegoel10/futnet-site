@@ -155,6 +155,8 @@ export function teamLogoHtml(team, size = 48) {
     return `<span class="shrink-0 inline-block" style="width:${size}px;height:${size}px">${crestSvg(team || {}, size)}</span>`;
 }
 window.teamLogoHtml = teamLogoHtml;
+window.teamCrestSvg = crestSvg;
+window.teamCanManage = (t) => canManage(t);
 function randomCrest() {
     const pick = (a) => a[Math.floor(Math.random() * a.length)];
     const outline = Math.random() < 0.25;
@@ -171,13 +173,14 @@ const docsOf = (s) => s.docs.map(d => ({ ...d.data(), id: d.id }));
 export function startTeams() {
     stopAll();
     const uid = myUid(); if (!uid) return;
-    T.unsubs.push(onSnapshot(query(C('teams'), where('memberUids', 'array-contains', uid)), s => { T.mine = docsOf(s); refreshTeamsUi(); }, () => {}));
+    T.unsubs.push(onSnapshot(query(C('teams'), where('memberUids', 'array-contains', uid)), s => { T.mine = docsOf(s); refreshTeamsUi(); try { window.rebuildGroupChats && window.rebuildGroupChats(); } catch (e) { /* ignore */ } }, () => {}));
     T.unsubs.push(onSnapshot(query(C('teamInvites'), where('uid', '==', uid)), s => { T.invites = docsOf(s); refreshTeamsUi(); updateBadge(); }, () => {}));
     T.unsubs.push(onSnapshot(D('freeAgents', uid), s => { T.myAgent = (s.exists && s.exists()) ? s.data() : null; refreshTeamsUi(); }, () => {}));
 }
 window.startTeams = startTeams;
 async function loadAll() {
-    try { T.all = docsOf(await getDocs(C('teams'))); } catch (e) { T.all = []; }
+    // Temporary squads (free agents for one VS match) aren't real teams: not in Find teams or the standings.
+    try { T.all = docsOf(await getDocs(C('teams'))).filter(t => !t.temp); } catch (e) { T.all = []; }
     refreshTeamsUi();
 }
 async function loadAgents() {
@@ -226,6 +229,7 @@ function teamCard(t, right = '') {
             <div class="text-[11px] text-white/55 truncate">${esc(levelLabel(t.level))} · ${(t.members || []).length} player${(t.members || []).length === 1 ? '' : 's'}${t.city ? ' · ' + esc(t.city) : ''}</div>
             ${(() => { const n = isMember(t) ? splitSchedule(t.schedule).upcoming[0] : null; return n ? `<div class="text-[11px] text-[#00F296] font-bold truncate">Next: ${n.home === false ? '@' : 'vs'} ${esc(n.opponent)} · ${esc(prettyDate(n.date))}${n.time ? ' ' + esc(prettyTime(n.time)) : ''}</div>` : ''; })()}
         </div>
+        ${t.temp && !right ? '<span class="text-[9px] font-black uppercase rounded-full px-2 py-1 bg-fuchsia-500/30 text-fuchsia-100">Temp squad</span>' : ''}
         ${right || (role ? `<span class="text-[9px] font-black uppercase rounded-full px-2 py-1 ${role === 'Player' ? 'bg-white/10 text-white/70' : 'bg-[#00F296] text-slate-950'}">${role}</span>` : '')}
     </div>`;
 }
@@ -313,7 +317,7 @@ function leadersHtml() {
     const played = list.some(r => r.p > 0);
     const chip = (k, l) => `<button onclick="teamsLeadLevel('${k}')" class="px-3 py-1.5 rounded-lg text-[11px] font-black ${lv === k ? 'bg-white text-slate-950' : 'bg-white/10 text-white/75'}">${l}</button>`;
     return `<div class="flex gap-1.5 overflow-x-auto">${chip('all', 'All')}${LEVELS.map(([k, l]) => chip(k, l)).join('')}</div>
-        ${played ? '' : '<p class="text-[11px] text-white/55">Standings fill up as teams play VS Mode games (coming next). 3 points for a win, 1 for a draw.</p>'}
+        ${played ? '' : '<p class="text-[11px] text-white/55">Standings fill up as teams play VS Mode games. 3 points for a win, 1 for a draw.</p>'}
         <div class="${CARD} !p-0 overflow-hidden">
             <div class="grid grid-cols-[28px_1fr_28px_28px_28px_28px_36px_36px] gap-1 px-3 py-2 text-[9px] font-black uppercase text-white/45 border-b border-white/10">
                 <span>#</span><span>Team</span><span class="text-center">P</span><span class="text-center">W</span><span class="text-center">D</span><span class="text-center">L</span><span class="text-center">GD</span><span class="text-center text-[#00F296]">Pts</span></div>
@@ -535,7 +539,10 @@ window.saveTeam = async function () {
         });
         document.getElementById('team-form')?.remove();
         toast(F.editing ? 'Team saved.' : `${name} is ready! Now add your players.`);
-        if (!F.editing) window.openTeam(ref.id);
+        // Made from "Create VS Match" (no team yet): go back to the match form with the new team picked.
+        const after = window.__afterTeamCreated; window.__afterTeamCreated = null;
+        if (!F.editing && typeof after === 'function') after(ref.id);
+        else if (!F.editing) window.openTeam(ref.id);
     } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = F.editing ? 'Save changes' : 'Create team'; }
         if (String(e && e.message) === 'TAKEN') { F.nameOk = false; checkName(name); toast('That name was just taken. Pick another.', 'error'); }
@@ -611,8 +618,10 @@ function renderTeamPage() {
                 <span class="rounded-full px-2 py-1 flex items-center gap-1 bg-white/10"><span class="w-3 h-3 rounded-full inline-block" style="background:${esc((t.colors || {}).primary || '#00F296')}"></span><span class="w-3 h-3 rounded-full inline-block border border-white/30" style="background:${esc((t.colors || {}).secondary || '#0B141A')}"></span></span>
             </div>
         </div>
+        ${t.temp ? `<div class="bg-fuchsia-500/10 border border-fuchsia-400/40 rounded-2xl p-3 text-[11px] text-fuchsia-100 text-center">🧩 <b>Temporary squad</b> of free agents for one VS match${t.forMatchDate ? ' on ' + esc(prettyDate(t.forMatchDate)) : ''}. Use the team chat to sort out who pays and when to meet.${t.forMatchId ? `<button onclick="openVsMatch('${jsq(t.forMatchId)}')" class="block mx-auto mt-2 font-black text-[#00F296] underline">Open the match</button>` : ''}</div>` : ''}
+        ${member ? `<button onclick="openTeamChat('${jsq(t.id)}')" class="${BTN} w-full py-3 text-sm"><i class="fa-solid fa-comments mr-1"></i> Team chat</button>` : ''}
         ${action}
-        ${!member && window.vsChallengeButtonHtml ? window.vsChallengeButtonHtml(t) : ''}
+        ${!member && !t.temp && window.vsChallengeButtonHtml ? window.vsChallengeButtonHtml(t) : ''}
         ${boss && window.vsChallengesHtml ? window.vsChallengesHtml([t.id]) : ''}
         <div class="flex gap-2">${tabs.map(([k, l]) => `<button onclick="teamTab('${k}')" class="flex-1 py-2.5 rounded-xl text-xs font-black ${tab === k ? 'bg-[#00F296] text-slate-950' : 'bg-black/50 text-white/75 border border-white/10'}">${l}</button>`).join('')}</div>
         ${tab === 'schedule' ? scheduleHtml(t, boss) : tab === 'lineup' ? (t.lineupPrivate && !member ? privateNote('lineup') : lineupHtml(t, boss))
@@ -622,6 +631,12 @@ function renderTeamPage() {
     </div>`;
 }
 window.teamTab = (k) => { T.openTab = k; renderTeamPage(); };
+// 💬 The team's group chat (lives in the Chats tab with the community chats).
+window.openTeamChat = function (teamId) {
+    window.closeTeam();
+    // Wait for the Back step of the team page to finish before the Chats tab adds its own.
+    setTimeout(() => { if (window.openCommunityChat) window.openCommunityChat('team:' + teamId); }, 120);
+};
 
 // ---------------------------------------------------------------- schedule: the team's upcoming games
 // team.schedule = [{ id, opponent, opponentTeamId, date: 'YYYY-MM-DD', time: 'HH:MM', location, home, note, scoreFor, scoreAgainst }]
@@ -995,11 +1010,8 @@ function lineupHtml(t, boss) {
             <select onchange="lineupFormat(this.value)" class="${INPUT} !w-28">${Object.keys(FORMATS).map(f => `<option ${l.format === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
             <select onchange="lineupFormation(this.value)" class="${INPUT}">${FORMATS[l.format].map(f => `<option ${l.formation === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
         </div>` : `<div class="text-xs text-white/60 text-center">${esc(l.format)} · ${esc(l.formation)}</div>`}
-        <div class="relative w-full rounded-2xl overflow-hidden border border-white/15" style="aspect-ratio:3/4;background:repeating-linear-gradient(0deg,#0f6b3a 0 10%,#11793f 10% 20%)">
-            <div class="absolute inset-3 border-2 border-white/40 rounded-lg"></div>
-            <div class="absolute left-3 right-3 top-1/2 border-t-2 border-white/40"></div>
-            <div class="absolute left-1/2 top-1/2 w-20 h-20 -translate-x-1/2 -translate-y-1/2 border-2 border-white/40 rounded-full"></div>
-            <div class="absolute left-1/2 bottom-3 w-32 h-14 -translate-x-1/2 border-2 border-b-0 border-white/40"></div>
+        <div class="relative w-full rounded-3xl overflow-hidden border-2 shadow-2xl bg-[#03140C]" style="aspect-ratio:3/4;background-image:url('img/TeamBuildField.png');background-size:cover;background-position:center;border-color:${p}">
+            <div class="absolute inset-0 bg-black/40 pointer-events-none"></div>
             ${spots.map((_, i) => shirt(byId.get(l.spots[String(i)]), i)).join('')}
         </div>
         ${boss && L.pick != null ? `<div class="text-[11px] font-bold text-amber-300 text-center">Pick a player for ${L.pick === 0 ? 'goalkeeper' : 'this spot'}:</div>` : ''}
