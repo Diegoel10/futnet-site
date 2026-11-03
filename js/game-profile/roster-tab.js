@@ -118,8 +118,9 @@ export function renderRosterTab(event) {
             : window.activeRosterSubTab === 0 && att.attendance === 'noshow' ? '<span class="text-[8px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-black border border-red-500/40">No-show</span>'
             : window.activeRosterSubTab === 2 && att.removedByAdmin ? '<span class="text-[8px] bg-white/10 text-white/60 px-2 py-0.5 rounded font-black border border-white/20">Removed</span>' : '';
         const guestsWaitOnly = window.activeRosterSubTab === 1 && (att.guestsOnly === true || confirmedList.some(a => String(a.uid) === String(att.uid)));
-        const plusOnesBadge = guestsWaitOnly ? `<span class="text-[9px] text-amber-300 font-bold mt-0.5 block">Playing · ${att.guests ? att.guests.length : 0} guest(s) waiting</span>`
-            : att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
+        // Waitlist: a player who is already playing and only has guests waiting shows just the guests.
+        if (guestsWaitOnly) return `<div class="space-y-2">${guestsHtml.replace(/ ml-8/g, '')}</div>`;
+        const plusOnesBadge = att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
 
         return `
             <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">

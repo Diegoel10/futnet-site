@@ -1,3 +1,17 @@
+// Goals are saved by name, and names change ("Joubert" -> "Joubert Bernard"): find the player by exact
+// name, then ignoring case, then a name that starts with the other (only when exactly one player matches).
+export function findScorer(gName, people) {
+    const norm = (x) => String(x || '').toLowerCase().trim().split(/\s+/).filter(Boolean).join(' ');
+    const g = norm(gName); if (!g) return null;
+    const named = (people || []).filter(p => p && norm(p.name));
+    const exact = named.find(p => p.name === gName); if (exact) return exact;
+    const same = named.filter(p => norm(p.name) === g);
+    if (same.length) return same.find(p => p.uid) || same[0];
+    const pre = named.filter(p => { const n = norm(p.name); return g.startsWith(n + ' ') || n.startsWith(g + ' '); });
+    const ids = new Set(pre.map(p => p.uid || p.name));
+    return ids.size === 1 ? pre[0] : null;
+}
+window.findScorer = findScorer;
 // js/leaderboard.js
 import { escapeHtml, jsArg, isOwnGoal } from './game-profile/event-store.js';
 export function computePlayerStats(events) {
@@ -32,6 +46,7 @@ export function computePlayerStats(events) {
         });
 
         const matches = ev.matches || [];
+        const everyone = [...attendees, ...Object.values(ev.teamAssignments || {}).flat().filter(Boolean)];
         matches.forEach(m => {
             if (m.isFinished === false) return;
 
@@ -42,14 +57,14 @@ export function computePlayerStats(events) {
 
             t1Goals.forEach(gName => {
                 if (isOwnGoal(gName)) return;   // own goals count for the team, not for anyone's stats
-                const matchedAtt = attendees.find(a => a.name === gName);
+                const matchedAtt = findScorer(gName, everyone);
                 const stats = getPlayerRecord(gName, matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
                 stats.goals += 1;
             });
 
             t2Goals.forEach(gName => {
                 if (isOwnGoal(gName)) return;
-                const matchedAtt = attendees.find(a => a.name === gName);
+                const matchedAtt = findScorer(gName, everyone);
                 const stats = getPlayerRecord(gName, matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
                 stats.goals += 1;
             });

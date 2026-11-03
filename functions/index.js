@@ -99,6 +99,8 @@ async function notify(recipients, payload, { exclude = [], key = "" } = {}) {
         eventId: payload.eventId || "",
         communityId: payload.communityId || "",
         chatId: payload.chatId || "",
+        matchId: payload.matchId || "",
+        teamId: payload.teamId || "",
         sound: payload.sound || "",
         read: false,
         source: "server",
@@ -227,6 +229,8 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
     eventId: n.eventId || "",
     communityId: n.communityId || "",
     chatId: n.chatId || "",
+    matchId: n.matchId || "",
+    teamId: n.teamId || "",
     sound: n.sound || "",
   };
   // Money in: custom "cha-ching" sound (the file ships inside the apps; falls back to the normal sound).
@@ -2492,7 +2496,14 @@ function playerGame(g, uid) {
   const isMine = (goal) => {
     if (!goal || ownGoal(goal)) return false;
     if (typeof goal === "object" && (goal.uid || goal.userId)) return (goal.uid || goal.userId) === uid;
-    return myNames.has(String(typeof goal === "object" ? (goal.name || goal.scorer || "") : goal).trim().toLowerCase());
+    const gname = String(typeof goal === "object" ? (goal.name || goal.scorer || "") : goal).trim().toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+    if (myNames.has(gname)) return true;
+    // Names change ("Joubert" -> "Joubert Bernard"): a name that starts with the other counts when only one player matches.
+    const people = [...arr(g.attendees), ...Array.from({ length: n }, (_, i) => teamPlayers(g, i)).flat()]
+      .filter((p) => p && p.name).map((p) => ({ uid: uidOf(p) || p.name, name: String(p.name).trim().toLowerCase().split(/\s+/).join(" ") }));
+    if (people.some((p) => p.name === gname)) return false;
+    const pre = uniq(people.filter((p) => gname.startsWith(p.name + " ") || p.name.startsWith(gname + " ")).map((p) => p.uid));
+    return pre.length === 1 && pre[0] === uid;
   };
   const pick = (idx, name, fb) => (Number.isInteger(idx) && idx >= 0 && idx < n) ? idx : (names.indexOf(name) !== -1 ? names.indexOf(name) : fb);
   const table = names.map((nm, i) => ({ i, pts: 0, gf: 0, ga: 0 }));
@@ -3042,7 +3053,7 @@ exports.onTeamRequest = onDocumentCreated(`${BASE}/teams/{teamId}/requests/{uid}
   if (!t) return;
   await notify(teamBosses(t), {
     type: "team_request",
-    senderUid: uid,
+    senderUid: uid, teamId,
     title: `${t.name || "Your team"}: join request 🛡️`,
     body: `${r.name || (await nameOf(uid))} wants to join. Open the team to add them.`,
   }, { exclude: [uid], key: `teamreq_${teamId}_${uid}_${Math.floor(Date.now() / 3600000)}` });
@@ -3053,7 +3064,7 @@ exports.onTeamInvite = onDocumentCreated(`${BASE}/teamInvites/{inviteId}`, async
   if (!iv.uid) return;
   await notify([iv.uid], {
     type: "team_invite",
-    senderUid: iv.byUid || "",
+    senderUid: iv.byUid || "", teamId: iv.teamId || "",
     title: "Team invite 🛡️",
     body: `${iv.byName || "A captain"} invited you to join ${iv.teamName || "their team"}. Open Teams to answer.`,
   }, { key: `teaminv_${event.params.inviteId}_${Math.floor(Date.now() / 3600000)}` });
@@ -3084,14 +3095,14 @@ exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event
       // Joined on their own (open team or an invite): tell the captains
       await notify(teamBosses(after), {
         type: "team_joined",
-        senderUid: u,
+        senderUid: u, teamId,
         title: `${after.name || "Your team"} 🛡️`,
         body: `${await nameOf(u)} joined the team.`,
       }, { exclude: [u], key: `teamjoin_${teamId}_${u}` });
     } else {
       await notify([u], {
         type: "team_added",
-        senderUid: by,
+        senderUid: by, teamId,
         title: "You're on a team! 🛡️",
         body: `${by ? await nameOf(by) : "A captain"} added you to ${after.name || "a team"}.`,
       }, { key: `teamadd_${teamId}_${u}` });
@@ -3143,7 +3154,7 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
   if (!before && after.challenge && after.challenge.status === "pending") {
     const from = teamName(after.challenge.fromTeamId), to = teamName(after.challenge.toTeamId);
     await notify(await teamCaptains(after.challenge.toTeamId), {
-      type: "vs_challenge", senderUid: after.organizerId,
+      type: "vs_challenge", senderUid: after.organizerId, matchId,
       title: `🆚 ${from} challenged ${to}`,
       body: `${vsWhen(after)} at ${after.location || "TBD"} · ${after.format || ""}. Open Teams to accept or decline.`,
     }, { exclude: [after.organizerId], key: `vschal_${matchId}` });
@@ -3151,7 +3162,7 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
   // a2) "Suggest another time": the team that now has to answer
   if (before && before.challenge && after.challenge && after.challenge.status === "pending" && (+after.challenge.counter || 0) > (+before.challenge.counter || 0)) {
     await notify(await teamCaptains(after.challenge.toTeamId), {
-      type: "vs_challenge", senderUid: by,
+      type: "vs_challenge", senderUid: by, matchId,
       title: `🕒 ${teamName(after.challenge.fromTeamId)} suggested another time`,
       body: `${vsWhen(after)} at ${after.location || "TBD"}${after.message ? ` · "${clip(after.message, 80)}"` : ""}. Open Teams to accept or decline.`,
     }, { exclude: [by], key: `vscounter_${matchId}_${after.challenge.counter}` });
@@ -3160,7 +3171,7 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
   if (before && before.challenge && after.challenge && before.challenge.status === "pending" && after.challenge.status !== "pending") {
     const yes = after.challenge.status === "accepted";
     await notify(uniq([after.organizerId, ...(await teamCaptains(after.challenge.fromTeamId))]), {
-      type: "vs_challenge_answer", senderUid: by,
+      type: "vs_challenge_answer", senderUid: by, matchId,
       title: yes ? "Challenge accepted! 🆚" : "Challenge declined",
       body: `${teamName(after.challenge.toTeamId)} ${yes ? "accepted" : "declined"} your challenge for ${vsWhen(after)}.`,
     }, { exclude: [by], key: `vsans_${matchId}` });
@@ -3183,7 +3194,7 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
     const over = after.status !== "open" || taken >= (+after.teamsCount || 2);
     if (over) {
       await notify(sqPeople, {
-        type: "vs_squad_off", senderUid: by,
+        type: "vs_squad_off", senderUid: by, matchId,
         title: "The free-agent squad is off",
         body: `${after.status === "cancelled" ? "The match was cancelled" : "Teams took all the spots"} in ${vsTitle(after)} (${vsWhen(after)}), so the squad didn't happen. Nobody pays.`,
       }, { key: `squadoff_${matchId}_${sqPeople.length}_${Date.now() - (Date.now() % 60000)}` });
@@ -3252,7 +3263,7 @@ exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (ev
   const was = new Set(arr(before.teams).map((t) => t.teamId));
   for (const t of arr(after.teams).filter((x) => !was.has(x.teamId))) {
     await notify([after.organizerId], {
-      type: "vs_team_joined", senderUid: by,
+      type: "vs_team_joined", senderUid: by, matchId,
       title: `${t.name} joined your VS Match 🆚`, body: `${vsTitle(after)} · ${vsWhen(after)}`,
     }, { exclude: [by], key: `vsjoin_${matchId}_${t.teamId}` });
   }
