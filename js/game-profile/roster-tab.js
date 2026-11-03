@@ -83,6 +83,22 @@ export function renderRosterTab(event) {
         return `<div class="ml-12 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold">${bits.join('')}</div>`;
     };
 
+    // Right side of each row: the player's position group (GK / DEF / MID / FWD) for everyone. Payments stay in the Admin tab.
+    const POS_GROUP = { GK: 'GK', LB: 'DEF', CB: 'DEF', RB: 'DEF', LWB: 'DEF', RWB: 'DEF', DM: 'MID', CM: 'MID', AM: 'MID', LM: 'MID', RM: 'MID', CF: 'FWD', ST: 'FWD', LW: 'FWD', RW: 'FWD' };
+    const posGroupOf = (att) => {
+        const uid = String(att.uid || '');
+        const d = uid ? [...(window.directoryList || []), ...(window.cachedDirectoryList || [])].find(u => String(u.uid || u.id) === uid) : null;
+        const spot = String((d && d.positionSpot) || att.positionSpot || '').toUpperCase();
+        if (POS_GROUP[spot]) return POS_GROUP[spot];
+        const p = String((d && d.position) || att.position || '').toLowerCase();
+        if (/keeper|^gk/.test(p)) return 'GK';
+        if (/def|back/.test(p)) return 'DEF';
+        if (/mid/.test(p)) return 'MID';
+        if (/forw|strik|wing|att|^st|^cf/.test(p)) return 'FWD';
+        return '';
+    };
+    const posBadge = (pos) => pos ? `<span class="text-[10px] font-black px-2.5 py-1 rounded-full border bg-emerald-500/15 text-[#00F296] border-emerald-500/40">${pos}</span>` : '';
+
     const renderAttendeeCard = (att) => {
         const isPaid = att.paid === 'Paid' || att.paid === 'Credit' || att.creditPaidCents > 0;
         const safeAvatar = resolveAvatar(att);
@@ -93,7 +109,7 @@ export function renderRosterTab(event) {
         let guestsHtml = '';
         if (att.guests && att.guests.length > 0) {
             guestsHtml = att.guests.map((g) => `
-                <div class="flex items-center justify-between text-xs bg-black/30 p-2 rounded-xl border border-white/5 ml-8">
+                <div class="flex items-center justify-between text-xs pt-2 border-t border-white/10">
                     <div class="flex items-center gap-2.5">
                         <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-[#00F296] font-black flex items-center justify-center text-[10px] border border-emerald-500/40">
                             ${escapeHtml((g.name || 'G').charAt(0).toUpperCase())}
@@ -103,7 +119,6 @@ export function renderRosterTab(event) {
                             <span class="text-[9px] text-[#00F296] block">guest of ${escapeHtml(rawName)}</span>
                         </div>
                     </div>
-                    <span class="text-[9px] font-bold px-2 py-0.5 rounded-full border ${(g.paid === 'Paid' || g.paid === 'Credit') ? 'bg-emerald-500/20 text-[#00F296] border-emerald-500/40' : 'bg-black/40 text-white/60 border-white/10'}">${(g.paid === 'Paid' || g.paid === 'Credit') ? 'Paid' : escapeHtml(g.paid || 'Unpaid')}</span>
                 </div>
             `).join('');
         }
@@ -113,13 +128,13 @@ export function renderRosterTab(event) {
             : (window.activeRosterSubTab === 1 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40');
         
         const statusLabel = window.activeRosterSubTab === 0 ? (isPaid ? 'Paid' : escapeHtml(att.paid || 'Unpaid')) : (window.activeRosterSubTab === 1 ? 'Waitlist' : 'Declined');
-        const organizerBadge = isOrganizer ? '<span class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : '';
+        const organizerBadge = isOrganizer ? '<span style="font-size:8px" class="text-[8px] bg-[#00F296]/20 text-[#00F296] px-2 py-0.5 rounded font-black border border-[#00F296]/40">Organizer</span>' : '';
         const attendanceBadge = window.activeRosterSubTab === 0 && att.attendance === 'late' ? '<span class="text-[8px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded font-black border border-amber-400/40">Late</span>'
             : window.activeRosterSubTab === 0 && att.attendance === 'noshow' ? '<span class="text-[8px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-black border border-red-500/40">No-show</span>'
             : window.activeRosterSubTab === 2 && att.removedByAdmin ? '<span class="text-[8px] bg-white/10 text-white/60 px-2 py-0.5 rounded font-black border border-white/20">Removed</span>' : '';
         const guestsWaitOnly = window.activeRosterSubTab === 1 && (att.guestsOnly === true || confirmedList.some(a => String(a.uid) === String(att.uid)));
         // Waitlist: a player who is already playing and only has guests waiting shows just the guests.
-        if (guestsWaitOnly) return `<div class="space-y-2">${guestsHtml.replace(/ ml-8/g, '')}</div>`;
+        if (guestsWaitOnly) return `<div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">${guestsHtml.replace('pt-2 border-t border-white/10', '')}</div>`;
         const plusOnesBadge = att.guests && att.guests.length > 0 ? `<span class="text-[9px] text-[#00F296] font-bold mt-0.5 block">+${att.guests.length} Plus One(s)</span>` : '';
 
         return `
@@ -137,9 +152,7 @@ export function renderRosterTab(event) {
                             ${plusOnesBadge}
                         </div>
                     </div>
-                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full border ${statusBadgeClass}">
-                        ${statusLabel}
-                    </span>
+                    ${posBadge(posGroupOf(att))}
                 </div>
                 ${waitInfoHtml(att)}
                 ${guestsHtml}
@@ -213,17 +226,23 @@ export function renderRosterTab(event) {
 window.resolvePlayerAvatar = function(person) {
     const initials = () => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person?.name || person?.firstName || 'Player')}`;
     if (!person) return initials();
-    const uid = person.uid ? String(person.uid) : '';
-    const isGenerated = (u) => typeof u === 'string' && u.includes('api.dicebear.com');
-    const usable = (u) => typeof u === 'string' && u.trim() !== '';
+    const uid = String(person.uid || person.userId || '');
+    const isGenerated = (u) => typeof u === 'string' && (u.includes('api.dicebear.com') || u.includes('person-circle.svg'));
+    const usable = (u) => typeof u === 'string' && u.trim() !== '' && !isGenerated(u);
 
-    if (uid && window.currentUser && uid === String(window.currentUser.uid) && usable(window.userProfile?.avatar)) {
-        return window.userProfile.avatar;
+    if (uid && window.currentUser && uid === String(window.currentUser.uid)) {
+        const mine = window.userProfile?.avatar || window.userProfile?.photoURL || window.currentUser.photoURL;
+        if (usable(mine)) return mine;
     }
-    if (uid && Array.isArray(window.directoryList)) {
-        const hit = window.directoryList.find(u => String(u.uid) === uid);
-        if (hit && usable(hit.avatar)) return hit.avatar;
-        if (hit && usable(hit.photoURL)) return hit.photoURL;
+    if (uid) {
+        // Both player lists (the full one and the light "people" copy), whichever is loaded.
+        for (const list of [window.directoryList, window.cachedDirectoryList]) {
+            if (!Array.isArray(list)) continue;
+            const hit = list.find(u => String(u.uid || u.id) === uid);
+            if (hit && usable(hit.avatar)) return hit.avatar;
+            if (hit && usable(hit.photoURL)) return hit.photoURL;
+            if (hit && usable(hit.profilePicture)) return hit.profilePicture;
+        }
     }
     const own = person.avatar || person.photoURL || person.profilePicture;
     if (usable(own) && !isGenerated(own)) return own;
@@ -242,7 +261,7 @@ window.switchRosterSubTab = function(subIndex) {
 window.openPlayerProfileModal = function(uid, name, avatar) {
     if (!uid || String(uid).startsWith('manual_')) return;
     const me = window.currentUser?.uid;
-    const photo = avatar && avatar.trim() !== '' ? avatar : window.resolvePlayerAvatar({ uid, name });
+    const photo = window.resolvePlayerAvatar({ uid, name, avatar });
     window._popupPerson = { uid, name, avatar: photo };
     const eventId = window.activeModalEventId;
     const ev = (window.eventsList || []).find(e => String(e.id) === String(eventId)) || {};

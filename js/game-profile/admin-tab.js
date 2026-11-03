@@ -214,53 +214,24 @@ export function renderAdminTab(event) {
             `;
         }).join('');
 
-    const pillsNavHtml = `
-        <div class="space-y-2 bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-3 shadow-xl">
-            <span class="text-[9px] font-black text-white/50 uppercase tracking-wider block px-1">MANAGE</span>
-            <div class="grid grid-cols-3 gap-2 bg-black/50 p-1.5 rounded-xl border border-white/10">
-                <button onclick="switchGameProfileTab('manage-event')" class="py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition text-center truncate ${currentTab === 'manage-event' ? 'bg-[#00F296] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'text-white/70 hover:text-white'}">
-                    Event
-                </button>
-                <button onclick="switchGameProfileTab('manage-players')" class="py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition text-center truncate ${currentTab === 'manage-players' ? 'bg-[#00F296] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'text-white/70 hover:text-white'}">
-                    Players
-                </button>
-                <button onclick="switchGameProfileTab('manage-matches')" class="py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition text-center truncate ${currentTab === 'manage-matches' ? 'bg-[#00F296] text-slate-950 shadow-[0_0_12px_rgba(0,242,150,0.4)]' : 'text-white/70 hover:text-white'}">
-                    Matches
-                </button>
-            </div>
-        </div>
-    `;
+    // The admin home: the tools as emoji tiles (same look as VS). "Match management" holds Start Match and the matches played.
+    // Tiles that need more room (players, match results, storm watch) open their own page with a Back button.
+    const isSessionEnded = event.isSessionEnded || false;
+    const reqs = Array.isArray(event.joinRequests) ? event.joinRequests : [];
+    const DARKT = 'bg-black/60 hover:bg-black text-white font-bold rounded-xl text-xs px-2 border border-white/15 transition';
+    const tool = (onclick, icon, label, cls = DARKT, badge = '') => `<button onclick="${onclick}" class="${cls} flex flex-col items-center justify-center gap-1 py-3 min-h-[72px]" style="position:relative"><span class="text-lg leading-none">${icon}</span><span class="text-center leading-tight">${label}</span>${badge ? `<span class="rounded-full bg-amber-400 text-slate-950 text-[10px] font-black" style="position:absolute;top:6px;right:6px;min-width:18px;height:18px;padding:0 4px;display:flex;align-items:center;justify-content:center">${badge}</span>` : ''}</button>`;
+    const label = (t) => `<div class="text-[10px] font-black uppercase tracking-wider text-white/55">${t}</div>`;
+    const back = (title) => `<div class="flex items-center gap-2"><button onclick="switchGameProfileTab('manage-event')" class="bg-black/60 border border-white/15 text-white font-bold rounded-xl text-xs px-3 py-2"><i class="fa-solid fa-chevron-left mr-1"></i>Back</button><span class="text-sm font-black text-white">${title}</span></div>`;
+    const stormOnNow = event.gameStatus?.stormWatch === true;
 
     let activeTabContentHtml = '';
 
-    if (currentTab === 'manage-event') {
-        activeTabContentHtml = `
-            <div class="space-y-3">
-                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
-                    <h5 class="text-xs font-black uppercase text-[#00F296]">Event Controls</h5>
-                    <div class="flex flex-wrap gap-2">
-                        <button onclick="openTwoPageGameWizard('${event.id}', 'edit')" class="bg-[#00F296] text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow">Edit Game</button>
-                        <button onclick="openTwoPageGameWizard('${event.id}', 'copy')" class="bg-black/60 text-white font-bold px-4 py-2.5 rounded-xl text-xs border border-white/20">Copy Event</button>
-                        ${event.livestream && event.livestream.status === 'live' ? '' : `<button onclick="openStartLivestream('${event.id}')" class="bg-red-600 text-white font-black px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-white"></span> Go live</button>`}
-                        <button onclick="confirmCancelGame('${event.id}')" class="bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl text-xs border border-red-500/40">Cancel Game</button>
-                    </div>
-                </div>
-                ${adminStatusHtml(event)}
-                <div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2">
-                    <h5 class="text-xs font-black uppercase text-[#00F296]">Need players?</h5>
-                    <p class="text-[11px] text-white/60">Send a push notification about this game to everyone on FutNet (once an hour).</p>
-                    <button onclick="notifyEveryoneAboutGame('${event.id}')" class="w-full bg-amber-400 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs shadow flex items-center justify-center gap-2"><i class="fa-solid fa-bullhorn"></i> Notify everyone</button>
-                </div>
-            </div>
-        `;
-    } else if (currentTab === 'manage-players') {
-        const reqs = Array.isArray(event.joinRequests) ? event.joinRequests : [];
+    if (currentTab === 'manage-players') {
         const reqHtml = reqs.length ? `
             <div class="space-y-2 bg-amber-500/10 border border-amber-400/40 rounded-2xl p-3">
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300"><i class="fa-solid fa-hand mr-1"></i> Join requests (${reqs.length})</div>
                 ${reqs.map(r => {
-                    const dir = window.directoryList?.find(u => String(u.uid) === String(r.uid));
-                    const av = dir?.avatar || safeAvatar(r.avatar) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(r.name || 'Player')}`;
+                    const av = window.resolvePlayerAvatar ? window.resolvePlayerAvatar(r) : (safeAvatar(r.avatar) || '');
                     const uidArg = String(r.uid).replace(/'/g, "\\'");
                     return `<div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl p-2.5">
                         <img src="${escapeHtml(av)}" class="w-8 h-8 rounded-full object-cover">
@@ -272,42 +243,49 @@ export function renderAdminTab(event) {
             </div>` : '';
         activeTabContentHtml = `
             <div class="space-y-4">
+                ${back(`👥 Manage players (${attendees.length})`)}
                 ${reqHtml}
-                <button onclick="openAddPlayersScreen('${event.id}')" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-3 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-user-plus"></i> Add Players
-                </button>
-                <div class="space-y-2.5">
-                    ${attendeesHtml}
-                </div>
+                <div class="space-y-2.5">${attendeesHtml}</div>
                 ${waitlistHtml}
-            </div>
-        `;
+            </div>`;
     } else if (currentTab === 'manage-matches') {
-        const isSessionEnded = event.isSessionEnded || false;
         activeTabContentHtml = `
             <div class="space-y-4">
-                <div class="flex items-center justify-between gap-2">
-                    <button onclick="checkAndOpenStartMatch('${event.id}')" class="flex-1 bg-gradient-to-r from-[#00F296] to-[#00B4AE] hover:opacity-95 text-slate-950 font-black py-2.5 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-play"></i> Start Match
-                    </button>
-                    <button onclick="toggleSessionEnded('${event.id}')" class="px-3 py-2.5 rounded-xl text-xs font-black ${isSessionEnded ? 'bg-black/60 text-white/70 border border-white/15' : 'bg-amber-400 text-slate-950 shadow'}"><i class="fa-solid ${isSessionEnded ? 'fa-rotate-left' : 'fa-flag-checkered'} mr-1"></i>${isSessionEnded ? 'Reopen Event' : 'End Event'}</button>
+                ${back('⏱️ Match management')}
+                ${isSessionEnded
+                    ? `<button onclick="openSessionResults('${event.id}')" class="w-full bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-sm shadow flex items-center justify-center gap-2"><i class="fa-solid fa-trophy"></i> View final results</button>`
+                    : `<button onclick="${liveActive ? `openStartMatchScreen('${event.id}')` : `checkAndOpenStartMatch('${event.id}')`}" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-3 rounded-xl text-sm shadow-md flex items-center justify-center gap-2">${liveActive ? '⏱️ Open live match' : '<i class="fa-solid fa-play"></i> Start Match'}</button>`}
+                <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Matches played</div>
+                <div class="space-y-3">${liveBannerHtml}${matchesListHtml}</div>
+            </div>`;
+    } else if (currentTab === 'manage-storm') {
+        activeTabContentHtml = `<div class="space-y-4">${back('⛈️ Storm watch')}${adminStatusHtml(event) || '<p class="text-xs text-white/55">Storm watch is only for games that haven\'t happened yet.</p>'}</div>`;
+    } else {
+        activeTabContentHtml = `
+            <div class="space-y-3">
+                ${reqs.length ? `<button onclick="switchGameProfileTab('manage-players')" class="w-full bg-amber-500/15 border border-amber-400/50 text-amber-200 font-black rounded-2xl px-4 py-3 text-xs flex items-center gap-2"><i class="fa-solid fa-hand"></i><span class="flex-1 text-left">${reqs.length} join request${reqs.length === 1 ? '' : 's'} waiting</span><span>Review ›</span></button>` : ''}
+                ${liveBannerHtml}
+                ${label('Organizer tools')}
+                <div class="grid grid-cols-3 gap-2">
+                    ${tool(`openAddPlayersScreen('${event.id}')`, '➕', 'Add players')}
+                    ${tool(`switchGameProfileTab('manage-players')`, '👥', 'Manage players', DARKT, reqs.length ? String(reqs.length) : '')}
+                    ${tool(`notifyEveryoneAboutGame('${event.id}')`, '📣', 'Notify everyone')}
+                    ${tool(`switchGameProfileTab('manage-storm')`, '⛈️', 'Storm watch', stormOnNow ? DARKT + ' !border-amber-400/70 !text-amber-200' : DARKT)}
+                    ${tool(`openTwoPageGameWizard('${event.id}', 'edit')`, '✏️', 'Edit')}
+                    ${tool(`openTwoPageGameWizard('${event.id}', 'copy')`, '📋', 'Copy')}
+                    ${event.livestream && event.livestream.status === 'live' ? '' : tool(`openStartLivestream('${event.id}')`, '🔴', 'Go live')}
+                    ${tool(`switchGameProfileTab('manage-matches')`, '⏱️', 'Match management', liveActive ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black rounded-xl text-xs px-2 transition' : DARKT)}
+                    ${tool(`toggleSessionEnded('${event.id}')`, isSessionEnded ? '↩️' : '🏁', isSessionEnded ? 'Reopen event' : 'End event', isSessionEnded ? DARKT : 'bg-amber-400 text-slate-950 font-black rounded-xl text-xs px-2 transition')}
+                    ${tool(`confirmCancelGame('${event.id}')`, '❌', 'Cancel game', DARKT + ' !text-red-400')}
                 </div>
-                ${isSessionEnded ? `<button onclick="openSessionResults('${event.id}')" class="w-full bg-amber-400/15 border border-amber-400/50 text-amber-300 font-black py-2.5 rounded-xl text-xs flex items-center justify-center gap-2"><i class="fa-solid fa-trophy"></i> View final results</button>` : ''}
-                <div class="space-y-3">
-                    ${liveBannerHtml}
-                    ${matchesListHtml}
-                </div>
-            </div>
-        `;
+                <p class="text-[11px] text-white/45">"Need players?" Notify everyone sends this game to everyone on FutNet (once an hour).</p>
+            </div>`;
     }
 
     return `
         <div class="space-y-4">
             ${unpaidBoxHtml(event)}
-            ${pillsNavHtml}
-            <div>
-                ${activeTabContentHtml}
-            </div>
+            <div class="bg-[#040E13]/95 border border-[#00B4AE]/40 rounded-[22px] p-3 shadow-xl">${activeTabContentHtml}</div>
         </div>
     `;
 }

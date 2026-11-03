@@ -1319,7 +1319,7 @@ function leaderboardHtml(c, tab) {
             ${LB_TABS.map(t => `<button onclick="setCommunityLeaderboardTab('${jsArg(c.id)}','${t[0]}')" class="py-2 px-1 rounded-lg text-[10px] font-black leading-tight transition ${t[0] === cur[0] ? 'bg-[#00F296] text-slate-950' : 'text-white/70 hover:text-white'}">${t[1]}</button>`).join('')}
         </div>
         ${rows.length ? `<div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
-            <div class="flex items-center gap-3 p-2.5 text-xs">
+            <div ${r.uid ? `onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(c.id)}')"` : ''} class="flex items-center gap-3 p-2.5 text-xs ${r.uid ? 'cursor-pointer hover:bg-white/5' : ''}">
                 <span class="w-6 text-center font-black text-white/60">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
                 ${avatarImg({ uid: r.uid, name: r.name, avatar: r.avatar }, 'w-8 h-8 rounded-full object-cover')}
                 <span class="flex-1 truncate font-bold text-white">${esc(r.name)}</span>

@@ -533,6 +533,45 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
     }, { exclude: cancelled, key: `left_${eventId}_${cancelled.sort().join("_")}_${Math.floor(Date.now() / 60000)}` });
   }
 
+  // a3) Waitlist news for the player: "you're on the waitlist (#n)" and "an admin moved you in"
+  if (after.isSessionEnded !== true) {
+    const beforeWait = new Map(arr(before.waitingList).map((w) => [uidOf(w), w]));
+    const wl = arr(after.waitingList);
+    const heads = wl.filter((w) => w.guestsOnly !== true);
+    for (const w of wl) {
+      const u = uidOf(w);
+      if (!u || !isRealPlayer(u) || beforeWait.has(u)) continue;
+      if (w.guestsOnly === true) {
+        const names = arr(w.guests).map((x) => x.name).filter(Boolean);
+        await notify([u], {
+          type: "game_waitlist", eventId, communityId: after.communityId || "",
+          title: "Your guest is on the waitlist ⏳",
+          body: `${names.join(", ") || "Your guest"} ${names.length > 1 ? "are" : "is"} on the waitlist for ${title}. We'll tell you the moment a spot opens.`,
+        }, { key: `waitg_${eventId}_${u}_${Math.floor(Date.now() / 60000)}` });
+        continue;
+      }
+      const pos = heads.findIndex((x) => uidOf(x) === u) + 1;
+      await notify([u], {
+        type: "game_waitlist", eventId, communityId: after.communityId || "",
+        title: "You're on the waitlist ⏳",
+        body: `${title} is full, so you're #${pos || heads.length} on the waitlist. We'll tell you the moment a spot opens${w.autoJoin === true ? ", and add you automatically" : ""}.`,
+      }, { key: `wait_${eventId}_${u}_${Math.floor(Date.now() / 60000)}` });
+    }
+    // Moved from the waitlist into the game by an admin (auto-joins and credit games already send their own news)
+    if (!rules.isCreditGame(after)) {
+      for (const a of arr(after.attendees)) {
+        const u = uidOf(a);
+        if (!u || beforeIn.has(u) || !beforeWait.has(u) || a.autoJoined === true || !isRealPlayer(u)) continue;
+        if (!(a.addedByAdmin === true || (a.addedBy && a.addedBy !== u))) continue;
+        await notify([u], {
+          type: "game_added", eventId, communityId: after.communityId || "", senderUid: a.addedBy || organizer,
+          title: "You're in! ⚽",
+          body: `${a.addedByName || "The organizer"} moved you off the waitlist. You're playing in ${title}${after.date ? ` on ${after.date}` : ""}.`,
+        }, { key: `waitin_${eventId}_${u}_${Math.floor(Date.now() / 60000)}` });
+      }
+    }
+  }
+
   // b) Non-members asking to join a community game -> tell the organizer
   const beforeReq = new Set(arr(before.joinRequests).map(uidOf));
   const bosses = await gameBosses(after);
@@ -3076,7 +3115,9 @@ exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event
   if (!after) return;
   const teamId = event.params.teamId;
   // A free-agent squad just filled up: everyone in it hears they're playing (and about their chat).
-  if (!before && after.temp) {
+  // A forming squad's early chat (chatOnly): no "complete" news and no join pings, it's just the chat list.
+  if (after.chatOnly) return;
+  if (after.temp && (!before || before.chatOnly)) {
     let where = "";
     try { const m = (await col("vsMatches").doc(after.forMatchId).get()).data(); if (m) where = ` on ${vsWhen(m)} at ${m.location || "TBD"}`; } catch (e) { /* ignore */ }
     await notify(arr(after.memberUids), {

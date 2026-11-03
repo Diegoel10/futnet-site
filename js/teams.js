@@ -29,7 +29,8 @@ const myName = () => {
     return (p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim() || (me() && me().displayName) || 'Player').trim();
 };
 const myAvatar = () => { const a = (window.userProfile || {}).avatar || ''; return /^https?:/.test(a) && a.length < 400 ? a : ''; };
-const avatarOf = (uid, name) => window.resolvePlayerAvatar ? window.resolvePlayerAvatar({ uid, name }) : '';
+/** The player's current photo (players list first), else what was saved. */
+const avatarOf = (uid, name, saved = '') => window.resolvePlayerAvatar ? window.resolvePlayerAvatar({ uid, name, avatar: saved }) : saved;
 const DEFAULT_AV = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
 
 // ---------------------------------------------------------------- shared rules (same on the phones)
@@ -267,7 +268,7 @@ export function renderTeamsTab() {
             ${mineToInvite.length ? '' : '<p class="text-[11px] text-white/45">Create a team to invite free agents.</p>'}
             <div class="space-y-2">${T.agents.filter(x => x.uid !== myUid() && !(window.isBlocked && window.isBlocked(x.uid))).map(x => `
                 <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-3">
-                    <img src="${esc(x.avatar || avatarOf(x.uid, x.name) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(x.uid)}','${jsq(x.name)}','')" class="w-11 h-11 rounded-full object-cover border border-emerald-500/40 cursor-pointer">
+                    <img src="${esc(avatarOf(x.uid, x.name, x.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(x.uid)}','${jsq(x.name)}','')" class="w-11 h-11 rounded-full object-cover border border-emerald-500/40 cursor-pointer">
                     <div class="flex-1 min-w-0">
                         <div class="text-sm font-black text-white truncate">${esc(x.name || 'Player')}</div>
                         <div class="text-[11px] text-[#00F296] font-bold">${esc((x.positions || []).join(' · ') || 'Any position')}${x.level ? ' · ' + esc(levelLabel(x.level)) : ''}</div>
@@ -765,7 +766,7 @@ function rosterHtml(t, boss) {
 function requestsHtml(t) {
     if (!T.requests.length) return '<p class="text-xs text-white/45 text-center py-6">No requests right now.</p>';
     return `<div class="space-y-2">${T.requests.map(r => `<div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-2.5">
-        <img src="${esc(r.avatar || avatarOf(r.uid, r.name) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover">
+        <img src="${esc(avatarOf(r.uid, r.name, r.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover">
         <div class="flex-1 min-w-0 text-sm font-black truncate">${esc(r.name || 'Player')}</div>
         <button onclick="answerTeamRequest('${jsq(r.uid)}', false)" class="${DARK}">Decline</button>
         <button onclick="answerTeamRequest('${jsq(r.uid)}', true)" class="${BTN}">Add</button></div>`).join('')}</div>`;
@@ -821,7 +822,7 @@ window.teamAddSearch = function (q) {
     const nm = (u) => (window.fullName ? window.fullName(u) : (u.name || `${u.firstName || ''} ${u.lastName || ''}`)).trim() || 'Player';
     const list = (ql ? people.filter(u => `${nm(u)} ${u.nickname || ''}`.toLowerCase().includes(ql)) : people.slice(0, 0)).slice(0, 30);
     box.innerHTML = ql ? (list.map(u => `<button onclick="addAppPlayer('${jsq(u.uid)}','${jsq(nm(u))}')" class="w-full flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white/5 text-left">
-        <img src="${esc(u.avatar || avatarOf(u.uid, nm(u)) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
+        <img src="${esc(avatarOf(u.uid, nm(u), u.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
         <span class="flex-1 min-w-0"><span class="block text-sm font-bold truncate">${esc(nm(u))}</span><span class="block text-[11px] text-white/50 truncate">${esc((window.personSubtitle && window.personSubtitle(u)) || u.position || 'Player')}</span></span>
         <i class="fa-solid fa-plus text-[#00F296]"></i></button>`).join('') || '<p class="text-xs text-white/45 py-3 text-center">Nobody found.</p>')
         : '<p class="text-[11px] text-white/45 py-2">Type a name to search.</p>';

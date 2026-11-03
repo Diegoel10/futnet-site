@@ -260,7 +260,7 @@ window.openPlayerStatsSheet = (uid, name, avatar, communityId = '') => {
         <div class="max-w-md mx-auto p-4 pb-16 space-y-4">
             <div class="flex justify-end"><button onclick="document.getElementById('player-stats-sheet').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="flex flex-col items-center text-center gap-1.5">
-                <img src="${esc(p.avatar)}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-24 h-24 rounded-full object-cover border-4 border-[#00F296] shadow-[0_0_20px_rgba(0,242,150,0.35)]">
+                <img src="${esc(p.avatar)}" onclick="openBigPhoto(this.src, '${esc(String(p.name).replace(/\\/g, '').replace(/'/g, ''))}')" title="See the photo bigger" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="cursor-zoom-in w-24 h-24 rounded-full object-cover border-4 border-[#00F296] shadow-[0_0_20px_rgba(0,242,150,0.35)]">
                 <div class="text-lg font-black">${esc(p.name)}${window.statusEmoji ? window.statusEmoji(uid) : ''}</div>
                 ${(p.nickname || p.position) ? `<div class="text-xs text-white/60">${esc([p.nickname, p.position].filter(Boolean).join(' · '))}</div>` : ''}
             </div>
@@ -429,3 +429,23 @@ window.playerStatsCard = (boxId) => {
 };
 
 window.mountPlayerStats = mountPlayerStats;
+
+/** A player's photo, big (tap a profile photo). Tap anywhere or ✕ to close. */
+window.openBigPhoto = function (src, name) {
+    if (!src || /person-circle\.svg|dicebear/.test(src)) return;   // no real photo: nothing to enlarge
+    document.getElementById('big-photo')?.remove();
+    const m = document.createElement('div');
+    m.id = 'big-photo';
+    m.className = 'fixed inset-0 z-[400] bg-black/95 flex flex-col items-center justify-center gap-3 p-4 cursor-zoom-out';
+    m.onclick = () => m.remove();
+    const img = document.createElement('img');
+    img.src = src; img.alt = name || 'Photo';
+    img.className = 'max-w-full rounded-2xl object-contain shadow-2xl';
+    img.style.maxHeight = '78dvh';
+    const cap = document.createElement('div');
+    cap.className = 'text-white font-black text-base'; cap.textContent = name || '';
+    const x = document.createElement('button');
+    x.className = 'absolute top-4 right-4 w-10 h-10 rounded-full bg-white/15 text-white font-bold'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
+    m.append(img, cap, x);
+    document.body.appendChild(m);
+};

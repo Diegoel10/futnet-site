@@ -12,7 +12,7 @@
 //   vsMatches/{id}/appeals/{autoId}: { teamId, byUid, byName, note, at }
 // The server sends the notifications, drops teams that didn't pay in time, and adds results to the teams' records.
 import { db, appId } from './firebase-config.js';
-import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTransaction, serverTimestamp, query, orderBy, limit }
+import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTransaction, serverTimestamp, query, orderBy, limit, getDocs, increment, arrayUnion }
     from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { teamLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
@@ -126,16 +126,25 @@ let started = '';
 setInterval(() => { const u = myUid(); if (u && started !== u) { started = u; start(); } if (!u && started) { started = ''; if (V.unsub) V.unsub(); V.list = []; } }, 1000);
 
 // ---------------------------------------------------------------- home screen cards
-function slotHtml(t, size = 46, plus = false) {
+function slotHtml(t, size = 46, plus = false, click = false) {
+    if (t && click) return `<button onclick="openVsTeamCard('${jsq(t.teamId)}')" class="flex flex-col items-center gap-1 min-w-0 active:scale-95 transition" style="width:${size + 30}px">${teamLogoHtml(t, size)}<span class="text-[10px] font-black text-white truncate max-w-full underline decoration-white/30 underline-offset-2">${esc(t.name)}</span></button>`;
     if (!t && plus) return `<button onclick="openVsSpot()" class="flex flex-col items-center gap-1" style="width:${size + 30}px"><div class="rounded-2xl border-2 border-dashed border-[#00F296]/70 bg-[#00F296]/10 flex items-center justify-center text-[#00F296]" style="width:${size}px;height:${size}px"><i class="fa-solid fa-plus" style="font-size:${Math.round(size / 3)}px"></i><span class="sr-only">+</span></div><span class="text-[10px] font-black text-[#00F296]">Take this spot</span></button>`;
     if (!t) return `<div class="flex flex-col items-center gap-1" style="width:${size + 30}px"><div class="rounded-2xl border-2 border-dashed border-white/35 flex items-center justify-center text-[9px] font-black text-white/50 text-center leading-tight" style="width:${size}px;height:${size}px">Open<br>spot</div><span class="text-[10px] font-bold text-white/40">&nbsp;</span></div>`;
     return `<div class="flex flex-col items-center gap-1 min-w-0" style="width:${size + 30}px">${teamLogoHtml(t, size)}<span class="text-[10px] font-black text-white truncate max-w-full">${esc(t.name)}</span></div>`;
 }
 const DEFAULT_AV = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
-const organizerAvatar = (m) => {
-    const d = (window.directoryList || window.cachedDirectoryList || []).find(u => String(u.uid) === String(m.organizerId));
-    return (d && (d.avatar || d.photoURL)) || (m.organizerId === myUid() ? myAvatar() : '') || m.organizerAvatar || DEFAULT_AV;
-};
+/** The organizer's current photo: my own profile photo, the players list, what was saved, else initials. */
+/** Anyone's current photo: my own profile, then the players list, then the game rosters, then what was saved. */
+function avatarOf(uid, saved, name) {
+    const real = (a) => !!a && !String(a).includes('person-circle.svg') && !String(a).includes('api.dicebear.com');
+    if (uid && uid === myUid()) { const p = window.userProfile || {}; const a = p.avatar || p.photoURL || (window.currentUser && window.currentUser.photoURL); if (real(a)) return a; }
+    const d = uid ? [...(window.directoryList || []), ...(window.cachedDirectoryList || [])].find(u => String(u.uid || u.id) === String(uid)) : null;
+    if (d && real(d.avatar || d.photoURL)) return d.avatar || d.photoURL;
+    if (real(saved)) return saved;
+    const r = window.resolvePlayerAvatar ? window.resolvePlayerAvatar({ uid, name, avatar: saved }) : '';
+    return r || DEFAULT_AV;
+}
+const organizerAvatar = (m) => avatarOf(m.organizerId, m.organizerAvatar, m.organizerName);
 const ymdToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 /** The match's name: its title, else "Team A vs Team B". */
 export function vsTitleOf(m) {
@@ -179,6 +188,7 @@ export function vsCardHtml(m) {
                 <div class="flex items-center gap-1 bg-black/50 px-2.5 py-1 rounded-xl border ${price ? 'border-[#00F296]/80' : 'border-[#00B4AE]/80'} text-white text-[10px] font-bold"><i class="fa-solid ${price ? 'fa-circle-dollar-to-slot' : 'fa-tag'} text-[10px]"></i><span>${price ? money(price) + ' per team' : 'Free'}</span></div>
             </div>
             <h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${esc(vsTitleOf(m))}</h3>
+            ${vsStormOn(m) ? `<div class="flex justify-center gap-1.5"><span class="px-2 py-0.5 rounded-full border text-[10px] font-black bg-amber-500/15 text-amber-200 border-amber-400/60">⛈️ Storm watch</span><span class="px-2 py-0.5 rounded-full border text-[10px] font-black ${VS_STORM[vsStormState(m)].cls}">${VS_STORM[vsStormState(m)].emoji} ${VS_STORM[vsStormState(m)].label}</span></div>` : ''}
             <div class="flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0])}${middle}${slotHtml(slots[1])}` : slots.map(s => slotHtml(s, 36)).join(vsBadge(24))}</div>
             ${isLiveNow && n > 2 ? (() => { const [a, b] = livePair(m); return a && b ? `<div class="text-center text-[11px] font-black"><span class="text-red-400">● LIVE</span> ${esc(a.name)} ${liveGoals(m, a.teamId)} - ${liveGoals(m, b.teamId)} ${esc(b.name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span></div>` : ''; })() : ''}
             <div class="space-y-1.5 text-[11px] font-medium text-white/90">
@@ -571,8 +581,47 @@ window.openVsMatch = function (id, initial) {
     V.open = V.list.find(m => m.id === id) || (initial ? { ...initial, id } : { id, teams: [] });
     if (!V.list.find(m => m.id === id)) getDoc(D('vsMatches', id)).then(s => { if (s.exists() && V.open && V.open.id === id) { V.open = { ...s.data(), id }; drawPage(); } }).catch(() => {});
     V.tab = (initial && initial.tab) || 'info';
+    recordVsView(id);
     watchComments(id);
     drawPage();
+};
+// ---------------------------------------------------------------- 👀 who has seen the match (organizer's Analytics)
+//   vsMatches/{id}/views/{uid} = { uid, name, avatar, count (+1 per visit), days: ['YYYY-MM-DD'], firstAt, lastAt }
+//   One visit per person per 30 minutes. The organizer's own visits aren't counted.
+function recordVsView(id) {
+    const u = window.currentUser; if (!u || !u.uid || !id) return;
+    const m = V.list.find(x => x.id === id) || V.open;
+    if (m && m.organizerId === u.uid) return;
+    try { const k = 'futnet_vsview_' + id; const last = +localStorage.getItem(k) || 0; if (Date.now() - last < 30 * 60000) return; localStorage.setItem(k, String(Date.now())); } catch (e) { /* ignore */ }
+    setDoc(D('vsMatches', id, 'views', u.uid), { uid: u.uid, name: myName(), avatar: myAvatar(), count: increment(1), days: arrayUnion(ymdToday()), lastAt: serverTimestamp() }, { merge: true }).catch(() => {});
+}
+window.openVsViews = async function () {
+    const m = V.open; if (!m) return;
+    sheet('vs-views', '📈 Analytics: who has seen it', '<p class="text-xs text-white/50 text-center py-6"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading…</p>');
+    let list = [];
+    try { list = (await getDocs(collection(db, 'artifacts', appId, 'vsMatches', m.id, 'views'))).docs.map(d => d.data()); } catch (e) { /* ignore */ }
+    const ms = (v) => (v && v.toMillis ? v.toMillis() : (+v || 0));
+    list.sort((a, b) => ms(b.lastAt) - ms(a.lastAt));
+    const inIds = new Set();
+    (m.teams || []).forEach(t => { const full = teamFull(t.teamId); ((full && full.memberUids) || []).forEach(u => inIds.add(String(u))); });
+    squadsOf(m).forEach(q => q.members.forEach(p => inIds.add(String(p.uid))));
+    const total = list.reduce((s, v) => s + (+v.count || 0), 0);
+    const notIn = list.filter(v => !inIds.has(String(v.uid))).length;
+    const html = `<div class="space-y-3">
+        <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-black/40 border border-white/10 rounded-xl p-2"><div class="text-xl font-black text-[#00F296]">${list.length}</div><div class="text-[10px] text-white/55">people</div></div>
+            <div class="bg-black/40 border border-white/10 rounded-xl p-2"><div class="text-xl font-black">${total}</div><div class="text-[10px] text-white/55">visits</div></div>
+            <div class="bg-black/40 border border-white/10 rounded-xl p-2"><div class="text-xl font-black text-amber-300">${notIn}</div><div class="text-[10px] text-white/55">looked, not in</div></div>
+        </div>
+        <p class="text-[10px] text-white/45">Counts everyone who opened this match (once per 30 minutes). Your own visits don't count.</p>
+        <div class="space-y-1.5">${list.map(v => `<button onclick="document.getElementById('vs-views')?.remove(); openPlayerStatsSheet && openPlayerStatsSheet('${jsq(v.uid)}','${jsq(personName(v.uid, v.name))}','')" class="w-full flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-left">
+            <img src="${esc(personAvatar(v.uid, v.avatar, personName(v.uid, v.name)))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover">
+            <span class="flex-1 min-w-0"><span class="block text-xs font-black truncate">${esc(personName(v.uid, v.name))} ${inIds.has(String(v.uid)) ? '<span class="text-[9px] text-[#00F296]">IN THE MATCH</span>' : ''}</span>
+                <span class="block text-[10px] text-white/50">${ms(v.lastAt) ? 'Last seen ' + esc(new Date(ms(v.lastAt)).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : ''}</span></span>
+            <span class="text-xs font-black text-white/80">${+v.count || 1}×</span></button>`).join('') || '<p class="text-xs text-white/50 text-center py-4">Nobody has opened it yet. Share the match to get it seen!</p>'}</div>
+    </div>`;
+    const el = document.getElementById('vs-views'); if (!el) return;
+    sheet('vs-views', '📈 Analytics: who has seen it', html);
 };
 window.closeVsMatch = function () { stopComments(); V.open = null; document.getElementById('vs-page')?.remove(); };
 window.vsTab = (k) => { V.tab = k; drawPage(); if (k === 'comments') setTimeout(() => { const b = document.getElementById('vs-comments-end'); b && b.scrollIntoView({ block: 'end' }); }, 0); };
@@ -603,6 +652,8 @@ function drawPage() {
     const conf = confirmedTeams(m);
     const clash = conf.length >= 2 && colorsClash((conf[0].colors || {}).primary, (conf[1].colors || {}).primary);
     if (V.tab === 'admin' && !boss) V.tab = 'info';
+    const myTeamIn = myTeamEntry(m), mySq = mySquad(m);
+    if (V.tab === 'team' && !myTeamIn && !mySq) V.tab = 'info';
     const tab = V.tab || 'info';
     const stateChip = (t) => t.state === 'confirmed' ? '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-[#00F296] text-slate-950">CONFIRMED</span>'
         : t.state === 'invited' ? '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-fuchsia-500/30 text-fuchsia-200">INVITED</span>'
@@ -643,6 +694,7 @@ function drawPage() {
     const mapsUrl = m.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(m.location) : '';
     const tabBtn = (k, label) => `<button onclick="vsTab('${k}')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === k ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${label}</button>`;
     const info = `<div class="space-y-3">
+            ${vsStormCardHtml(m)}
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs space-y-2">
                 <div class="flex items-center gap-2"><i class="fa-solid fa-calendar text-[#00F296] w-4"></i>${esc((window.fmtGameDate || prettyDate)(m.date))}</div>
                 <div class="flex items-center gap-2"><i class="fa-solid fa-clock text-[#00F296] w-4"></i>${esc(prettyTime(m.time))}</div>
@@ -666,22 +718,25 @@ function drawPage() {
         </div>`;
     const teamsTab = `<div class="space-y-2">${shown.map(teamRow).join('') || '<p class="text-xs text-white/45 text-center py-4">No teams yet.</p>'}
             ${squadsOf(m).map(q => `<div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-300 pt-2">🧩 ${esc(q.name)} forming (${q.members.length}/${perSideOf(m)})</div>${membersHtml(q.members, q.captainUid)}`).join('')}</div>`;
-    const tool = (onclick, icon, label, cls = DARK) => `<button onclick="${onclick}" class="${cls} flex flex-col items-center gap-1 py-3"><span class="text-lg leading-none">${icon}</span><span>${label}</span></button>`;
+    const tool = (onclick, icon, label, cls = DARK) => `<button onclick="${onclick}" class="${cls} !px-2 flex flex-col items-center justify-center gap-1 py-3 min-h-[72px]"><span class="text-lg leading-none">${icon}</span><span class="text-center leading-tight">${label}</span></button>`;
+    const played = m.results || [];
     const admin = `<div class="space-y-3">
             ${m.live ? liveScoreHtml(m) : ''}
-            ${conf.length < 2 && live ? '<p class="text-[11px] text-white/55">Match management (clock and goals) opens once two teams are confirmed.</p>' : ''}
             <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Organizer tools</div>
             <div class="grid grid-cols-3 gap-2">
-                ${live && conf.length >= 2 ? tool('openVsManage()', '⏱️', m.live ? 'Live match' : 'Stopwatch', BTN) : ''}
+                ${live ? tool('openVsManage()', '⏱️', 'Match management', m.live ? BTN + ' !px-2' : DARK) : ''}
                 ${tool('openVsNotify()', '📣', 'Notify players')}
+                ${tool('openVsViews()', '📈', 'Analytics')}
+                ${live ? tool('openVsStorm()', '⛈️', 'Storm watch', vsStormOn(m) ? DARK + ' !border-amber-400/70 !text-amber-200' : DARK) : ''}
                 ${live ? tool('editVs()', '✏️', 'Edit') : ''}
                 ${tool('copyVs()', '📋', 'Copy')}
                 ${live ? tool('openAddTeamManually()', '➕', 'Add team') : ''}
                 ${m.livestream && m.livestream.status === 'live' ? tool("vsTab('live')", '🔴', 'Watch live') : live ? tool('openVsLivestream()', '🔴', 'Go live') : ''}
-                ${live ? tool('openVsScore()', '🏁', 'Final score') : ''}
+                ${live ? tool('openVsScore()', '🏁', 'End match', 'bg-amber-400 text-slate-950 font-black rounded-xl text-xs px-2 transition') : ''}
                 ${live ? tool('cancelVs()', '❌', 'Cancel', DARK + ' text-red-400') : ''}
                 ${m.status === 'final' ? tool('openVsScore()', '✏️', 'Fix score') + tool('rematchVs()', '🔁', 'Rematch', BTN) : ''}
             </div>
+            ${live && conf.length < 2 ? `<p class="text-[11px] text-amber-200">Match management opens once ${2 - conf.length === 2 ? 'two teams are' : 'one more team is'} <b>confirmed</b>: a team is confirmed when it joins a free match, or when you mark its payment ("Got a payment").</p>` : ''}
             <p class="text-[11px] text-white/55">Mark payments in the Teams tab ("Got a payment").</p>
             <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Money</div>
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs space-y-1">${shown.filter(t => t.state !== 'invited').map(t => `<div class="flex justify-between gap-2"><span class="truncate">${esc(t.name)}</span><span class="${price && paidCents(m, t.teamId) >= price ? 'text-[#00F296]' : 'text-white/70'} font-bold">${price ? `${money(paidCents(m, t.teamId))} / ${money(price)}` : 'Free'}</span></div>`).join('') || '<span class="text-white/45">No teams yet.</span>'}
@@ -702,14 +757,14 @@ function drawPage() {
         </div>
         <div class="relative overflow-hidden bg-[#040E13]/95 border-2 border-fuchsia-500/40 rounded-3xl p-4 shadow-2xl">
             <div class="absolute inset-0 pointer-events-none opacity-30" style="background:radial-gradient(circle at 50% 45%, #E8262B 0%, transparent 60%)"></div>
-            <div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72, canTakeSpot)}${scoreMid}${slotHtml(slots[1], 72, canTakeSpot)}` : slots.map(x => slotHtml(x, 46, canTakeSpot)).join(vsBadge(28))}</div>
+            <div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72, canTakeSpot, true)}${scoreMid}${slotHtml(slots[1], 72, canTakeSpot, true)}` : slots.map(x => slotHtml(x, 46, canTakeSpot, true)).join(vsBadge(28))}</div>
             <div class="relative text-center text-[11px] font-black text-white/75 mt-2">${statusLine}</div>
         </div>
         <div class="bg-black/40 border-2 border-fuchsia-500/30 p-1.5 rounded-2xl flex items-center gap-1 overflow-x-auto shadow-md">
-            ${boss ? tabBtn('admin', '<i class="fa-solid fa-gear mr-1"></i> Admin') : ''}${m.livestream && lsKey(m.livestream) ? `<button onclick="vsTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white' : 'text-red-300'}">${m.livestream.status === 'live' ? '🔴 Live' : '▶ Replay'}</button>` : ''}${tabBtn('info', 'Match Info')}${tabBtn('teams', `Teams (${spotsTaken(m)}/${n})`)}${tabBtn('stats', 'Stats')}${tabBtn('comments', `Comments (${V.comments.length})`)}
+            ${boss ? tabBtn('admin', '<i class="fa-solid fa-gear mr-1"></i> Admin') : ''}${m.livestream && lsKey(m.livestream) ? `<button onclick="vsTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white' : 'text-red-300'}">${m.livestream.status === 'live' ? '🔴 Live' : '▶ Replay'}</button>` : ''}${myTeamIn || mySq ? tabBtn('team', myTeamIn ? '🛡️ My Team' : '🧩 My Squad') : ''}${tabBtn('info', 'Match Info')}${tabBtn('teams', `Teams (${spotsTaken(m)}/${n})`)}${tabBtn('stats', 'Stats')}${tabBtn('comments', `Comments (${V.comments.length})`)}
         </div>
         <div class="bg-[#040E13]/95 border-2 border-fuchsia-500/30 rounded-3xl p-4 shadow-2xl">
-            ${tab === 'admin' ? admin : tab === 'live' ? liveTabHtml(m, boss) : tab === 'stats' ? statsHtml(m) : tab === 'teams' ? teamsTab : tab === 'comments' ? commentsHtml(m) : info}
+            ${tab === 'admin' ? admin : tab === 'team' ? myTeamTabHtml(m) : tab === 'live' ? liveTabHtml(m, boss) : tab === 'stats' ? statsHtml(m) : tab === 'teams' ? teamsTab : tab === 'comments' ? commentsHtml(m) : info}
         </div>
         ${!boss && m.status === 'final' && myEntry ? `<button onclick="appealVs()" class="${DARK} w-full">Appeal the score</button>` : ''}
     </div>`;
@@ -743,27 +798,18 @@ const myRequestSquad = (m) => squadsOf(m).find(q => q.requests.some(p => p.uid =
 /** A player's current name and photo (from the live players list; what was saved is the fallback). */
 function personName(uid, saved) {
     const d = [...(window.cachedDirectoryList || []), ...(window.directoryList || [])].find(u => String(u.uid) === String(uid));
-    const n = d && window.fullName ? window.fullName(d) : (d && d.name);
+    let n = (d && window.fullName && window.fullName(d)) || (d && d.name) || '';
+    if (n === 'Player') n = (d && d.name) || '';
     return n || (uid === myUid() ? myName() : '') || saved || 'Player';
 }
-function personAvatar(uid, saved, name) {
-    if (uid === myUid()) { const p = window.userProfile || {}; if (p.avatar) return p.avatar; }
-    const r = window.resolvePlayerAvatar ? window.resolvePlayerAvatar({ uid, name, avatar: saved }) : '';
-    return r || saved || DEFAULT_AV;
-}
+function personAvatar(uid, saved, name) { return avatarOf(uid, saved, name); }
 function membersHtml(list, captainUid) {
     return `<div class="flex flex-wrap gap-1.5">${list.map(p => { const nm = personName(p.uid, p.name); return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold">
         <img src="${esc(personAvatar(p.uid, p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${esc(nm)}${p.uid === captainUid ? ' <span class="text-[9px] font-black text-amber-300">CAPTAIN</span>' : ''}${p.position ? ` <span class="text-white/50">${esc(p.position)}</span>` : ''}</span>`; }).join('')}</div>`;
 }
 const squadOpen = (m) => m.squadsOn !== false && m.status === 'open' && !isFull(m) && !(m.date && m.date < ymdToday());
-function squadBoxHtml(m) {
-    const list = squadsOf(m);
-    const mine = mySquad(m);
-    if (!(m.squadsOn !== false && m.status === 'open') || (isFull(m) && !mine)) return '';
-    const need = perSideOf(m);
-    const onTeam = myStake(m) === 'team';
-    const waitingIn = myRequestSquad(m);
-    const rows = list.map(q => {
+function squadRowHtml(m, q) {
+    const need = perSideOf(m), mine = mySquad(m), onTeam = myStake(m) === 'team';
         const pct = Math.min(100, Math.round(q.members.length * 100 / need));
         const inThis = q.members.some(p => p.uid === myUid());
         const iCap = q.captainUid === myUid();
@@ -790,9 +836,18 @@ function squadBoxHtml(m) {
                     <button onclick="answerSquadRequest('${jsq(q.id)}','${jsq(p.uid)}', true)" class="${BTN} !px-2.5 !py-1.5">Yes</button></div>`; }).join('')}</div>` : ''}
             ${iCap ? `<label class="flex items-center justify-between gap-2 text-[11px] text-white/75 cursor-pointer"><span>Players must ask me first</span>
                 <input type="checkbox" ${q.joinMode === 'ask' ? 'checked' : ''} onchange="setSquadJoinMode('${jsq(q.id)}', this.checked)" class="w-4 h-4 accent-[#00F296]"></label>` : ''}
+            ${inThis && V.tab !== 'team' ? `<button onclick="vsOpenSquadChat('${jsq(q.id)}')" class="${DARK} w-full"><i class="fa-solid fa-comments mr-1"></i>Squad chat${q.chatTeamId ? '' : ' (starts it)'}</button>` : ''}
             ${action}
         </div>`;
-    }).join('');
+}
+function squadBoxHtml(m) {
+    const list = squadsOf(m);
+    const mine = mySquad(m);
+    if (!(m.squadsOn !== false && m.status === 'open') || (isFull(m) && !mine)) return '';
+    const need = perSideOf(m);
+    const onTeam = myStake(m) === 'team';
+    const waitingIn = myRequestSquad(m);
+    const rows = list.map(q => squadRowHtml(m, q)).join('');
     return `<div class="bg-fuchsia-500/10 border border-fuchsia-400/40 rounded-2xl p-3 space-y-2">
         <div class="text-sm font-black">🧩 No team? Play as a free agent</div>
         <p class="text-[11px] text-white/75 leading-relaxed">Start a squad (you're its captain) or join one. A squad only plays if it gets <b>${need} players before teams take the open spots</b>. When it's full, it becomes a temporary team for this match with its own group chat. The captain handles ${(+m.priceCents || 0) > 0 ? `the ${money(m.priceCents)} team fee` : 'the details'}. If teams fill the spots first, the squad is off and nobody pays.</p>
@@ -801,6 +856,104 @@ function squadBoxHtml(m) {
         ${myUid() && !onTeam && squadOpen(m) ? `<button onclick="openStartSquad()" class="${DARK} w-full"><i class="fa-solid fa-plus mr-1"></i>Start a new squad</button>` : ''}
     </div>`;
 }
+// ---------------------------------------------------------------- 🛡️ My Team tab (the team I'm on, for THIS match)
+/** The match entry of a team I'm a member of (captain or player), temp squads included. */
+function myTeamEntry(m) {
+    const ids = new Set((TS().mine || []).map(t => t.id));
+    return (m.teams || []).find(t => ids.has(t.teamId) || ((teamFull(t.teamId) || {}).memberUids || []).includes(myUid())) || null;
+}
+const comingOf = (entry, p) => (entry.roster || []).includes(p.id) ? 'in' : (entry.out || []).includes(p.id) ? 'out' : '';
+function myTeamTabHtml(m) {
+    const entry = myTeamEntry(m);
+    const live = m.status === 'open' || m.status === 'challenge';
+    const need = perSideOf(m), price = +m.priceCents || 0;
+    const H = (t) => `<div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">${t}</div>`;
+    if (!entry) {
+        const q = mySquad(m); if (!q) return '';
+        const left = Math.max(0, need - q.members.length);
+        return `<div class="space-y-3">
+            <div class="bg-fuchsia-500/10 border border-fuchsia-400/40 rounded-2xl p-3 space-y-1">
+                <div class="text-sm font-black">🧩 ${esc(q.name)} <span class="text-[9px] font-black rounded-full px-1.5 py-0.5 bg-fuchsia-500/30 text-fuchsia-100 align-middle">TEMP SQUAD</span></div>
+                <p class="text-[11px] text-white/75">${left ? `You need <b>${left} more player${left === 1 ? '' : 's'}</b> before teams take the open spots.` : 'Your squad is full!'} Tap "Squad chat" to talk with your squad now. When it's full it becomes a temporary team for this match (same chat).</p>
+            </div>
+            <button onclick="vsOpenSquadChat('${jsq(q.id)}')" class="${BTN} w-full"><i class="fa-solid fa-comments mr-1"></i>Squad chat</button>
+            ${squadRowHtml(m, q)}
+            <button onclick="shareVs()" class="${DARK} w-full"><i class="fa-solid fa-share-nodes mr-1"></i>Invite friends to the squad</button>
+        </div>`;
+    }
+    const team = teamFull(entry.teamId) || { members: [] };
+    const iCap = canManage(team);
+    const locked = rosterLocked(m);
+    const canEdit = live && !locked && entry.state !== 'invited';
+    const members = team.members || [];
+    const meM = members.find(p => p.uid === myUid());
+    const coming = members.filter(p => comingOf(entry, p) === 'in').length;
+    const paid = paidCents(m, entry.teamId);
+    const chip = (st) => st === 'in' ? '<span class="text-[9px] font-black rounded-full px-2 py-0.5 bg-[#00F296] text-slate-950">COMING</span>'
+        : st === 'out' ? '<span class="text-[9px] font-black rounded-full px-2 py-0.5 bg-red-500/25 text-red-300">OUT</span>'
+        : '<span class="text-[9px] font-black rounded-full px-2 py-0.5 bg-white/10 text-white/55">NO ANSWER</span>';
+    const mySt = meM ? comingOf(entry, meM) : '';
+    return `<div class="space-y-3">
+        <div class="bg-black/40 border border-white/10 rounded-2xl p-3 flex items-center gap-3">
+            <button onclick="vsOpenTeam('${jsq(entry.teamId)}')" class="shrink-0">${teamLogoHtml(entry, 46)}</button>
+            <div class="flex-1 min-w-0"><div class="text-sm font-black truncate">${esc(entry.name)}${team.temp ? ' <span class="text-[9px] font-black rounded-full px-1.5 py-0.5 bg-fuchsia-500/30 text-fuchsia-100 align-middle">TEMP SQUAD</span>' : ''}</div>
+                <div class="text-[11px] text-white/60">${iCap ? "You're the captain" : "You're a player"} · ${entry.state === 'confirmed' ? '✅ Confirmed for this match' : entry.state === 'invited' ? 'Invited (the captain answers in Teams)' : '⏳ Not confirmed yet'}</div></div>
+        </div>
+        ${team.temp ? '<p class="text-[11px] text-fuchsia-200">This is a temporary team, just for this match.</p>' : ''}
+        ${meM && live ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">${H('Are you coming?')}
+            <div class="flex gap-2">
+                <button onclick="vsSetComing('${jsq(entry.teamId)}','${jsq(meM.id)}', true)" ${canEdit ? '' : 'disabled'} class="flex-1 py-2.5 rounded-xl text-xs font-black ${mySt === 'in' ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white'}">✅ I'm in</button>
+                <button onclick="vsSetComing('${jsq(entry.teamId)}','${jsq(meM.id)}', false)" ${canEdit ? '' : 'disabled'} class="flex-1 py-2.5 rounded-xl text-xs font-black ${mySt === 'out' ? 'bg-red-500 text-white' : 'bg-white/10 text-white'}">❌ Can't make it</button>
+            </div>${locked ? '<p class="text-[11px] text-amber-200">🔒 The roster is locked now (close to kickoff).</p>' : ''}</div>` : ''}
+        <div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center justify-between">${H("Who's coming")}<span class="text-xs font-black ${coming >= need ? 'text-[#00F296]' : 'text-amber-300'}">${coming}/${need}</span></div>
+            ${coming < need ? `<p class="text-[11px] text-amber-200">You need ${need - coming} more to play ${esc(m.format || '')}.</p>` : ''}
+            ${members.map(p => { const st = comingOf(entry, p); const nm = p.uid ? personName(p.uid, p.name) : p.name;
+                return `<div class="flex items-center gap-2 bg-white/5 rounded-xl px-2 py-1.5">
+                <img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
+                <span class="w-6 text-center text-xs font-black text-[#00F296]">${esc(p.number || '')}</span>
+                <span class="flex-1 min-w-0 text-xs font-bold truncate">${esc(nm)}${p.role === 'captain' ? ' <span class="text-[9px] text-amber-300">(C)</span>' : ''}${p.position ? ` <span class="text-white/45">${esc(p.position)}</span>` : ''}</span>
+                ${iCap && canEdit ? `<button onclick="vsSetComing('${jsq(entry.teamId)}','${jsq(p.id)}', ${st !== 'in'})" class="text-[10px] font-black rounded-lg px-2 py-1 ${st === 'in' ? 'bg-[#00F296] text-slate-950' : st === 'out' ? 'bg-red-500/25 text-red-300' : 'bg-white/10 text-white/60'}">${st === 'in' ? 'COMING ✓' : st === 'out' ? 'OUT' : 'Mark in'}</button>` : chip(st)}
+            </div>`; }).join('') || '<p class="text-xs text-white/50">No players on the team yet.</p>'}
+            ${iCap && canEdit ? '<p class="text-[10px] text-white/45">Tap a player to switch them between coming and out.</p>' : ''}
+        </div>
+        ${price ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-1">${H('Money')}
+            <div class="flex justify-between text-xs"><span>Team fee</span><b>${money(price)}</b></div>
+            <div class="flex justify-between text-xs"><span>Paid so far</span><b class="${paid >= price ? 'text-[#00F296]' : 'text-amber-300'}">${money(paid)}</b></div>
+            ${coming ? `<div class="flex justify-between text-xs"><span>Split between ${coming} coming</span><b>${money(Math.ceil(price / coming))} each</b></div>` : ''}
+            <p class="text-[10px] text-white/45">${iCap ? 'Pay the organizer. They mark it as paid.' : 'Pay your captain. The captain pays the organizer.'}</p></div>` : ''}
+        <div class="grid grid-cols-2 gap-2">
+            <button onclick="vsSquadChat('${jsq(entry.teamId)}')" class="${BTN}"><i class="fa-solid fa-comments mr-1"></i>Team chat</button>
+            ${iCap && live ? `<button onclick="vsRemindTeam('${jsq(entry.teamId)}')" class="${DARK}">📣 Remind the team</button>` : `<button onclick="vsOpenTeam('${jsq(entry.teamId)}')" class="${DARK}">👥 Team page</button>`}
+            ${iCap && live ? `<button onclick="vsOpenTeam('${jsq(entry.teamId)}')" class="${DARK}">👥 Team page</button>
+            <button onclick="leaveVs('${jsq(entry.teamId)}')" class="${DARK} !text-red-400">Leave match</button>` : ''}
+        </div>
+    </div>`;
+}
+/** Coming (true) or out (false) for this match. Players set themselves; the captain can set anyone. */
+window.vsSetComing = async function (teamId, memberId, yes) {
+    const m = V.open; if (!m) return;
+    try {
+        await changeMatch(m.id, (x) => {
+            if (rosterLocked(x)) throw new Error('LOCKED');
+            const t = x.teams.find(y => y.teamId === teamId); if (!t) return false;
+            t.roster = (t.roster || []).filter(id => id !== memberId); t.out = (t.out || []).filter(id => id !== memberId);
+            (yes ? t.roster : t.out).push(memberId);
+        });
+    } catch (e) { toast(String(e && e.message) === 'LOCKED' ? 'Rosters are locked now.' : "Couldn't save.", 'error'); }
+};
+/** Captain: a message in the team chat (everyone gets the push) asking who's coming. */
+window.vsRemindTeam = async function (teamId) {
+    const m = V.open; if (!m) return;
+    const when = `${(window.fmtGameDate || prettyDate)(m.date)} ${prettyTime(m.time)}`.trim();
+    const text = `⚽ ${vsTitleOf(m)} · ${when}${m.location ? ' · ' + m.location : ''}\nAre you coming? Open the match, go to the "My Team" tab and tap "I'm in" or "Can't make it".`;
+    const id = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    try {
+        await setDoc(doc(collection(db, 'artifacts', appId, 'teams', teamId, 'messages'), id), { id, senderUid: myUid(), sender: myName(), avatar: myAvatar(), text, vsMatchId: m.id, createdAt: serverTimestamp() });
+        toast('Sent to the team chat! 📣');
+    } catch (e) { toast("Couldn't send it.", 'error'); }
+};
+
 const SQUAD_COLORS = [['#7C3AED', '#FFFFFF'], ['#F97316', '#0B141A'], ['#0EA5E9', '#FFFFFF'], ['#FACC15', '#0B141A'], ['#EC4899', '#FFFFFF'], ['#14B8A6', '#0B141A']];
 function meAsMember() {
     const prof = window.userProfile || {};
@@ -830,7 +983,7 @@ async function changeSquads(matchId, fn) {
             const k = (+x.squadCount || 0) + 1;
             const used = new Set((x.teams || []).map(t => String((t.colors || {}).primary || '').toLowerCase()));
             const [primary, secondary] = SQUAD_COLORS.find(c => !used.has(c[0].toLowerCase())) || SQUAD_COLORS[0];
-            const tRef = doc(C('teams'));
+            const tRef = full.chatTeamId ? D('teams', full.chatTeamId) : doc(C('teams'));   // keeps the squad chat that was already started
             const name = full.name && full.name !== 'Free agents' ? full.name : (k > 1 ? `Free Agents FC ${k}` : 'Free Agents FC');
             const team = {
                 name, nameKey: '', short: 'FA', temp: true, forMatchId: matchId, forMatchDate: x.date || '',
@@ -952,7 +1105,51 @@ window.leaveVsSquad = async function (squadId) {
     const q0 = squadsOf(m).find(q => q.id === squadId);
     if (q0 && q0.captainUid === myUid() && q0.members.length > 1 && !confirm('You are the captain. If you leave, the others are asked who takes charge. Leave?')) return;
     try { await changeSquads(m.id, (squads) => squads.map(q => q.id === squadId ? withoutMe(q) : q)); toast('You left the squad.'); }
-    catch (e) { squadErr(e); }
+    catch (e) { squadErr(e); return; }
+    if (q0 && q0.chatTeamId) leaveSquadChat(q0.chatTeamId);
+};
+/** Out of a forming squad's chat too (only while it's still just a chat). */
+async function leaveSquadChat(chatId) {
+    try {
+        await runTransaction(db, async (tx) => {
+            const r = D('teams', chatId); const s = await tx.get(r);
+            if (!s.exists() || !s.data().chatOnly) return;
+            const members = (s.data().members || []).filter(p => p.uid !== myUid());
+            tx.update(r, { members, memberUids: members.map(p => p.uid), updatedBy: myUid(), updatedAt: serverTimestamp() });
+        });
+    } catch (e) { /* ignore */ }
+}
+/** 💬 A forming squad's chat: made the first time someone taps it (a temporary team doc, chatOnly, so it lives in Chats).
+ *  When the squad fills up, the real temp team takes over the same doc, so the chat history stays. */
+window.vsOpenSquadChat = async function (squadId) {
+    const m = V.open; if (!m || !myUid()) return;
+    let chatId = '', q = null;
+    try {
+        await changeSquads(m.id, (squads) => {
+            const s = squads.find(x => x.id === squadId);
+            if (!s || !s.members.some(p => p.uid === myUid())) throw new Error('NOT_IN');
+            if (!s.chatTeamId) s.chatTeamId = doc(C('teams')).id;
+            chatId = s.chatTeamId; q = { ...s, members: [...s.members] };
+            return squads;
+        });
+    } catch (e) { toast(String(e && e.message) === 'NOT_IN' ? "You're not in this squad anymore." : "Couldn't open the chat.", 'error'); return; }
+    // Now the chat's members = whoever is in the squad right now (heals people who left or joined).
+    const mine = (TS().mine || []).find(t => t.id === chatId);
+    if (mine && !mine.chatOnly) { window.vsSquadChat(chatId); return; }   // the squad already became a real temp team
+    const members = q.members.map(p => ({ id: p.uid, uid: p.uid, name: p.name, number: '', position: p.position || '', role: p.uid === q.captainUid ? 'captain' : 'player' }));
+    if (!members.some(p => p.uid === myUid())) members.push({ id: myUid(), uid: myUid(), name: myName(), number: '', position: '', role: 'player' });
+    try {
+        await setDoc(D('teams', chatId), {
+            name: q.name || 'Squad', nameKey: '', short: 'FA', temp: true, chatOnly: true, forMatchId: m.id, forMatchDate: m.date || '', forSquadId: squadId,
+            colors: { primary: '#7C3AED', secondary: '#FFFFFF' }, logo: { type: 'crest', shape: 'shield', style: 'filled', pattern: 'stripes', icon: '🧩', text: 'short', ring: false },
+            joinMode: 'invite', ownerId: q.captainUid || myUid(), members, memberUids: members.map(p => p.uid),
+            updatedAt: serverTimestamp(), updatedBy: myUid(), ...(mine ? {} : { createdAt: serverTimestamp() }),
+        }, { merge: true });
+    } catch (e) { console.warn('squad chat', e); }
+    // Wait until the chat shows up in my list, then open it.
+    const t0 = Date.now();
+    const go = () => { if ((TS().mine || []).some(t => t.id === chatId) || Date.now() - t0 > 4000) window.vsSquadChat(chatId); else setTimeout(go, 250); };
+    go();
 };
 window.vsSquadChat = function (teamId) {
     window.closeVsMatch();
@@ -1161,7 +1358,7 @@ async function saveLive(fn) {
 window.openVsManage = async function () {
     const m = V.open; if (!m) return;
     const conf = confirmedTeams(m);
-    if (conf.length < 2) { toast('Two teams need to be confirmed first.', 'error'); return; }
+    if (conf.length < 2) { toast('Two teams need to be confirmed first. Mark their payment in Teams ("Got a payment"), or add a team.', 'error'); return; }
     if (!m.live || !m.live.mode) {
         await saveLive((L) => ({ a: conf[0].teamId, b: conf[1].teamId, mode: 'timer', durationSeconds: 600, elapsedSeconds: 600, isRunning: false,
             lastUpdatedTimestamp: Date.now(), alarmEnabled: true, goals: (L && L.goals) || [] }));
@@ -1370,6 +1567,51 @@ function statsHtml(m) {
 }
 
 // ---------------------------------------------------------------- 📣 notify players (a push to everyone in the match)
+// ---- ⛈️ Storm watch (same idea as regular games): a status on the match + a note; everyone in it is notified.
+//   gameStatus = { stormWatch, state: 'on' | 'likely' | 'unlikely', note, by, byName, at }
+const VS_STORM = {
+    on: { emoji: '✅', label: 'Game on', cls: 'bg-emerald-500/15 text-[#00F296] border-emerald-400/60' },
+    likely: { emoji: '🟡', label: 'Game likely', cls: 'bg-amber-500/15 text-amber-300 border-amber-400/60' },
+    unlikely: { emoji: '🔴', label: 'Game not likely', cls: 'bg-red-500/15 text-red-300 border-red-400/60' },
+};
+const vsStormOn = (m) => !!(m && m.gameStatus && m.gameStatus.stormWatch === true) && (m.status === 'open' || m.status === 'challenge');
+const vsStormState = (m) => (VS_STORM[m && m.gameStatus && m.gameStatus.state] ? m.gameStatus.state : 'on');
+function vsStormCardHtml(m) {
+    if (!vsStormOn(m)) return '';
+    const s = VS_STORM[vsStormState(m)], note = String(m.gameStatus.note || '').trim();
+    return `<div class="bg-[#1A1405]/95 border-2 border-amber-400/60 rounded-2xl p-3 space-y-2">
+        <div class="flex items-center gap-3"><div class="text-3xl leading-none">⛈️</div>
+            <div class="flex-1 min-w-0"><div class="text-[10px] font-black uppercase tracking-wider text-amber-300">Storm watch</div><div class="text-xs text-white/80">The organizer is watching the weather.</div></div>
+            <span class="shrink-0 px-3 py-1.5 rounded-full border-2 text-xs font-black ${s.cls}">${s.emoji} ${s.label}</span></div>
+        ${note ? `<p class="text-xs text-white/90">${esc(note)}</p>` : ''}</div>`;
+}
+window.openVsStorm = function () {
+    const m = V.open; if (!m) return;
+    const on = vsStormOn(m), st = vsStormState(m);
+    sheet('vs-storm', '⛈️ Storm watch', `
+        <p class="text-[11px] text-white/65">Shows a weather box on the match and tells everyone in it (teams, squads, you) what's going on.</p>
+        <div class="space-y-2">${Object.entries(VS_STORM).map(([k, s]) => `<label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 cursor-pointer">
+            <input type="radio" name="vs-storm-state" value="${k}" ${st === k ? 'checked' : ''} class="w-4 h-4 accent-[#00F296]"><span class="text-xs font-bold">${s.emoji} ${s.label}</span></label>`).join('')}</div>
+        <input id="vs-storm-note" maxlength="160" value="${esc((m.gameStatus && m.gameStatus.note) || '')}" placeholder="Note for players (optional), e.g. We'll decide at 6:30" class="${INPUT}">
+        <button onclick="saveVsStorm(true)" class="${BTN} w-full py-3">${on ? 'Save and notify' : 'Turn on and notify'}</button>
+        ${on ? `<button onclick="saveVsStorm(false)" class="${DARK} w-full">Turn Storm watch off</button>
+        <button onclick="document.getElementById('vs-storm')?.remove(); cancelVs()" class="${DARK} w-full !text-red-400">⛈️ Cancel the match (storm)</button>` : ''}`);
+};
+window.saveVsStorm = async function (turnOn) {
+    const m = V.open; if (!m) return;
+    const state = (document.querySelector('input[name="vs-storm-state"]:checked') || {}).value || 'on';
+    const note = (document.getElementById('vs-storm-note')?.value || '').trim().slice(0, 160);
+    const gs = { stormWatch: !!turnOn, state, note, by: myUid(), byName: myName(), at: Date.now() };
+    try {
+        await updateDoc(D('vsMatches', m.id), { gameStatus: gs, updatedBy: myUid(), updatedAt: serverTimestamp() });
+        const s = VS_STORM[state];
+        const text = turnOn ? `⛈️ Storm watch: ${s.emoji} ${s.label}${note ? `. ${note}` : ''}` : '☀️ Storm watch is off. The match is on as planned.';
+        await addDoc(collection(db, 'artifacts', appId, 'vsMatches', m.id, 'comments'), { text, byUid: myUid(), byName: myName(), avatar: myAvatar(), announce: true, at: serverTimestamp() });
+        document.getElementById('vs-storm')?.remove();
+        toast(turnOn ? `Saved: ${s.label}. Everyone was notified.` : 'Storm watch off. Everyone was notified.');
+    } catch (e) { toast("Couldn't save.", 'error'); }
+};
+
 window.openVsNotify = function () {
     const m = V.open; if (!m) return;
     sheet('vs-notify', '📣 Notify players', `
@@ -1408,7 +1650,7 @@ function commentsHtml(m) {
     return `<div class="space-y-3">
         <div class="flex justify-end">${window.muteButtonHtml ? window.muteButtonHtml('vs_' + m.id, 'this match') : ''}</div>
         <div class="space-y-2">${list.map(c => `<div class="flex items-start gap-2">
-            <img src="${esc(c.avatar || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover shrink-0">
+            <img src="${esc(personAvatar(c.byUid, c.avatar, c.byName))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover shrink-0">
             <div class="min-w-0 flex-1 ${c.announce ? 'bg-amber-400/10 border-amber-400/40' : 'bg-black/40 border-white/10'} border rounded-2xl px-3 py-2">
                 <div class="flex items-baseline justify-between gap-2"><span class="text-xs font-black truncate">${c.announce ? '📣 ' : ''}${esc(c.byName || 'Player')}${c.announce ? ' <span class="text-[9px] font-black text-amber-300">ORGANIZER</span>' : ''}</span><span class="text-[10px] text-white/45 shrink-0">${msTs(c.at) ? esc(new Date(msTs(c.at)).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : ''}</span></div>
                 <div class="text-sm text-white/90 whitespace-pre-wrap break-words">${esc(c.text)}</div>
@@ -1468,6 +1710,79 @@ window.answerInvite = async function (matchId, teamId, yes) {
         });
         toast(yes ? "You're in!" : 'Got it.');
     } catch (e) { toast("Couldn't answer.", 'error'); }
+};
+// ---- tap a team at the top: its card for this match (everyone sees the basics; the organizer manages it)
+window.openVsTeamCard = function (teamId) {
+    const m = V.open; if (!m) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
+    const boss = m.organizerId === myUid();
+    const live = m.status === 'open' || m.status === 'challenge';
+    const full = teamFull(teamId) || {};
+    const price = +m.priceCents || 0, paid = paidCents(m, teamId), left = Math.max(0, price - paid);
+    const members = full.members || [];
+    const cap = members.find(p => p.role === 'captain') || members.find(p => p.uid && p.uid === full.ownerId);
+    const coming = members.filter(p => (t.roster || []).includes(p.id));
+    const r = full.record || {};
+    const games = (+r.w || 0) + (+r.d || 0) + (+r.l || 0);
+    const pays = (m.payments || []).filter(p => p.teamId === teamId);
+    const pct = price ? Math.min(100, Math.round(paid * 100 / price)) : 100;
+    const H = (x) => `<div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">${x}</div>`;
+    const chip = (p) => { const nm = p.uid ? personName(p.uid, p.name) : p.name;
+        return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold"><img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span>`; };
+    const methodName = { cash: 'Cash', venmo: 'Venmo', zelle: 'Zelle', cashapp: 'Cash App', other: 'Other' };
+    sheet('vs-teamcard', esc(t.name), `
+        <div class="flex items-center gap-3">${teamLogoHtml(t, 56)}
+            <div class="flex-1 min-w-0 space-y-1">
+                <div class="flex flex-wrap items-center gap-1.5">${t.state === 'confirmed' ? '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-[#00F296] text-slate-950">CONFIRMED</span>' : t.state === 'invited' ? '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-fuchsia-500/30 text-fuchsia-200">INVITED</span>' : '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-amber-400/20 text-amber-300">PENDING</span>'}
+                ${full.temp ? '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-fuchsia-500/30 text-fuchsia-100">TEMP SQUAD</span>' : ''}${t.offApp ? '<span class="text-[9px] font-black rounded-full px-2 py-1 bg-white/10 text-white/70">NOT ON FUTNET</span>' : ''}</div>
+                ${cap ? `<div class="text-[11px] text-white/70">Captain: <b class="text-white">${esc(cap.uid ? personName(cap.uid, cap.name) : cap.name)}</b></div>` : ''}
+                ${[full.city, full.level ? levelLabel(full.level) : '', members.length ? `${members.length} player${members.length === 1 ? '' : 's'}` : ''].filter(Boolean).length ? `<div class="text-[11px] text-white/55">${[full.city, full.level ? levelLabel(full.level) : '', members.length ? `${members.length} player${members.length === 1 ? '' : 's'}` : ''].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+            </div></div>
+        ${games ? `<div class="grid grid-cols-4 gap-1.5 text-center">${[['W', r.w], ['D', r.d], ['L', r.l], ['Goals', `${+r.gf || 0}-${+r.ga || 0}`]].map(([k, v]) => `<div class="bg-black/40 rounded-xl py-2"><div class="text-sm font-black">${esc(v || 0)}</div><div class="text-[9px] text-white/50 font-bold">${k}</div></div>`).join('')}</div>` : ''}
+        <div class="space-y-1.5">${H(`Coming to this match (${coming.length})`)}
+            ${coming.length ? `<div class="flex flex-wrap gap-1.5">${coming.map(chip).join('')}</div>` : '<p class="text-[11px] text-white/50">The captain hasn\'t picked who\'s coming yet.</p>'}</div>
+        ${price ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">${H('Payment')}
+            <div class="flex justify-between text-xs"><span>${money(paid)} of ${money(price)} paid</span><b class="${left ? 'text-amber-300' : 'text-[#00F296]'}">${left ? money(left) + ' left' : 'Paid in full ✅'}</b></div>
+            <div class="h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full ${pct >= 100 ? 'bg-[#00F296]' : 'bg-amber-400'}" style="width:${pct}%"></div></div>
+            ${boss && pays.length ? `<div class="space-y-1">${pays.map((p, i) => `<div class="flex items-center gap-2 text-[11px] bg-white/5 rounded-lg px-2 py-1.5"><span class="flex-1">${money(p.cents)} · ${esc(methodName[p.method] || p.method || '')}${p.at ? ' · ' + esc(new Date(p.at).toLocaleDateString([], { month: 'short', day: 'numeric' })) : ''}</span>
+                ${live ? `<button onclick="vsUndoPayment('${jsq(teamId)}', ${+p.at || 0}, ${i})" class="text-[10px] font-black text-red-300 px-1">Undo</button>` : ''}</div>`).join('')}</div>` : ''}
+        </div>` : ''}
+        ${boss && live && t.state !== 'invited' ? `<div class="space-y-2">${H('Organizer')}
+            ${price && left ? `<button onclick="vsPayInFull('${jsq(teamId)}')" class="${BTN} w-full py-3">✅ They paid it all (${money(left)})</button>
+            <button onclick="document.getElementById('vs-teamcard')?.remove(); openVsPayment('${jsq(teamId)}')" class="${DARK} w-full">💵 Got part of it / pick how they paid</button>` : ''}
+            ${t.state === 'pending' && !price ? `<p class="text-[11px] text-amber-200">Waiting for an open spot (the match is full).</p>` : ''}
+            <button onclick="document.getElementById('vs-teamcard')?.remove(); leaveVs('${jsq(teamId)}')" class="${DARK} w-full !text-red-400">Remove team from the match</button></div>` : ''}
+        ${!t.offApp && !teamId.startsWith('x_') ? `<button onclick="document.getElementById('vs-teamcard')?.remove(); vsOpenTeam('${jsq(teamId)}')" class="${DARK} w-full">👥 See the full team page</button>` : ''}`);
+};
+/** Organizer: the team paid the rest in one go. */
+window.vsPayInFull = async function (teamId) {
+    const m = V.open; if (!m) return;
+    try {
+        let got = 0;
+        await changeMatch(m.id, (x) => {
+            const left = Math.max(0, (+x.priceCents || 0) - paidCents(x, teamId)); if (!left) return false;
+            x.payments.push({ teamId, cents: left, method: 'cash', byUid: myUid(), at: Date.now() }); got = left; settle(x);
+        });
+        document.getElementById('vs-teamcard')?.remove();
+        if (got) toast(`Marked ${money(got)} received. Paid in full ✅`);
+    } catch (e) { toast("Couldn't save the payment.", 'error'); }
+};
+/** Organizer: take back a payment marked by mistake (the team goes back to pending if it's no longer paid up). */
+window.vsUndoPayment = async function (teamId, at, idx) {
+    const m = V.open; if (!m) return;
+    if (!confirm('Take back this payment?')) return;
+    try {
+        await changeMatch(m.id, (x) => {
+            const mine = x.payments.map((p, i) => [p, i]).filter(([p]) => p.teamId === teamId);
+            const hit = mine.find(([p]) => at && +p.at === at) || mine[idx]; if (!hit) return false;
+            x.payments.splice(hit[1], 1);
+            const t = x.teams.find(y => y.teamId === teamId);
+            if (t && t.state === 'confirmed' && (+x.priceCents || 0) > 0 && paidCents(x, teamId) < +x.priceCents) t.state = 'pending';
+            settle(x);
+        });
+        document.getElementById('vs-teamcard')?.remove();
+        toast('Payment taken back.');
+    } catch (e) { toast("Couldn't do that.", 'error'); }
 };
 window.leaveVs = async function (teamId) {
     const m = V.open; if (!m) return;

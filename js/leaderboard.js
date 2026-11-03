@@ -193,7 +193,7 @@ export function renderLeaderboard(category = 'goals') {
         const metricVal = category === 'goals' ? p.goals : (category === 'wins' ? p.matchesWon : p.sessionsWon);
 
         return `
-            <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+            <tr ${p.uid ? `onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsArg(p.uid)}', '${jsArg(p.name)}', '')"` : ''} class="hover:bg-slate-50 transition border-b border-slate-100 ${p.uid ? 'cursor-pointer' : ''}">
                 <td class="p-4 font-black text-slate-900">${rankBadge}</td>
                 <td class="p-4 flex items-center gap-3">
                     <img src="${escapeHtml(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar)}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
