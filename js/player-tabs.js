@@ -192,6 +192,7 @@ window.openProfileSettings = async function () {
             <button onclick="document.getElementById('profile-settings-modal').remove()" class="w-8 h-8 rounded-full bg-white/10"><i class="fa-solid fa-xmark"></i></button></div>
         ${btn('fa-pen-to-square', 'Edit profile details', "document.getElementById('profile-settings-modal').remove(); openEditProfileModal()")}
         ${btn('fa-key', 'Sign-in details', "document.getElementById('profile-settings-modal').remove(); openSignInDetails()")}
+        ${window.themePickerHtml ? window.themePickerHtml() : ''}
         <div id="owner-tools-slot"></div>
         <div id="safety-slot"></div>
         <div class="bg-[#07141E]/90 border border-[#00B4AE]/40 rounded-2xl px-3 py-1">

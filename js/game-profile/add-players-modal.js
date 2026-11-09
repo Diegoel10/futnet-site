@@ -3,6 +3,7 @@ import { mutateEvent, escapeHtml, safeAvatar } from './event-store.js';
 import { db, appId } from '../firebase-config.js';
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { creditGame } from '../credits.js';
+import { freeSpotsOf } from '../money-rules.js';
 
 // Best name we have for a person, whatever app created their profile.
 const nameOf = (p) => String((p && ((window.fullName && window.fullName(p)) || p.name || p.displayName || p.fullName ||
@@ -234,20 +235,35 @@ window.submitBatchAddPlayers = async function(eventId) {
         };
     });
 
+    let added = 0, waitlisted = [];
     const res = await mutateEvent(eventId, (draft) => {
+        added = 0; waitlisted = [];
         draft.attendees = Array.isArray(draft.attendees) ? draft.attendees : [];
+        draft.waitingList = Array.isArray(draft.waitingList) ? draft.waitingList : [];
+        // Spots left right now (players + their guests). When the game is full, new players go on the waitlist
+        // (same as when someone joins by themselves). The admin can still move them in from Manage players.
+        let free = freeSpotsOf(draft);
         picked.forEach(pl => {
             if (draft.attendees.some(a => String(a.uid) === String(pl.uid))) return;
             const entry = { uid: pl.uid, name: pl.name, position: pl.position, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [], addedByAdmin: true, addedBy: String(window.currentUser?.uid || ''), addedByName: String(window.userProfile?.name || [window.userProfile?.firstName, window.userProfile?.lastName].filter(Boolean).join(' ') || 'An admin') };
             if (pl.avatar) entry.avatar = pl.avatar;
-            draft.attendees.push(entry);
-            draft.waitingList = (draft.waitingList || []).filter(w => String(w.uid) !== String(pl.uid));
             draft.declinedList = (draft.declinedList || []).filter(d => String(d.uid) !== String(pl.uid));
+            if (free <= 0) {
+                if (!draft.waitingList.some(w => String(w.uid) === String(pl.uid))) draft.waitingList.push({ ...entry, status: 'waiting', waitingSince: Date.now() });
+                waitlisted.push(pl.name || 'Player');
+                return;
+            }
+            free -= 1;
+            added += 1;
+            draft.attendees.push(entry);
+            draft.waitingList = draft.waitingList.filter(w => String(w.uid) !== String(pl.uid));
         });
     });
     if (res.ok) {
         const ev = (window.eventsList || []).find(e => e.id === eventId);
-        window.showToast(ev && creditGame(ev) ? "Players added! Their credit is charged; anyone without enough shows as Unpaid." : "Players added successfully!");
+        const waitNote = waitlisted.length ? `${waitlisted.join(', ')} went on the waitlist (the game is full). Move them in from Manage players if you want.` : '';
+        if (!added && waitlisted.length) window.showToast(waitNote);
+        else window.showToast((ev && creditGame(ev) ? "Players added! Their credit is charged; anyone without enough shows as Unpaid." : "Players added successfully!") + (waitNote ? ' ' + waitNote : ''));
         const modal = document.getElementById('add-players-screen-modal');
         if (modal) modal.remove();
     }

@@ -55,6 +55,7 @@
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6090723692830298" crossorigin="anonymous"></script>
     <!-- Custom Styles -->
     <link rel="stylesheet" href="css/styles.css">
+    <script>try { var _ft = localStorage.getItem('futnet_theme'); if (_ft && _ft !== 'classic') document.documentElement.setAttribute('data-futtheme', _ft); } catch (e) {}</script>
     <style>
         /* Prevent mobile browsers from auto-zooming and breaking layout on input focus */
         @media screen and (max-width: 768px) {
@@ -67,6 +68,17 @@
             padding: 0;
             background: #040E13 url('img/GamesBackground.png') center top / cover no-repeat fixed !important;
             min-height: 100vh;
+        }
+        /* Themes (Settings > Theme). js/themes.js swaps the button colors. */
+        html[data-futtheme="cage"], html[data-futtheme="cage"] body {
+            background: #04070F url('img/theme-cage.jpg') center 72% / cover no-repeat fixed !important;
+        }
+        html[data-futtheme="favela"], html[data-futtheme="favela"] body {
+            background: #0C0A14 url('img/theme-favela.jpg') center 62% / cover no-repeat fixed !important;
+        }
+        html[data-futtheme="tokyo"], html[data-futtheme="tokyo"] body {
+            background: linear-gradient(rgba(6,14,30,.30), rgba(6,14,30,.30)), #081226 url('img/theme-tokyo.jpg') center 65% / cover no-repeat fixed !important;
+            background-attachment: fixed !important;
         }
     </style>
     <script>
@@ -682,6 +694,7 @@
         import './js/profile.js';
         import './js/leaderboard.js';
         import './js/spot-offers.js';
+        import './js/themes.js';
         import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 

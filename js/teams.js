@@ -628,9 +628,65 @@ function renderTeamPage() {
         ${tab === 'schedule' ? scheduleHtml(t, boss) : tab === 'lineup' ? (t.lineupPrivate && !member ? privateNote('lineup') : lineupHtml(t, boss))
             : tab === 'requests' && boss ? requestsHtml(t) : (t.rosterPrivate && !member ? privateNote('roster') : rosterHtml(t, boss))}
         ${member && t.ownerId !== myUid() ? `<button onclick="leaveTeam()" class="w-full text-xs font-bold text-red-400 py-2">Leave team</button>` : ''}
+        ${t.ownerId === myUid() && !t.temp ? `<button onclick="openHandOverTeam()" class="w-full rounded-xl border border-white/20 bg-black/50 text-xs font-bold text-white py-3"><i class="fa-solid fa-people-arrows mr-1"></i> Hand over team</button>` : ''}
         ${t.ownerId === myUid() ? `<button onclick="deleteTeam('${jsq(t.id)}')" class="w-full rounded-xl border border-red-500/40 text-xs font-bold text-red-400 py-3"><i class="fa-solid fa-trash mr-1"></i> Delete team</button>` : ''}
     </div>`;
 }
+
+// ---- Hand over team: the creator gives the team to another player (they become the owner and captain) ----
+window.openHandOverTeam = function () {
+    const t = T.open; if (!t || t.ownerId !== myUid()) return;
+    const people = (t.members || []).filter(m => m.uid && m.uid !== myUid());
+    sheet('team-handover', 'Hand over team', `
+        <p class="text-[12px] text-white/70">Pick who takes over <b>${esc(t.name)}</b>. They become the owner and captain: they can edit or delete the team, add players and sign it up for matches.</p>
+        ${people.length ? `<div class="space-y-1.5 max-h-72 overflow-y-auto">${people.map(m => {
+            const nm = m.uid ? (window.fullName ? (window.fullName((window.cachedDirectoryList || []).find(u => u.uid === m.uid) || {}) || m.name) : m.name) : m.name;
+            return `<button onclick="confirmHandOver('${jsq(m.uid)}','${jsq(nm || 'Player')}')" class="w-full flex items-center gap-3 rounded-xl px-2 py-2 bg-black/40 border border-white/10 hover:bg-white/5 text-left">
+                <img src="${esc(avatarOf(m.uid, nm, m.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
+                <span class="flex-1 min-w-0"><span class="block text-sm font-bold truncate">${esc(nm || 'Player')}</span><span class="block text-[11px] text-white/50">${m.role === 'captain' ? 'Captain' : m.role === 'co' ? 'Co-captain' : 'Player'}</span></span>
+                <i class="fa-solid fa-chevron-right text-white/40"></i></button>`;
+        }).join('')}</div>`
+        : '<p class="text-[12px] text-amber-200">Add your friend to the roster first (Roster > Add player). Only players with a FutNet account can take over a team.</p>'}`);
+};
+window.confirmHandOver = function (uid, name) {
+    const t = T.open; if (!t) return;
+    document.getElementById('team-handover')?.remove();
+    sheet('team-handover', 'Hand over team', `
+        <p class="text-sm text-white"><b>${esc(name)}</b> will be the new owner of <b>${esc(t.name)}</b>.</p>
+        <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl px-3 py-3 cursor-pointer">
+            <input id="ho-leave" type="checkbox" checked class="w-5 h-5 accent-[#00F296]">
+            <span class="text-[12px] text-white/85">Take me off the team too (no more team chat or notifications)</span></label>
+        <p class="text-[11px] text-white/50">You can't undo this yourself. ${esc(name)} would have to give it back.</p>
+        <button onclick="doHandOver('${jsq(uid)}','${jsq(name)}')" class="${BTN} w-full py-3">Hand over to ${esc(name)}</button>
+        <button onclick="document.getElementById('team-handover')?.remove()" class="w-full text-xs font-bold text-white/60 py-2">Cancel</button>`);
+};
+window.doHandOver = async function (uid, name) {
+    const t = T.open; if (!t) return;
+    const leave = document.getElementById('ho-leave')?.checked !== false;
+    const me = myUid();
+    try {
+        await runTransaction(db, async (tx) => {
+            const ref = D('teams', t.id);
+            const s = await tx.get(ref);
+            if (!s.exists()) throw new Error('GONE');
+            const d = s.data();
+            if (d.ownerId !== me) throw new Error('NOT_OWNER');
+            let members = (d.members || []).map(x => ({ ...x }));
+            const p = members.find(x => x.uid === uid);
+            if (!p) throw new Error('NOT_MEMBER');
+            p.role = 'captain';
+            if (leave) members = members.filter(x => x.uid !== me);
+            else { const mine = members.find(x => x.uid === me); if (mine) mine.role = 'player'; }
+            tx.update(ref, { ownerId: uid, members, memberUids: [...new Set(members.filter(x => x.uid).map(x => x.uid))], updatedBy: me, updatedAt: serverTimestamp() });
+        });
+        document.getElementById('team-handover')?.remove();
+        toast(`${name} is now in charge of ${t.name}.`);
+        if (leave) window.closeTeam();
+    } catch (e) {
+        const m = String(e && e.message);
+        toast(m === 'NOT_MEMBER' ? `${name} isn't on the roster anymore.` : m === 'NOT_OWNER' ? 'Only the team owner can hand it over.' : "Couldn't hand over the team. Try again.", 'error');
+    }
+};
 window.teamTab = (k) => { T.openTab = k; renderTeamPage(); };
 // 💬 The team's group chat (lives in the Chats tab with the community chats).
 window.openTeamChat = function (teamId) {

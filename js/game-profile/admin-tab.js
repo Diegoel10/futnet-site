@@ -427,20 +427,27 @@ window.submitAdminAddPlayer = async function(eventId) {
         window.showToast("Please enter a player name", "error");
         return;
     }
+    let waitlisted = false;
     const res = await mutateEvent(eventId, (draft) => {
         draft.attendees = draft.attendees || [];
-        draft.attendees.push({
+        draft.waitingList = draft.waitingList || [];
+        const entry = {
             uid: 'usr_' + Math.random().toString(36).substring(2, 9),
             name: nameVal,
             avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(nameVal)}`,
             role: 'Player',
             status: 'confirmed',
             paid: 'Unpaid',
-            guests: []
-        });
+            guests: [],
+            addedByAdmin: true,
+        };
+        // Full game: the waitlist, like everyone else.
+        waitlisted = freeSpotsOf(draft) <= 0;
+        if (waitlisted) draft.waitingList.push({ ...entry, status: 'waiting', waitingSince: Date.now() });
+        else draft.attendees.push(entry);
     });
     if (res.ok) {
-        window.showToast(`${nameVal} added to roster!`);
+        window.showToast(waitlisted ? `${nameVal} went on the waitlist (the game is full).` : `${nameVal} added to roster!`);
         document.getElementById('admin-add-players-modal')?.remove();
     }
 };
