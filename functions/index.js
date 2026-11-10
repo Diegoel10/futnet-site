@@ -3114,6 +3114,27 @@ exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event
   const after = event.data.after.exists ? event.data.after.data() : null;
   if (!after) return;
   const teamId = event.params.teamId;
+  // The team changed its logo, colors or name: update its copy in every VS match it signed up for (so the game cards show the new one).
+  if (before && !after.chatOnly) {
+    const look = (t) => JSON.stringify([t.name || "", t.short || "", t.logo || null, t.colors || {}]);
+    if (look(before) !== look(after)) {
+      try {
+        const snap = await col("vsMatches").where("teamIds", "array-contains", teamId).get();
+        for (const d of snap.docs) {
+          await db.runTransaction(async (tx) => {
+            const m = (await tx.get(d.ref)).data(); if (!m) return;
+            let changed = false;
+            const teams = arr(m.teams).map((t) => {
+              if (t.teamId !== teamId) return t;
+              changed = true;
+              return { ...t, name: after.name || t.name, short: after.short || "", logo: after.logo || null, colors: after.colors || {} };
+            });
+            if (changed) tx.update(d.ref, { teams });
+          });
+        }
+      } catch (e) { logger.warn("team look -> vs matches", teamId, e.message); }
+    }
+  }
   // A free-agent squad just filled up: everyone in it hears they're playing (and about their chat).
   // A forming squad's early chat (chatOnly): no "complete" news and no join pings, it's just the chat list.
   if (after.chatOnly) return;
