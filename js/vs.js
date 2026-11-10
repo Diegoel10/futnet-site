@@ -223,7 +223,7 @@ function wrapEvents() {
         orig.apply(this, arguments);
         const grid = document.getElementById('events-grid'); if (!grid) return;
         const day = window.selectedDateStr;
-        const list = V.list.filter(m => (m.date || '') === day && m.status !== 'declined').sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        const list = V.list.filter(m => (m.date || '') === day && m.status !== 'declined' && m.status !== 'cancelled').sort((a, b) => String(a.time).localeCompare(String(b.time)));
         if (!list.length) return;
         if (grid.querySelector('.fa-calendar-xmark') || grid.querySelector('.fa-spin')) { grid.innerHTML = list.map(vsCardHtml).join(''); return; }
         const timeOf = new Map((window.eventsList || []).map(ev => [String(ev.id), String(ev.time || '')]));
@@ -679,6 +679,7 @@ function drawPage() {
             ${price ? `<div class="h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full ${pct >= 100 ? 'bg-[#00F296]' : 'bg-amber-400'}" style="width:${pct}%"></div></div>` : ''}
             ${roster.length ? `<div class="flex flex-wrap gap-1">${roster.map(p => `<span class="text-[10px] font-bold rounded-full px-2 py-1 bg-white/10">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name)}</span>`).join('')}</div>` : ''}
             <div class="flex flex-wrap gap-2">
+                ${canKit(m, t.teamId) && t.state !== 'invited' ? `<button onclick="openVsKits()" class="${DARK}">${shirt(kitOf(m, t.teamId), 'text-sm mr-1')}Shirt color</button>` : ''}
                 ${iCap && live && t.state !== 'invited' ? `<button onclick="openVsRoster('${jsq(t.teamId)}')" class="${DARK}" ${rosterLocked(m) ? 'disabled' : ''}>${rosterLocked(m) ? '🔒 Roster locked' : `Pick who's coming (${(t.roster || []).length})`}</button>` : ''}
                 ${full && full.temp && (full.memberUids || []).includes(myUid()) ? `<button onclick="vsSquadChat('${jsq(t.teamId)}')" class="${DARK}"><i class="fa-solid fa-comments mr-1"></i>Squad chat</button>` : ''}
                 ${boss && live && price && t.state !== 'invited' && paid < price ? `<button onclick="openVsPayment('${jsq(t.teamId)}')" class="${BTN}">💵 Got a payment</button>` : ''}
@@ -733,17 +734,19 @@ function drawPage() {
             ${m.live ? liveScoreHtml(m) : ''}
             <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Organizer tools</div>
             <div class="grid grid-cols-3 gap-2">
-                ${live ? tool('openVsManage()', '⏱️', 'Match management', m.live ? BTN + ' !px-2' : DARK) : ''}
+                ${live || m.status === 'final' ? tool('openVsManage()', '⏱️', 'Match management', m.live ? BTN + ' !px-2' : DARK) : ''}
                 ${tool('openVsNotify()', '📣', 'Notify players')}
                 ${tool('openVsViews()', '📈', 'Analytics')}
                 ${live ? tool('openVsStorm()', '⛈️', 'Storm watch', vsStormOn(m) ? DARK + ' !border-amber-400/70 !text-amber-200' : DARK) : ''}
                 ${live ? tool('editVs()', '✏️', 'Edit') : ''}
+                ${live ? tool('openVsKits()', '👕', 'Shirt colors') : ''}
                 ${tool('copyVs()', '📋', 'Copy')}
                 ${live ? tool('openAddTeamManually()', '➕', 'Add team') : ''}
                 ${m.livestream && m.livestream.status === 'live' ? tool("vsTab('live')", '🔴', 'Watch live') : live ? tool('openVsLivestream()', '🔴', 'Go live') : ''}
-                ${live ? tool('openVsScore()', '🏁', 'End match', 'bg-amber-400 text-slate-950 font-black rounded-xl text-xs px-2 transition') : ''}
+                ${live && (m.teamsCount || 2) <= 2 ? tool('openVsScore()', '🏁', 'End match', 'bg-amber-400 text-slate-950 font-black rounded-xl text-xs px-2 transition') : ''}
+                ${live && (m.teamsCount || 2) > 2 && (m.results || []).length ? tool('vsEndEvent()', '🏁', 'End event', 'bg-amber-400 text-slate-950 font-black rounded-xl text-xs px-2 transition') : ''}
                 ${live ? tool('cancelVs()', '❌', 'Cancel', DARK + ' text-red-400') : ''}
-                ${m.status === 'final' ? tool('openVsScore()', '✏️', 'Fix score') + tool('rematchVs()', '🔁', 'Rematch', BTN) : ''}
+                ${m.status === 'final' ? ((m.teamsCount || 2) <= 2 ? tool('openVsScore()', '✏️', 'Fix score') : '') + tool('rematchVs()', '🔁', 'Rematch', BTN) : ''}
                 ${vsOutcome(m) ? tool('openVsResultCards()', '📸', 'Result cards') : ''}
             </div>
             ${live && conf.length < 2 ? `<p class="text-[11px] text-amber-200">Match management opens once ${2 - conf.length === 2 ? 'two teams are' : 'one more team is'} <b>confirmed</b>: a team is confirmed when it joins a free match, or when you mark its payment ("Got a payment").</p>` : ''}
@@ -1369,20 +1372,51 @@ async function saveLive(fn) {
 window.openVsManage = async function () {
     const m = V.open; if (!m) return;
     const conf = confirmedTeams(m);
-    if (conf.length < 2) { toast('Two teams need to be confirmed first. Mark their payment in Teams ("Got a payment"), or add a team.', 'error'); return; }
+    if (conf.length < 2 && !(m.results || []).length) { toast('Two teams need to be confirmed first. Mark their payment in Teams ("Got a payment"), or add a team.', 'error'); return; }
+    // Opens the hub (games played + Edit). A new game only starts when you tap "Start Match".
+    V.manage = true;
+    drawManage();
+};
+window.vsStartLive = async function () {
+    const m = V.open; if (!m) return;
+    const conf = confirmedTeams(m);
+    if (conf.length < 2) { toast('Two teams need to be confirmed first.', 'error'); return; }
+    if (m.status === 'final') { toast('This match is over. Fix games with "Edit Game" below.', 'error'); return; }
     if (!m.live || !m.live.mode) {
         await saveLive((L) => ({ a: conf[0].teamId, b: conf[1].teamId, mode: 'timer', durationSeconds: 600, elapsedSeconds: 600, isRunning: false,
             lastUpdatedTimestamp: Date.now(), alarmEnabled: true, goals: (L && L.goals) || [] }));
     }
-    V.manage = true;
     drawManage();
 };
+/** Match management when no game is being played: Start Match (or the final results) + the games played with Edit / Delete. */
+function drawManageHub(m, el) {
+    const results = m.results || [];
+    const multi = (m.teamsCount || 2) > 2;
+    const top = m.status === 'final'
+        ? `<button onclick="openVsResultCards()" class="w-full bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-base flex items-center justify-center gap-2"><i class="fa-solid fa-trophy"></i> View final results</button>`
+        : `<button onclick="vsStartLive()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-4 rounded-2xl text-base flex items-center justify-center gap-2"><i class="fa-solid fa-play"></i> Start ${results.length ? 'Next ' : ''}Match</button>
+           ${multi && results.length ? `<button onclick="vsEndEvent()" class="w-full bg-amber-400/15 border border-amber-400/60 text-amber-300 font-black py-3 rounded-2xl text-sm flex items-center justify-center gap-2">🏁 End event (show final results)</button>` : ''}`;
+    el.innerHTML = `<div class="flex-1 flex flex-col min-h-0 bg-[#060d12] rounded-t-[32px] border-t border-white/10 overflow-hidden" style="margin-top:max(12px, env(safe-area-inset-top))">
+      <div class="flex-1 overflow-y-auto"><div class="max-w-2xl mx-auto w-full px-5 pt-6 pb-10 space-y-5">
+        <div class="flex items-center gap-3">
+            <button onclick="closeVsManage()" class="bg-black/60 border border-white/15 text-white font-bold px-4 py-2 rounded-xl text-sm"><i class="fa-solid fa-chevron-left mr-1"></i> Back</button>
+            <h3 class="text-xl font-black">⏱️ Match management</h3>
+        </div>
+        ${m.status !== 'final' ? `<button onclick="openVsKits()" class="w-full bg-black/50 border border-white/15 rounded-2xl p-3 flex items-center gap-3 text-left">
+            <span class="flex items-center gap-1.5">${confirmedTeams(m).map(t => shirt(kitOf(m, t.teamId), 'text-2xl')).join('')}</span>
+            <span class="flex-1 min-w-0"><span class="block text-sm font-black">Shirt colors</span><span class="block text-[11px] text-white/55">Pick before the match so nobody wears the same color.</span></span>
+            <i class="fa-solid fa-chevron-right text-white/40"></i></button>` : ''}
+        ${top}
+        ${results.length ? playedGamesAdminHtml(m) : `<div class="text-[11px] font-black uppercase tracking-wider text-white/50">Matches played</div><p class="text-sm text-white/50 text-center py-6">No match results recorded yet.</p>`}
+      </div></div></div>`;
+}
 window.closeVsManage = function () { V.manage = false; document.getElementById('vs-manage')?.remove(); };
 function drawManage() {
     const m = V.open;
-    if (!V.manage || !m || !m.live) { document.getElementById('vs-manage')?.remove(); return; }
+    if (!V.manage || !m) { document.getElementById('vs-manage')?.remove(); return; }
     let el = document.getElementById('vs-manage');
     if (!el) { el = document.createElement('div'); el.id = 'vs-manage'; el.dataset.close = 'closeVsManage'; el.className = 'fixed inset-0 z-[160] flex flex-col bg-black/85 backdrop-blur-sm text-white'; document.body.appendChild(el); }
+    if (!m.live) { drawManageHub(m, el); return; }
     const L = m.live, conf = confirmedTeams(m);
     const [A, B] = livePair(m);
     const run = liveRunning(L), mode = L.mode || 'timer', secs = liveSecs(L);
@@ -1390,7 +1424,7 @@ function drawManage() {
     const untouched = !goalsA.length && !goalsB.length && (mode === 'stopwatch' ? secs === 0 : secs === (+L.durationSeconds || 600));
     const status = run ? ['LIVE', '#00F296', 'rgba(0,242,150,0.12)'] : untouched ? ['READY', '#9ca3af', 'rgba(255,255,255,0.06)'] : ['PAUSED', '#f59e0b', 'rgba(245,158,11,0.12)'];
     const startLabel = run ? '<i class="fa-solid fa-pause"></i> Pause' : (untouched ? '<i class="fa-solid fa-play"></i> Start' : '<i class="fa-solid fa-play"></i> Resume');
-    const col = (t) => ((t.colors || {}).primary && /^#[0-9a-f]{6}$/i.test(t.colors.primary) && t.colors.primary.toLowerCase() !== '#111827' ? t.colors.primary : '#6ee7a0');
+    const col = (t) => kitText(kitOf(m, t.teamId));
     const durations = [5, 10, 15, 20, 25, 30, 45];
     const curMins = Math.round((+L.durationSeconds || 600) / 60);
     if (!durations.includes(curMins)) durations.push(curMins);
@@ -1401,7 +1435,7 @@ function drawManage() {
         ${conf.map(t => `<option value="${esc(t.teamId)}" ${t.teamId === cur ? 'selected' : ''} ${t.teamId === other ? 'disabled' : ''}>${esc(t.name)}</option>`).join('')}</select>`;
     const scoreCard = (t, goals) => { const c = col(t); return `
         <div class="rounded-3xl p-4 space-y-3 text-center self-start" style="border:2px solid ${c}99;background:#081117">
-            <div class="flex flex-col items-center gap-1.5">${teamLogoHtml(t, 44)}<span class="font-bold text-white truncate max-w-full text-sm">${esc(t.name)}</span></div>
+            <div class="flex flex-col items-center gap-1.5">${teamLogoHtml(t, 44)}<span class="font-bold text-white truncate max-w-full text-sm flex items-center gap-1.5">${shirt(kitOf(m, t.teamId), 'text-sm')}${esc(t.name)}</span></div>
             <div class="text-7xl font-black leading-none py-1" style="color:${c}">${goals.length}</div>
             <button onclick="vsGoalPicker('${jsq(t.teamId)}')" class="w-full font-black py-3 rounded-2xl text-base" style="background-color:${c}26;color:${c};border:1.5px solid ${c}66">+ Goal</button>
             ${goalList(goals)}
@@ -1445,7 +1479,6 @@ function drawManage() {
             <button onclick="vsLiveDelete()" class="w-full text-red-400 font-bold py-2 text-base">Delete live game</button>
             <button onclick="closeVsManage()" class="w-full text-white/60 font-bold py-2 text-base">Close (the game keeps going)</button>
         </div>
-        ${playedGamesAdminHtml(m)}
       </div></div></div>`;
 }
 window.vsLiveToggle = () => saveLive((L) => {
@@ -1492,7 +1525,7 @@ window.vsRemoveGoal = async function (i) {
 };
 window.vsLiveDelete = async function () {
     if (!confirm('Delete this live game? The goals are thrown away.')) return;
-    if (await saveLive(() => null)) { window.closeVsManage(); toast('Live game deleted.'); }
+    if (await saveLive(() => null)) { drawManage(); toast('Live game deleted.'); }
 };
 async function endLiveGame(matchId, silent) {
     let final = false;
@@ -1516,7 +1549,7 @@ window.vsLiveSave = async function () {
     const m = V.open; if (!m || !m.live) return;
     const two = confirmedTeams(m).length <= 2;
     if (!confirm(two ? 'Save and end the match? This is the final score.' : 'Save this game and end it?')) return;
-    try { await endLiveGame(m.id); window.closeVsManage(); V.tab = two ? 'info' : 'stats'; drawPage(); } catch (e) { toast("Couldn't save the game.", 'error'); }
+    try { await endLiveGame(m.id); if (two) { window.closeVsManage(); V.tab = 'info'; drawPage(); autoCards(m.id); } } catch (e) { toast("Couldn't save the game.", 'error'); }   // 3-4 teams: back to the hub for the next game
 };
 function playEndAlarm() {
     try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.5; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 1.2); } catch (e) { /* ignore */ }
@@ -1555,9 +1588,9 @@ function playedGamesAdminHtml(m) {
             <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Game ${i + 1}</div>
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2.5">
                 <div class="flex items-center gap-2">
-                    <span class="flex-1 min-w-0 flex items-center gap-1.5 text-xs font-black">${teamLogoHtml(teamOf(r.a), 22)}<span class="truncate">${esc(teamOf(r.a).name)}</span></span>
+                    <span class="flex-1 min-w-0 flex items-center gap-1.5 text-xs font-black">${shirt(kitOf(m, r.a), 'text-sm')}<span class="truncate">${esc(teamOf(r.a).name)}</span></span>
                     <span class="shrink-0 bg-[#00F296]/15 text-[#00F296] font-black font-mono text-base px-3 py-1 rounded-xl">${esc(r.ga)} - ${esc(r.gb)}</span>
-                    <span class="flex-1 min-w-0 flex items-center justify-end gap-1.5 text-xs font-black"><span class="truncate">${esc(teamOf(r.b).name)}</span>${teamLogoHtml(teamOf(r.b), 22)}</span>
+                    <span class="flex-1 min-w-0 flex items-center justify-end gap-1.5 text-xs font-black"><span class="truncate">${esc(teamOf(r.b).name)}</span>${shirt(kitOf(m, r.b), 'text-sm')}</span>
                 </div>
                 ${(r.goals || []).length ? `<div class="grid grid-cols-2 gap-2 border-t border-white/10 pt-2"><div class="min-w-0 space-y-0.5">${scorers(r, r.a)}</div><div class="min-w-0 space-y-0.5">${scorers(r, r.b, true)}</div></div>` : ''}
                 <div class="grid grid-cols-2 gap-2 border-t border-white/10 pt-2.5">
@@ -1717,51 +1750,165 @@ function outcomeBoxHtml(m) {
         ${btn}
     </div>`;
 }
+/** Right after a match ends: wait for the saved result to arrive, then pop the result cards up on their own. */
+function autoCards(id) {
+    let n = 0;
+    const t = setInterval(() => {
+        const m = V.open;
+        if (!m || m.id !== id || ++n > 30) { clearInterval(t); return; }
+        if (m.status === 'final' && vsOutcome(m)) { clearInterval(t); window.openVsResultCards(); }
+    }, 200);
+}
+/** 3-4 teams: no single final score, so the organizer ends the event; the table decides the winner and loser. */
+window.vsEndEvent = async function () {
+    const m = V.open; if (!m) return;
+    if (m.live) { toast('Save or delete the game being played first.', 'error'); return; }
+    if (!(m.results || []).length) { toast('Play at least one game first.', 'error'); return; }
+    if (!confirm('End the event? The table decides the winner and loser, and the result cards are made.')) return;
+    try {
+        await changeMatch(m.id, (x) => { x.status = 'final'; x.score = {}; x.forfeit = ''; x._edit = { live: null }; });
+        window.closeVsManage(); V.tab = 'info'; drawPage();
+        toast('Event ended. 🏁'); autoCards(m.id);
+    } catch (e) { toast("Couldn't end the event.", 'error'); }
+};
 window.openVsResultCards = async function () {
     const m = V.open; if (!m) return;
     const o = vsOutcome(m); if (!o) { toast('No result yet.', 'error'); return; }
     try {
         const { openVsCards } = await import('./vs-cards.js');
-        await openVsCards({ ...o, info: { title: vsTitleOf(m), date: (window.fmtGameDate || prettyDate)(m.date || ''), location: m.location || '', format: m.format || '' } });
+        // Top scorers + own goals (for the Top Scorers card)
+        const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { teamId: id, name: 'Team' };
+        const kits = kitsOf(m);
+        const photo = (g) => { if (g.uid) return personAvatar(g.uid, '', g.name); const p = (m.teams || []).flatMap(t => playersOfTeam(t)).find(x => (x.name || '').toLowerCase() === String(g.name || '').toLowerCase()); return personAvatar((p && p.uid) || '', p && p.avatar, g.name); };
+        const all = (m.results || []).flatMap(r => r.goals || []).filter(g => g.name);
+        const count = (list, key) => { const c = {}; list.forEach(g => { const k = key(g); c[k] = c[k] || { name: g.name, avatar: photo(g), team: teamOf(g.teamId).name, kit: kits[g.teamId] || '#9ca3af', n: 0 }; c[k].n++; }); return Object.values(c).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)); };
+        const scorers = count(all.filter(g => !g.own), g => (g.uid || g.name.toLowerCase()) + '|' + g.teamId);
+        // an own goal is saved under the team that got the goal (the "gift")
+        const ownGoals = count(all.filter(g => g.own), g => g.uid || g.name.toLowerCase());
+        await openVsCards({ ...o, scorers, ownGoals, info: { title: vsTitleOf(m), date: (window.fmtGameDate || prettyDate)(m.date || ''), location: m.location || '', format: m.format || '' } });
     } catch (e) { console.error(e); toast("Couldn't make the cards.", 'error'); }
 };
 
-// ---------------------------------------------------------------- 📊 stats tab (games played, top scorers, team table)
-function statsHtml(m) {
-    const results = (m.results || []).slice();
-    const teamName = (id) => ((m.teams || []).find(t => t.teamId === id) || {}).name || 'Team';
-    const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { name: 'Team' };
-    const all = [...results.map(r => r.goals || []), ...(m.live ? [m.live.goals || []] : [])].flat();
-    const scorers = {};
-    all.filter(g => g.name && !g.own).forEach(g => { const k = (g.uid || g.name) + '|' + g.teamId; scorers[k] = scorers[k] || { name: g.name, teamId: g.teamId, n: 0 }; scorers[k].n++; });
-    const top = Object.values(scorers).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)).slice(0, 10);
-    const table = {};
-    results.forEach(r => {
-        [[r.a, r.ga, r.gb], [r.b, r.gb, r.ga]].forEach(([id, f, g]) => {
-            const t = table[id] = table[id] || { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 };
-            t.p++; t.gf += f; t.ga += g; if (f > g) t.w++; else if (f === g) t.d++; else t.l++;
-        });
+// ---------------------------------------------------------------- 👕 shirt colors (picked before the match, like a normal game's team colors)
+//   m.teams[i].kit = '#hex'. No pick yet: the team's own color, else a free color. Two teams never show the same color.
+const KIT_COLORS = [['Blue', '#3b82f6'], ['Red', '#ef4444'], ['Yellow', '#eab308'], ['Green', '#22c55e'], ['Purple', '#a855f7'], ['Pink', '#ec4899'], ['Orange', '#f97316'], ['White', '#ffffff'], ['Black', '#000000']];
+function kitsOf(m) {
+    const out = {}, used = new Set();
+    const teams = (m.teams || []).filter(t => t.state !== 'invited');
+    teams.forEach(t => { const k = /^#[0-9a-f]{6}$/i.test(t.kit || '') ? t.kit.toLowerCase() : ''; if (k && !used.has(k)) { out[t.teamId] = k; used.add(k); } });
+    teams.forEach(t => {
+        if (out[t.teamId]) return;
+        const own = (freshLook(t).colors || {}).primary;
+        const k = own && /^#[0-9a-f]{6}$/i.test(own) && !used.has(own.toLowerCase()) ? own.toLowerCase() : (KIT_COLORS.map(c => c[1]).find(c => !used.has(c)) || '#9ca3af');
+        out[t.teamId] = k; used.add(k);
     });
-    const rows = Object.values(table).map(t => ({ ...t, pts: t.w * 3 + t.d, gd: t.gf - t.ga })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
-    if (!results.length && !m.live) return `<p class="text-xs text-white/50 text-center py-8">No games yet. Stats show here once the organizer starts the match in Match management.</p>`;
-    return `<div class="space-y-4">
-        ${m.live ? `<div class="text-[10px] font-black uppercase tracking-wider text-red-400">● Playing now</div>${liveScoreHtml(m)}` : ''}
-        ${results.length ? `<div class="text-[10px] font-black uppercase tracking-wider text-white/55">Games played (${results.length})</div>
-        <div class="space-y-2">${results.map((r, i) => `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-1.5">
-            <div class="flex items-center gap-2"><span class="text-[10px] font-black text-white/45 w-12">GAME ${i + 1}</span>
-                <span class="flex-1 min-w-0 flex items-center justify-end gap-1.5 text-xs font-black truncate">${esc(teamName(r.a))} ${teamLogoHtml(teamOf(r.a), 22)}</span>
-                <span class="text-lg font-black font-mono px-1">${esc(r.ga)} - ${esc(r.gb)}</span>
-                <span class="flex-1 min-w-0 flex items-center gap-1.5 text-xs font-black truncate">${teamLogoHtml(teamOf(r.b), 22)} ${esc(teamName(r.b))}</span></div>
-            ${(r.goals || []).length ? `<div class="grid grid-cols-2 gap-2 text-[11px] text-white/65"><div class="text-right">${(r.goals || []).filter(g => g.teamId === r.a).map(g => `⚽ ${esc(goalName(g))}`).join('<br>')}</div><div>${(r.goals || []).filter(g => g.teamId === r.b).map(g => `⚽ ${esc(goalName(g))}`).join('<br>')}</div></div>` : ''}
-        </div>`).join('')}</div>` : ''}
-        ${top.length ? `<div class="text-[10px] font-black uppercase tracking-wider text-white/55">⚽ Top scorers</div>
-        <div class="bg-black/40 border border-white/10 rounded-2xl divide-y divide-white/5">${top.map((s, i) => `<div class="flex items-center gap-3 px-3 py-2 text-xs">
-            <span class="w-5 font-black ${i < 3 ? 'text-[#FACC15]' : 'text-white/45'}">${i + 1}</span><span class="flex-1 min-w-0 font-bold truncate">${esc(s.name)} <span class="text-white/45 font-normal">${esc(teamName(s.teamId))}</span></span><span class="font-black text-[#00F296]">${s.n}</span></div>`).join('')}</div>` : ''}
-        ${rows.length > 1 && (m.teamsCount || 2) > 2 ? `<div class="text-[10px] font-black uppercase tracking-wider text-white/55">🏆 Table</div>
-        <div class="bg-black/40 border border-white/10 rounded-2xl overflow-hidden">
-            <div class="grid grid-cols-[1fr_24px_24px_24px_24px_32px_32px] gap-1 px-3 py-2 text-[9px] font-black uppercase text-white/45 border-b border-white/10"><span>Team</span><span class="text-center">P</span><span class="text-center">W</span><span class="text-center">D</span><span class="text-center">L</span><span class="text-center">GD</span><span class="text-center text-[#00F296]">Pts</span></div>
-            ${rows.map(t => `<div class="grid grid-cols-[1fr_24px_24px_24px_24px_32px_32px] gap-1 px-3 py-2 text-xs items-center border-b border-white/5"><span class="font-bold truncate">${esc(teamName(t.id))}</span><span class="text-center text-white/70">${t.p}</span><span class="text-center text-white/70">${t.w}</span><span class="text-center text-white/70">${t.d}</span><span class="text-center text-white/70">${t.l}</span><span class="text-center text-white/70">${t.gd > 0 ? '+' : ''}${t.gd}</span><span class="text-center font-black text-[#00F296]">${t.pts}</span></div>`).join('')}
-        </div>` : ''}
+    return out;
+}
+const kitOf = (m, teamId) => kitsOf(m)[teamId] || '#9ca3af';
+const kitText = (hex) => (String(hex).toLowerCase() === '#000000' ? '#9ca3af' : hex);   // black text on black is invisible
+const shirt = (hex, cls = 'text-base') => `<i class="fa-solid fa-shirt ${cls} shrink-0" style="${String(hex).toLowerCase() === '#000000' ? 'color:#000;-webkit-text-stroke:1px #9ca3af' : `color:${hex}`}"></i>`;
+const canKit = (m, teamId) => (m.status === 'open' || m.status === 'challenge') && (m.organizerId === myUid() || myCaptainTeams().some(x => x.id === teamId));
+window.openVsKits = function () {
+    const m = V.open; if (!m) return;
+    const kits = kitsOf(m);
+    const teams = (m.teams || []).filter(t => t.state !== 'invited');
+    sheet('vs-kits', '👕 Shirt colors', `
+        <p class="text-[11px] text-white/60">Pick what each team wears so nobody shows up in the same color. Captains can pick their own team's.</p>
+        ${teams.map(t => { const mineOk = canKit(m, t.teamId); return `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center gap-2">${teamLogoHtml(t, 28)}<span class="flex-1 min-w-0 text-sm font-black truncate">${esc(t.name)}</span>${shirt(kits[t.teamId], 'text-2xl')}</div>
+            ${mineOk ? `<div class="flex flex-wrap gap-2">${KIT_COLORS.map(([name, hex]) => { const takenBy = teams.find(o => o.teamId !== t.teamId && kits[o.teamId] === hex); const on = kits[t.teamId] === hex; return `<button ${takenBy ? 'disabled' : ''} onclick="vsSetKit('${jsq(t.teamId)}','${hex}')" title="${name}${takenBy ? ' (taken by ' + esc(takenBy.name) + ')' : ''}"
+                class="w-9 h-9 rounded-full flex items-center justify-center ${on ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''} ${takenBy ? 'opacity-25 cursor-not-allowed' : ''}" style="background:${hex};border:1px solid rgba(255,255,255,.35)">${on ? `<i class="fa-solid fa-check text-xs" style="color:${hex === '#ffffff' || hex === '#eab308' ? '#000' : '#fff'}"></i>` : ''}</button>`; }).join('')}</div>` : '<p class="text-[11px] text-white/45">Only this team\'s captain or the organizer can change it.</p>'}
+        </div>`; }).join('')}`);
+};
+window.vsSetKit = async function (teamId, hex) {
+    const m = V.open; if (!m) return;
+    try {
+        await changeMatch(m.id, (x) => {
+            const kits = kitsOf(x);
+            if (Object.entries(kits).some(([id, k]) => id !== teamId && k === hex)) throw new Error('TAKEN');
+            const t = x.teams.find(e => e.teamId === teamId); if (!t) return false;
+            t.kit = hex;
+        });
+        const t = (V.open.teams || []).find(e => e.teamId === teamId); if (t) t.kit = hex;
+        window.openVsKits();
+        toast('Shirt color saved. 👕');
+    } catch (e) { toast(String(e && e.message) === 'TAKEN' ? 'Another team already has that color.' : "Couldn't save the color.", 'error'); }
+};
+
+// ---------------------------------------------------------------- 📊 stats tab (laid out like a normal game's Game Stats: Matches / Leaderboard / Top Scorers)
+window.vsStatsSub = function (k) { V.statsSub = k; drawPage(); };
+window.vsToggleTableTeam = function (id) { V.openTableTeam = V.openTableTeam === id ? '' : id; drawPage(); };
+function statsHtml(m) {
+    const sub = V.statsSub || 'matches';
+    const results = (m.results || []).slice();
+    const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { teamId: id, name: 'Team' };
+    const people = (id) => playersOfTeam(teamOf(id));
+    const photoFor = (g) => {
+        if (g.uid) return personAvatar(g.uid, '', g.name);
+        const p = [...people(g.teamId), ...(m.teams || []).flatMap(t => people(t.teamId))].find(x => (x.name || '').toLowerCase() === String(g.name || '').toLowerCase());
+        return personAvatar((p && p.uid) || '', p && p.avatar, g.name || 'Player');
+    };
+    const chip = (g, side) => `<div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 min-w-0">
+        <i class="fa-solid fa-futbol ${side ? 'text-red-400' : 'text-[#00F296]'} text-[9px]"></i>
+        ${g.name ? `<img src="${esc(photoFor(g))}" onerror="this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover">` : ''}
+        <span class="text-white font-bold text-[10px] truncate flex-1">${esc(goalName(g))}</span>
+        <span class="shrink-0">${teamLogoHtml(teamOf(g.teamId), 16)}</span></div>`;
+    const tabBtn = (k, label) => `<button onclick="vsStatsSub('${k}')" class="flex-1 py-2 rounded-xl text-xs font-black transition ${sub === k ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${label}</button>`;
+    const side = (id, right) => `<span class="flex-1 min-w-0 flex items-center ${right ? 'justify-start' : 'justify-end'} gap-1.5 text-xs font-black">${right ? teamLogoHtml(teamOf(id), 24) : ''}<span class="truncate">${esc(teamOf(id).name)}</span>${right ? '' : teamLogoHtml(teamOf(id), 24)}</span>`;
+    const matchCard = (label, a, b, goals, badge, ga, gb) => `<div class="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 shadow-md">
+        <div class="flex items-center justify-between text-xs font-bold uppercase"><span class="text-[#00F296] font-black">${label}</span>${badge}</div>
+        <div class="bg-black/80 rounded-2xl py-3 px-3 flex items-center gap-2 border border-white/10">${side(a)}<span class="text-xl font-black text-[#00F296] px-2 font-mono shrink-0">${ga ?? goals.filter(g => g.teamId === a).length} - ${gb ?? goals.filter(g => g.teamId === b).length}</span>${side(b, true)}</div>
+        <div class="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
+            <div class="space-y-1 min-w-0">${goals.filter(g => g.teamId === a).map(g => chip(g, 0)).join('') || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
+            <div class="space-y-1 min-w-0">${goals.filter(g => g.teamId === b).map(g => chip(g, 1)).join('') || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
+        </div></div>`;
+    let body = '';
+    if (sub === 'matches') {
+        const lp = m.live ? livePair(m) : [];
+        body = `<div class="space-y-3">
+            ${m.live && lp.length === 2 ? matchCard(`🔴 Live · Match ${results.length + 1}`, lp[0].teamId, lp[1].teamId, m.live.goals || [], '<span class="text-[10px] text-[#00F296] font-bold animate-pulse">In progress</span>') : ''}
+            ${!results.length && !m.live ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
+            ${results.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => matchCard(`Match ${i + 1}`, r.a, r.b, r.goals || [], '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Finished</span>', r.ga, r.gb)).join('')}
+        </div>`;
+    } else if (sub === 'leaderboard') {
+        const table = {};
+        (m.teams || []).filter(t => t.state !== 'invited').forEach(t => { table[t.teamId] = { id: t.teamId, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, live: false }; });
+        const add = (a, b, ga, gb, live) => [[a, ga, gb], [b, gb, ga]].forEach(([id, f, g]) => {
+            const t = table[id] = table[id] || { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 };
+            t.p++; t.gf += f; t.ga += g; if (live) t.live = true;
+            if (f > g) t.w++; else if (f === g) t.d++; else t.l++;
+        });
+        results.forEach(r => add(r.a, r.b, r.ga, r.gb));
+        if (m.live) { const [A, B] = livePair(m); const G = m.live.goals || []; if (A && B) add(A.teamId, B.teamId, G.filter(g => g.teamId === A.teamId).length, G.filter(g => g.teamId === B.teamId).length, true); }
+        const rows = Object.values(table).map(t => ({ ...t, pts: t.w * 3 + t.d, gd: t.gf - t.ga })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
+        body = `<div class="bg-[#141821] border border-white/10 rounded-2xl overflow-hidden shadow-xl"><table class="w-full text-left border-collapse text-sm">
+            <thead><tr class="border-b border-white/10 text-white/50 font-bold text-xs"><th class="py-3 pl-4 pr-2">Club</th><th class="py-3 px-1.5 text-center w-9">MP</th><th class="py-3 px-1.5 text-center w-9">W</th><th class="py-3 px-1.5 text-center w-9">D</th><th class="py-3 px-1.5 text-center w-9">L</th><th class="py-3 px-1.5 text-center w-10">GD</th><th class="py-3 pl-1.5 pr-4 text-center w-11 text-[#00F296]">Pts</th></tr></thead>
+            <tbody>${rows.map((t, i) => { const open = V.openTableTeam === t.id; const ps = people(t.id); return `
+                <tr class="hover:bg-white/5 cursor-pointer ${open ? '' : 'border-b border-white/5'}" onclick="vsToggleTableTeam('${jsq(t.id)}')" title="Show players">
+                    <td class="py-3 pl-4 pr-2"><div class="flex items-center gap-2.5 min-w-0"><span class="text-white/50 font-semibold w-4 text-right shrink-0">${i + 1}</span><span class="shrink-0">${teamLogoHtml(teamOf(t.id), 24)}</span><span class="font-bold truncate">${esc(teamOf(t.id).name)}</span>${t.live ? '<span class="w-2 h-2 rounded-full bg-[#00F296] inline-block animate-ping shrink-0" title="Playing live now"></span>' : ''}<i class="fa-solid fa-chevron-${open ? 'up' : 'down'} text-[9px] text-white/30 shrink-0"></i></div></td>
+                    <td class="py-3 px-1.5 text-center text-white/80">${t.p}</td><td class="py-3 px-1.5 text-center text-white/80">${t.w}</td><td class="py-3 px-1.5 text-center text-white/80">${t.d}</td><td class="py-3 px-1.5 text-center text-white/80">${t.l}</td>
+                    <td class="py-3 px-1.5 text-center text-white/80">${t.gd >= 0 ? '+' + t.gd : t.gd}</td><td class="py-3 pl-1.5 pr-4 text-center font-black text-[#00F296]">${t.pts}</td></tr>
+                ${open ? `<tr class="border-b border-white/5"><td colspan="7"><div class="flex flex-wrap gap-1.5 pb-3 pl-[46px] pr-4">${ps.length ? ps.map(p => { const nm = p.uid ? personName(p.uid, p.name) : p.name; return `<div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full"><img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover"><span class="text-[10px] font-bold">${esc(String(nm || '').split(' ')[0])}</span></div>`; }).join('') : '<span class="text-[10px] text-white/40 italic">No players listed</span>'}</div></td></tr>` : ''}`; }).join('')}</tbody></table></div>`;
+    } else {
+        const all = [...results.flatMap(r => r.goals || []), ...(m.live ? m.live.goals || [] : [])];
+        const sc = {};
+        all.filter(g => g.name && !g.own).forEach(g => { const k = (g.uid || g.name.toLowerCase()) + '|' + g.teamId; sc[k] = sc[k] || { g, n: 0 }; sc[k].n++; });
+        const top = Object.values(sc).sort((a, b) => b.n - a.n || String(a.g.name).localeCompare(String(b.g.name)));
+        const own = {};
+        all.filter(g => g.own && g.name).forEach(g => { const k = g.uid || g.name.toLowerCase(); own[k] = own[k] || { g, n: 0 }; own[k].n++; });
+        body = `<div class="bg-black/40 border border-emerald-500/30 rounded-2xl overflow-hidden shadow-xl"><table class="w-full text-left border-collapse text-xs">
+            <thead><tr class="bg-black/60 border-b border-white/10 text-white/70 uppercase font-black text-[10px]"><th class="p-3">Player</th><th class="p-3 text-right">Goals</th></tr></thead>
+            <tbody class="divide-y divide-white/10">${top.length ? top.map(({ g, n }, i) => `<tr class="hover:bg-white/5"><td class="p-3 font-bold"><div class="flex items-center gap-2.5 min-w-0"><span class="${i < 3 ? 'text-[#FACC15]' : 'text-white/40'} font-black">#${i + 1}</span>
+                <img src="${esc(photoFor(g))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover border border-white/20">
+                <span class="min-w-0"><span class="block truncate">${esc(g.name)}</span><span class="flex items-center gap-1 text-[10px] text-white/50 font-normal">${teamLogoHtml(teamOf(g.teamId), 14)}${esc(teamOf(g.teamId).name)}</span></span></div></td>
+                <td class="p-3 text-right font-black text-[#00F296] whitespace-nowrap">⚽ ${n}</td></tr>`).join('') : '<tr><td colspan="2" class="p-6 text-center text-white/40 italic">No goalscorers recorded yet.</td></tr>'}</tbody></table></div>
+            ${Object.keys(own).length ? `<div class="bg-red-500/10 border border-red-500/30 rounded-2xl p-3 space-y-2"><div class="text-[10px] font-black uppercase tracking-wider text-red-300">🙈 Own goals (oops)</div>
+                ${Object.values(own).map(({ g, n }) => `<div class="flex items-center gap-2 text-xs"><img src="${esc(photoFor({ ...g, teamId: '' }))}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover grayscale"><span class="flex-1 font-bold truncate">${esc(g.name)}</span><span class="font-black text-red-300">${n}</span></div>`).join('')}</div>` : ''}`;
+    }
+    return `<div class="space-y-4 py-1">
+        <div class="bg-black/40 border border-emerald-500/30 p-1 rounded-2xl flex items-center gap-1">${tabBtn('matches', 'Matches')}${tabBtn('leaderboard', 'Leaderboard')}${tabBtn('top-scorers', 'Top Scorers')}</div>
+        ${body}
+        ${vsOutcome(m) && (m.status === 'final' || (m.date && m.date < ymdToday())) ? `<button onclick="openVsResultCards()" class="w-full bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-sm">📸 Result cards</button>` : ''}
     </div>`;
 }
 
@@ -2063,7 +2210,7 @@ window.saveVsScore = async function () {
     if (isNaN(ga) || isNaN(gb)) { toast('Enter both scores.', 'error'); return; }
     try {
         await changeMatch(m.id, (x) => { x.score = { [a.teamId]: ga, [b.teamId]: gb }; x.forfeit = ''; x.status = 'final'; });
-        document.getElementById('vs-score')?.remove(); toast('Final score saved. 🏁');
+        document.getElementById('vs-score')?.remove(); toast('Final score saved. 🏁'); autoCards(m.id);
     } catch (e) { toast("Couldn't save the score.", 'error'); }
 };
 window.saveVsForfeit = async function (loserId) {
@@ -2073,7 +2220,7 @@ window.saveVsForfeit = async function (loserId) {
     if (!confirm(`Count it as a 3-0 win for ${winner.name}?`)) return;
     try {
         await changeMatch(m.id, (x) => { x.score = { [winner.teamId]: 3, [loserId]: 0 }; x.forfeit = loserId; x.status = 'final'; });
-        document.getElementById('vs-score')?.remove(); toast('Saved as a forfeit.');
+        document.getElementById('vs-score')?.remove(); toast('Saved as a forfeit.'); autoCards(m.id);
     } catch (e) { toast("Couldn't save.", 'error'); }
 };
 window.appealVs = async function () {
@@ -2088,7 +2235,12 @@ window.appealVs = async function () {
 };
 window.cancelVs = async function () {
     const m = V.open; if (!m || !confirm('Cancel this match? Every team gets a notification.')) return;
-    try { await changeMatch(m.id, (x) => { x.status = 'cancelled'; }); toast('Match cancelled.'); } catch (e) { toast("Couldn't cancel.", 'error'); }
+    try {
+        await changeMatch(m.id, (x) => { x.status = 'cancelled'; x._edit = { live: null }; });
+        toast('Match cancelled.');
+        window.closeVsManage(); window.closeVsMatch && window.closeVsMatch();       // it's off the Games list now
+        if (typeof window.renderEvents === 'function') window.renderEvents();
+    } catch (e) { toast("Couldn't cancel.", 'error'); }
 };
 window.rematchVs = function () {
     const m = V.open; if (!m) return;
@@ -2104,9 +2256,35 @@ window.rematchVs = function () {
 
 // ---------------------------------------------------------------- a team's VS matches (team page > Schedule)
 export function teamVsHtml(teamId) {
-    const list = V.list.filter(m => (m.teamIds || []).includes(teamId) && m.status !== 'declined').sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+    const list = V.list.filter(m => (m.teamIds || []).includes(teamId) && m.status !== 'declined' && m.status !== 'cancelled').sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
     if (!list.length) return '';
     return `<div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-300">VS Matches (${list.length})</div>
         <div class="space-y-2">${list.map(vsCardHtml).join('')}</div>`;
 }
 window.vsTeamHtml = teamVsHtml;
+
+// ---------------------------------------------------------------- a player's VS matches (Profile > Games: Upcoming / Previous)
+/** VS matches someone organizes or plays in (their team is in the match). Returns [{ date, time, html }] to mix with normal games. */
+window.vsGamesFor = function (uid, which, { beforeOpen = '' } = {}) {
+    if (!uid) return [];
+    const today = ymdToday();
+    const teamsOf = uid === myUid() ? (TS().mine || []) : [...(TS().all || []), ...Object.values(teamCache)].filter(t => t && (t.memberUids || []).includes(uid));
+    const ids = new Set(teamsOf.map(t => t.id || t.teamId));
+    return V.list.filter(m => m.status !== 'cancelled' && m.status !== 'declined' && (m.organizerId === uid || (m.teamIds || []).some(id => ids.has(id))))
+        .filter(m => { const over = m.status === 'final' || (m.date || '') < today; return which === 'upcoming' ? !over : over; })
+        .map(m => {
+            const conf = confirmedTeams(m), mine = conf.find(t => ids.has(t.teamId));
+            const score = m.status === 'final' && m.score && conf.length === 2 ? `${m.score[conf[0].teamId] ?? 0} - ${m.score[conf[1].teamId] ?? 0}` : '';
+            return { date: m.date || '', time: m.time || '', html: `
+            <div onclick="${beforeOpen}openVsMatch('${jsq(m.id)}')" class="bg-black/50 border border-[#E8262B]/40 hover:border-[#E8262B] rounded-xl p-3 cursor-pointer transition flex items-center justify-between gap-2">
+                <div class="min-w-0 flex items-center gap-2.5">
+                    ${mine ? `<span class="shrink-0">${teamLogoHtml(mine, 30)}</span>` : ''}
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2"><span class="text-[9px] px-1.5 py-0.5 rounded font-black bg-[#E8262B] text-white shrink-0">VS</span><span class="text-xs font-black text-white truncate">${esc(vsTitleOf(m))}</span></div>
+                        <p class="text-[10px] text-white/60 mt-0.5"><i class="fa-solid fa-calendar text-[#00F296]"></i> ${esc(prettyDate(m.date) || 'TBD')} • ${esc(prettyTime(m.time) || '')}${score ? ` • <b class="text-white">${esc(score)}</b>` : ''}</p>
+                    </div>
+                </div>
+                <span class="text-[10px] font-bold text-white/70 shrink-0">View ›</span>
+            </div>` };
+        });
+};

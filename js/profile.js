@@ -119,12 +119,13 @@ window.renderProfileEventsList = function() {
         }
     });
 
-    if (filteredEvents.length === 0) {
+    const vsRows = window.vsGamesFor ? window.vsGamesFor(userUid, window.profileEventsTabState) : [];
+    if (filteredEvents.length === 0 && !vsRows.length) {
         contentContainer.innerHTML = `<div class="text-center text-xs text-white/40 py-6">No ${window.profileEventsTabState} games found.</div>`;
         return;
     }
 
-    contentContainer.innerHTML = filteredEvents.map(ev => `
+    const rows = filteredEvents.map(ev => ({ date: (ev.date || '').substring(0, 10), time: String(ev.time || ''), html: `
         <div onclick="openEventDetails('${ev.id}')" class="bg-black/50 border border-white/10 hover:border-[#00F296] rounded-xl p-3 cursor-pointer transition flex items-center justify-between">
             <div class="space-y-1 truncate pr-2">
                 <div class="flex items-center gap-2">
@@ -136,7 +137,9 @@ window.renderProfileEventsList = function() {
             ${window.profileEventsTabState === 'previous' ? '<span class="text-[9px] px-2 py-0.5 rounded-full font-bold bg-white/10 text-white/70 shrink-0 mr-2"><i class="fa-solid fa-flag-checkered"></i> Game ended</span>' : ''}
             <button class="bg-black/80 hover:bg-black text-white font-bold px-3 py-1.5 rounded-lg text-xs border border-white/10 shrink-0">View</button>
         </div>
-    `).join('');
+    ` })).concat(vsRows);
+    rows.sort((a, b) => { const k = `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`); return window.profileEventsTabState === 'upcoming' ? k : -k; });
+    contentContainer.innerHTML = rows.map(r => r.html).join('');
 };
 
 window.openEditProfileModal = function() {

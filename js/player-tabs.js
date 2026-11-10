@@ -98,8 +98,9 @@ function gamesHtml(uid, which) {
         const day = String(ev.date || '').slice(0, 10);
         return which === 'upcoming' ? (day >= today && !ev.isSessionEnded) : (day < today || ev.isSessionEnded);
     }).sort((a, b) => which === 'upcoming' ? String(a.date).localeCompare(String(b.date)) : String(b.date).localeCompare(String(a.date)));
-    if (!list.length) return `<div class="text-center text-xs text-white/40 py-6">No ${which} games.</div>`;
-    return list.map(ev => `
+    const vs = window.vsGamesFor ? window.vsGamesFor(uid, which, { beforeOpen: "document.getElementById('player-stats-sheet')?.remove(); " }) : [];
+    if (!list.length && !vs.length) return `<div class="text-center text-xs text-white/40 py-6">No ${which} games.</div>`;
+    const rows = list.map(ev => ({ date: String(ev.date || '').slice(0, 10), time: String(ev.time || ''), html: `
         <div onclick="document.getElementById('player-stats-sheet')?.remove(); openEventDetails('${esc(ev.id)}')" class="bg-black/50 border border-white/10 hover:border-[#00F296] rounded-xl p-3 cursor-pointer transition flex items-center justify-between gap-2">
             <div class="min-w-0">
                 <div class="flex items-center gap-2"><span class="text-xs font-black text-white truncate">${esc(ev.title || 'Soccer Match')}</span>
@@ -107,7 +108,9 @@ function gamesHtml(uid, which) {
                 <p class="text-[10px] text-white/60"><i class="fa-solid fa-calendar text-[#00F296]"></i> ${esc(fmtGameDate(ev.date) || 'TBD')} • ${esc(ev.time || '')}</p>
             </div>
             <span class="text-[10px] font-bold text-white/70 shrink-0">View ›</span>
-        </div>`).join('');
+        </div>` })).concat(vs);
+    rows.sort((a, b) => { const k = `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`); return which === 'upcoming' ? k : -k; });
+    return rows.map(r => r.html).join('');
 }
 function gamesBlock(uid, key) {
     return `<div class="space-y-2">

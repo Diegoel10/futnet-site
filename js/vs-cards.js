@@ -199,6 +199,50 @@ async function drawDraw(ctx, d, A) {
     footer(ctx, A.logo);
 }
 
+const OG_LINES = ['SCORED FOR THE WRONG TEAM 🙈', 'THANKS FOR THE ASSIST 🎁', 'WRONG GOAL, BRO 🤦', 'DOUBLE AGENT 🕵️', 'GPS NOT WORKING 🧭'];
+async function drawScorers(ctx, d, A) {
+    background(ctx, A.bg, GOLD);
+    header(ctx, A.logo, d.info);
+    text(ctx, 'GOLDEN BOOT', W - 60, 82, { font: `42px ${MARKER}`, color: GOLD, align: 'right', rotate: -0.05 });
+    brush(ctx, W / 2, 200, 820, 140, '#1D4ED8', 5);
+    text(ctx, '⚽ TOP SCORERS', W / 2, 198, { font: `100px ${MARKER}`, color: '#fff', maxWidth: 780 });
+    const top = d.scorers.slice(0, 3), rest = d.scorers.slice(3, 6);
+    const og = (d.ownGoals || []).slice(0, 3);
+    const imgs = await Promise.all([...top, ...og].map(p => loadImage(p.avatar)));
+    // podium: #1 in the middle, bigger
+    const order = top.length === 3 ? [1, 0, 2] : top.length === 2 ? [0, 1] : [0];
+    const slotsX = top.length === 3 ? [W / 2 - 400, W / 2, W / 2 + 400] : top.length === 2 ? [W / 2 - 220, W / 2 + 220] : [W / 2];
+    const yTop = og.length ? 400 : 430;
+    order.forEach((idx, k) => {
+        const p = top[idx]; if (!p) return;
+        const first = idx === 0, r = first ? 110 : 82, cx = slotsX[k], cy = yTop + (first ? 0 : 30);
+        const ring = idx === 0 ? GOLD : idx === 1 ? '#D1D5DB' : '#D97706';
+        avatar(ctx, imgs[idx], p.name, cx, cy, r, ring, {});
+        if (first) { ctx.save(); ctx.shadowColor = GOLD; ctx.shadowBlur = 20; text(ctx, '👑', cx, cy - r - 30, { font: `64px ${BODY}`, shadow: false }); ctx.restore(); }
+        text(ctx, p.name.split(' ')[0].toUpperCase(), cx, cy + r + 40, { font: `900 ${first ? 40 : 32}px ${BODY}`, color: first ? GOLD : '#fff', maxWidth: 360 });
+        text(ctx, `${p.n} ${p.n === 1 ? 'GOAL' : 'GOALS'}`, cx, cy + r + 88, { font: `${first ? 56 : 44}px ${BLOCK}`, color: ring });
+        text(ctx, p.team.toUpperCase(), cx, cy + r + 128, { font: `800 22px ${BODY}`, color: p.kit === '#000000' ? '#9ca3af' : p.kit, maxWidth: 360 });
+    });
+    if (rest.length && !og.length) {
+        text(ctx, rest.map((p, i) => `${i + 4}. ${p.name.split(' ')[0].toUpperCase()} ${p.n}`).join('    '), W / 2, FOOT - 40, { font: `900 30px ${BODY}`, color: 'rgba(255,255,255,0.85)', maxWidth: 1260 });
+    }
+    if (og.length) {   // the cheeky part
+        const y0 = FOOT - 175, h = 160;
+        ctx.save(); rr(ctx, 70, y0, W - 140, h, 26); ctx.fillStyle = 'rgba(127,29,29,0.55)'; ctx.fill(); ctx.setLineDash([14, 10]); ctx.lineWidth = 3; ctx.strokeStyle = '#FCA5A5'; ctx.stroke(); ctx.restore();
+        text(ctx, '🙈 OWN GOAL HALL OF SHAME', 110, y0 + 34, { font: `900 28px ${BODY}`, color: '#FECACA', align: 'left' });
+        text(ctx, pick(OG_LINES, d.seed), W - 110, y0 + 34, { font: `34px ${MARKER}`, color: '#fff', align: 'right', rotate: -0.03 });
+        const step = (W - 220) / og.length;
+        og.forEach((p, i) => {
+            const cx = 110 + step * i + 50, cy = y0 + 104;
+            avatar(ctx, imgs[top.length + i], p.name, cx, cy, 38, '#EF4444', { grey: true, glow: false });
+            text(ctx, '🤡', cx + 32, cy - 26, { font: `34px ${BODY}`, shadow: false });
+            text(ctx, `${p.name.split(' ')[0].toUpperCase()}  ×${p.n}`, cx + 56, cy - 6, { font: `900 28px ${BODY}`, align: 'left', maxWidth: step - 120 });
+            text(ctx, `🎁 a gift for ${String(p.team).toUpperCase()}`, cx + 56, cy + 24, { font: `800 18px ${BODY}`, color: 'rgba(255,255,255,0.65)', align: 'left', maxWidth: step - 120 });
+        });
+    }
+    footer(ctx, A.logo);
+}
+
 /** d = { info:{title,date,location,format}, winner, loser, pair (draw), draw, multi, forfeit }  team = { name, logo, colors, short, gf, ga, w, d, l, pts, scorers:[{name,n}], players:[{name,avatar,captain}] } */
 export async function makeVsCards(d) {
     await loadFonts();
@@ -217,6 +261,7 @@ export async function makeVsCards(d) {
         if (d.winner) await make('winner', 'Winner', drawWinner);
         if (d.loser) await make('loser', 'Loser', drawLoser);
     }
+    if ((d.scorers || []).length || (d.ownGoals || []).length) await make('scorers', 'Top Scorers', drawScorers);
     return out;
 }
 
@@ -233,7 +278,7 @@ export async function openVsCards(d) {
     for (const c of cards) { try { files.push(new File([await toBlob(c.canvas)], `${slug}-${c.key}.jpg`, { type: 'image/jpeg' })); } catch (e) { files.push(null); } }
     m.innerHTML = `<div class="max-w-2xl mx-auto p-4 pb-16 space-y-4">
         <div class="flex items-center justify-between sticky top-0 bg-[#040E13] py-2 z-10">
-            <div><div class="text-base font-black">Result cards 📸</div><div class="text-[11px] text-white/60">One for the winners, one for the losers. Send them one by one.</div></div>
+            <div><div class="text-base font-black">Result cards 📸</div><div class="text-[11px] text-white/60">Winners, losers and top scorers. Send them one by one.</div></div>
             <button onclick="document.getElementById('vs-cards-modal').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark text-sm"></i></button>
         </div>
         ${files.some(f => !f) ? '<div class="text-xs bg-amber-500/10 border border-amber-400/40 rounded-xl p-3">Some photos couldn\'t be added to the images. Take a screenshot instead.</div>' : ''}
