@@ -293,8 +293,11 @@ window.handleSaveProfile = async function(e) {
     e.preventDefault();
     if (!window.currentUser) return;
 
-    window.userProfile.firstName = document.getElementById('edit-firstname').value;
-    window.userProfile.lastName = document.getElementById('edit-lastname').value;
+    // Never save a blank name (it shows as "Player" everywhere)
+    const newFirst = document.getElementById('edit-firstname').value.trim();
+    if (!newFirst) { if (window.showToast) window.showToast('Please enter your first name.', 'error'); return; }
+    window.userProfile.firstName = newFirst;
+    window.userProfile.lastName = document.getElementById('edit-lastname').value.trim();
     window.userProfile.nickname = document.getElementById('edit-nickname').value.trim();
     window.userProfile.avatar = document.getElementById('edit-avatar').value;
     // Favorite position from the soccer field (keeps the old value when nothing was tapped).

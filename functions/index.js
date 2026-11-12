@@ -2735,6 +2735,23 @@ async function ratingsFor(uid, communityId, position) {
 }
 
 /** Community Info: top 5 players (skill stars) and top 5 scorers, from this community's finished games. */
+/** Someone's public card (directory) lost its name (an app saved it blank), so they'd show as "Player".
+ *  Take the name from their own profile instead, and put it back on the card so everything shows it again. */
+async function fillMissingNames(dir) {
+  await Promise.all(Object.keys(dir).map(async (u) => {
+    const d = dir[u] || {};
+    if (String(d.name || `${d.firstName || ""} ${d.lastName || ""}`).trim()) return;
+    try {
+      const p = (await db.collection("artifacts").doc(APP_ID).collection("users").doc(u).collection("profile").doc("data").get()).data() || {};
+      let name = String(p.name || `${p.firstName || ""} ${p.lastName || ""}`).trim();
+      if (!name || name === "Player") { try { name = String((await admin.auth().getUser(u)).displayName || "").trim(); } catch (e) { /* no auth name */ } }
+      if (!name || name === "Player") return;
+      dir[u] = { ...d, name };
+      await col("directory").doc(u).set({ name }, { merge: true });
+    } catch (e) { logger.warn("name repair", u, e.message); }
+  }));
+}
+
 exports.communityTop = onCall(async (request) => {
   if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
   const communityId = String((request.data || {}).communityId || "");
@@ -2781,6 +2798,7 @@ exports.communityTop = onCall(async (request) => {
   const uids = uniq([...players, ...scorers, ...losers, ...ogs, ...sessionKings, ...sessionLosers, ...best, ...worst].map((r) => r.uid));
   const dir = {};
   await Promise.all(uids.map((u) => col("directory").doc(u).get().then((d) => { dir[u] = d.data() || {}; }).catch(() => { dir[u] = {}; })));
+  await fillMissingNames(dir);
   const who = (u) => {
     const d = dir[u] || {};
     return { uid: u, name: d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player", avatar: String(d.avatar || "").startsWith("http") ? d.avatar : "" };
@@ -2908,6 +2926,7 @@ async function topScorersOf(communityId) {
     const top = rows.sort((a, b) => (b.goals - a.goals) || (a.games - b.games)).slice(0, 5);
     const dir = {};
     await Promise.all(top.map((r) => col("directory").doc(r.uid).get().then((d) => { dir[r.uid] = d.data() || {}; }).catch(() => { dir[r.uid] = {}; })));
+    await fillMissingNames(dir);
     return top.map((r) => {
       const d = dir[r.uid] || {};
       const full = d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player";
