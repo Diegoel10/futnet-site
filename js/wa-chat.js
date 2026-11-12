@@ -8,6 +8,7 @@ import { db, appId, app } from './firebase-config.js';
 import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 import { doc, setDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+import { smartText } from './smart-text.js';
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -442,7 +443,7 @@ export function renderWhatsApp(messages, opts = {}) {
         }
         const body = deleted
             ? `<span class="wa-text wa-deleted"><i class="fa-solid fa-ban" style="margin-right:5px"></i>${DELETED_TEXT}</span>`
-            : (m.poll && Array.isArray(m.poll.options) ? pollHtml(m.poll, myUid, key) : `${media}<span class="wa-text">${esc(caption)}</span>`);
+            : (m.poll && Array.isArray(m.poll.options) ? pollHtml(m.poll, myUid, key) : `${media}<span class="wa-text">${smartText(caption)}</span>`);
         const quote = !deleted && m.replyTo && typeof m.replyTo === 'object'
             ? `<span class="wa-quote" onclick="event.stopPropagation(); waJumpTo('${esc(String(m.replyTo.id || ''))}')"><b>${String(m.replyTo.uid) === myUid ? 'You' : esc(m.replyTo.name || 'Player')}</b><span>${esc(m.replyTo.text || '')}</span></span>` : '';
         const edited = m.edited && !deleted ? '<span class="wa-edited">Edited</span>' : '';

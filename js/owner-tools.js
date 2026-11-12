@@ -4,7 +4,7 @@
 import { auth } from './firebase-config.js';
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
-const OWNER_EMAIL_SHA256 = ['0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b', 'dc33de30406203e7cdf8490b5ef4b5c7f993bdb2989bc3025bc5e4dd6b129378'];
+const OWNER_EMAIL_SHA256 = ['0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b', 'dc33de30406203e7cdf8490b5ef4b5c7f993bdb2989bc3025bc5e4dd6b129378', '903a1d99aac1826f6f04f45b8b6e56911ea4cbfb8a85a4c09631906a726de23a'];
 const esc = (t) => String(t || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fn = (name) => httpsCallable(getFunctions(auth.app, 'us-central1'), name, { timeout: 540000 });
 

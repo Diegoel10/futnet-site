@@ -12,8 +12,9 @@
 //   vsMatches/{id}/appeals/{autoId}: { teamId, byUid, byName, note, at }
 // The server sends the notifications, drops teams that didn't pay in time, and adds results to the teams' records.
 import { db, appId } from './firebase-config.js';
-import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTransaction, serverTimestamp, query, orderBy, limit, getDocs, increment, arrayUnion }
+import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTransaction, serverTimestamp, query, orderBy, limit, getDocs, increment, arrayUnion, where }
     from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { smartText } from './smart-text.js';
 import { teamLogoHtml as baseLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { liveSource, liveLinkProblem, liveSlotHtml } from './livestream.js';   // same YouTube / Facebook player as games
@@ -127,6 +128,7 @@ function start() {
         V.list = s.docs.map(d => ({ ...d.data(), id: d.id })).filter(m => (m.date || '') >= cut);
         try { window.renderEvents && document.getElementById('events-grid') && window.renderEvents(); } catch (e) { /* ignore */ }
         try { window.refreshTeamsUi && window.refreshTeamsUi(); } catch (e) { /* ignore */ }
+        try { window.refreshCommunityGamesTab && window.refreshCommunityGamesTab(); } catch (e) { /* ignore */ }
         if (V.open) { const fresh = V.list.find(m => m.id === V.open.id); if (fresh) { V.open = fresh; drawPage(); if (V.manage) drawManage(); } }
     }, () => {});
 }
@@ -281,6 +283,32 @@ function readWhere(p) {
 }
 
 // ---------------------------------------------------------------- Create VS Match (the + menu)
+/** Communities I'm an admin of (a VS match can be posted in one of them). */
+function myAdminCommunities() {
+    const roles = window.myCommunityRoles || {}, cache = window.communitiesCache || {};
+    return Object.keys(roles).filter(id => roles[id] === 'admin' && cache[id]).map(id => ({ id, name: cache[id].name || 'Community' }));
+}
+function communityPickHtml(prefill) {
+    const list = myAdminCommunities();
+    if (!list.length && !prefill.communityId) return '';
+    const cur = prefill.communityId || '';
+    return `<div class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 space-y-2">
+        ${LBL('🏘️ Post in a community (optional)')}
+        <select id="vs-comm" onchange="document.getElementById('vs-credit-wrap').style.display = this.value ? '' : 'none'" class="${INPUT}">
+            <option value="">No community</option>
+            ${list.map(c => `<option value="${esc(c.id)}" ${c.id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+            ${cur && !list.some(c => c.id === cur) ? `<option value="${esc(cur)}" selected>${esc(prefill.communityName || 'Community')}</option>` : ''}
+        </select>
+        <p class="text-[10px] text-white/50">It shows in the community's Games, members get told, and goals count in its stats.</p>
+        <div id="vs-credit-wrap" style="${cur ? '' : 'display:none'}">${toggle('vs-credit', '💳 Teams can pay with community credit', "The captain pays it all from their credit, or splits it so each player pays their share.", prefill.payWithCredit !== false)}</div>
+    </div>`;
+}
+const readCommunity = () => {
+    const id = val('vs-comm');
+    if (!id) return { communityId: '', communityName: '', payWithCredit: false };
+    return { communityId: id, communityName: ((window.communitiesCache || {})[id] || {}).name || '', payWithCredit: !!document.getElementById('vs-credit')?.checked };
+};
+
 window.openCreateVs = function (prefill = {}) {
     if (!myUid()) return;
     const mine = myCaptainTeams();
@@ -306,6 +334,7 @@ ${whereFields('vs', prefill)}
         <div>${LBL('How many teams?')}${seg('vs-count', [['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams']], String(prefill.teamsCount || 2))}</div>
         <div>${LBL('Level')}${seg('vs-level', LEVELS, prefill.level || 'casual')}</div>
         <div>${LBL('Price per team ($, 0 = free)')}<input id="vs-price" inputmode="decimal" class="${INPUT}" value="${esc(prefill.priceCents ? (prefill.priceCents / 100) : '')}" placeholder="0"></div>
+        ${communityPickHtml(prefill)}
         <details class="rounded-xl border border-white/10 bg-white/5 px-3 py-2" ${prefill.description || prefill.rules || prefill.refundNote ? 'open' : ''}>
             <summary class="text-xs font-black cursor-pointer py-1">📝 Description, rules & refund policy</summary>
             <div class="space-y-2 pt-2">
@@ -364,7 +393,7 @@ window.saveCreateVs = async function () {
             format: segVal('vs-format') || '7v7', level: segVal('vs-level') || 'casual', teamsCount: parseInt(segVal('vs-count'), 10) || 2, priceCents: price0,
             firstToPay: !!document.getElementById('vs-first')?.checked, partial: !!document.getElementById('vs-partial')?.checked,
             payByHours: parseInt(segVal('vs-payby'), 10) || 0, rosterLockHours: parseInt(segVal('vs-lock'), 10) || 0, squadsOn: !!document.getElementById('vs-squads')?.checked,
-            description: val('vs-desc'), rules: val('vs-rules'), refundNote: val('vs-refund') };
+            description: val('vs-desc'), rules: val('vs-rules'), refundNote: val('vs-refund'), ...readCommunity() };
         try {
             await changeMatch(pre0.editId, (x) => { if (fields.teamsCount < spotsTaken(x)) throw new Error('TOO_FEW'); Object.assign(x, fields); x._edit = fields; settle(x); });
             document.getElementById('vs-create')?.remove();
@@ -388,7 +417,7 @@ window.saveCreateVs = async function () {
         firstToPay: !!document.getElementById('vs-first')?.checked, partial: !!document.getElementById('vs-partial')?.checked,
         payByHours: parseInt(segVal('vs-payby'), 10) || 0, rosterLockHours: parseInt(segVal('vs-lock'), 10) || 0,
         squadsOn: !!document.getElementById('vs-squads')?.checked, forming: [],
-        description: val('vs-desc'), rules: val('vs-rules'), refundNote: val('vs-refund'),
+        description: val('vs-desc'), rules: val('vs-rules'), refundNote: val('vs-refund'), ...readCommunity(),
         organizerId: myUid(), organizerName: myName(), organizerAvatar: myAvatar(), status: 'open', teams, teamIds: teams.map(t => t.teamId), payments: [],
         rematchOf: pre.rematchOf || '', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     };
@@ -648,7 +677,13 @@ function teamFull(teamId) {
 function drawPage() {
     const m = V.open; if (!m) return;
     let el = document.getElementById('vs-page');
-    if (!el) { el = document.createElement('div'); el.id = 'vs-page'; el.dataset.close = 'closeVsMatch'; el.className = 'fixed inset-0 z-[135] bg-[#01060A]/95 backdrop-blur-sm overflow-y-auto text-white'; document.body.appendChild(el); }
+    if (!el) {
+        el = document.createElement('div'); el.id = 'vs-page'; el.dataset.close = 'closeVsMatch';
+        el.className = 'fixed inset-0 z-[135] overflow-y-auto text-white';
+        el.style.background = 'inherit';   // same background photo as the rest of the app (follows the theme), like a normal game page
+        el.style.backgroundColor = '#01060A';
+        document.body.appendChild(el);
+    }
     const boss = m.organizerId === myUid();
     const n = m.teamsCount || 2;
     const price = +m.priceCents || 0;
@@ -678,11 +713,14 @@ function drawPage() {
                 ${price ? `<div class="text-[11px] text-white/60">${money(paid)} of ${money(price)} paid</div>` : ''}</div>${stateChip(t)}</div>
             ${price ? `<div class="h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full ${pct >= 100 ? 'bg-[#00F296]' : 'bg-amber-400'}" style="width:${pct}%"></div></div>` : ''}
             ${roster.length ? `<div class="flex flex-wrap gap-1">${roster.map(p => `<span class="text-[10px] font-bold rounded-full px-2 py-1 bg-white/10">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name)}</span>`).join('')}</div>` : ''}
+            ${splitProgressHtml(m, t)}
             <div class="flex flex-wrap gap-2">
                 ${canKit(m, t.teamId) && t.state !== 'invited' ? `<button onclick="openVsKits()" class="${DARK}">${shirt(kitOf(m, t.teamId), 'text-sm mr-1')}Shirt color</button>` : ''}
                 ${iCap && live && t.state !== 'invited' ? `<button onclick="openVsRoster('${jsq(t.teamId)}')" class="${DARK}" ${rosterLocked(m) ? 'disabled' : ''}>${rosterLocked(m) ? '🔒 Roster locked' : `Pick who's coming (${(t.roster || []).length})`}</button>` : ''}
                 ${full && full.temp && (full.memberUids || []).includes(myUid()) ? `<button onclick="vsSquadChat('${jsq(t.teamId)}')" class="${DARK}"><i class="fa-solid fa-comments mr-1"></i>Squad chat</button>` : ''}
                 ${boss && live && price && t.state !== 'invited' && paid < price ? `<button onclick="openVsPayment('${jsq(t.teamId)}')" class="${BTN}">💵 Got a payment</button>` : ''}
+                ${iCap && creditOn(m) && t.state !== 'invited' && paid < price ? `<button onclick="openVsCreditPay('${jsq(t.teamId)}')" class="${BTN}">💳 Pay with credit</button>` : ''}
+                ${!iCap && creditOn(m) && t.split && (t.split.uids || []).includes(myUid()) && !(t.split.paid || {})[myUid()] && paid < price ? `<button onclick="vsCreditPayShare('${jsq(t.teamId)}')" class="${BTN}">💳 Pay my share (${money(t.split.perCents)})</button>` : ''}
                 ${iCap && live && m.challenge && m.challenge.toTeamId === t.teamId && m.challenge.status === 'pending' ? `<button onclick="answerChallenge('${jsq(m.id)}', true)" class="${BTN}">Accept</button><button onclick="openCounterChallenge('${jsq(m.id)}')" class="${DARK}">Another time</button><button onclick="answerChallenge('${jsq(m.id)}', false)" class="${DARK}">Decline</button>` : ''}
                 ${t.state === 'invited' && iCap && !m.challenge ? `<button onclick="answerInvite('${jsq(m.id)}','${jsq(t.teamId)}', true)" class="${BTN}">We're in</button><button onclick="answerInvite('${jsq(m.id)}','${jsq(t.teamId)}', false)" class="${DARK}">Can't make it</button>` : ''}
                 ${(iCap || boss) && live && !(m.challenge && m.challenge.fromTeamId === t.teamId && m.challenge.status === 'pending') ? `<button onclick="leaveVs('${jsq(t.teamId)}')" class="text-[11px] font-bold text-red-400 px-2">${boss && !iCap ? 'Remove team' : 'Leave match'}</button>` : ''}
@@ -703,6 +741,7 @@ function drawPage() {
     const mapsUrl = m.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(m.location) : '';
     const tabBtn = (k, label) => `<button onclick="vsTab('${k}')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === k ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${label}</button>`;
     const info = `<div class="space-y-3">
+            ${myShareHtml(m)}
             ${outcomeBoxHtml(m)}
             ${vsStormCardHtml(m)}
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs space-y-2">
@@ -710,6 +749,7 @@ function drawPage() {
                 <div class="flex items-center gap-2"><i class="fa-solid fa-clock text-[#00F296] w-4"></i>${esc(prettyTime(m.time))}</div>
                 <div class="flex items-center gap-2"><i class="fa-solid fa-location-dot text-[#00F296] w-4"></i><span class="min-w-0">${esc(m.location || '')}</span></div>
                 <div class="flex items-center gap-2"><i class="fa-solid fa-users text-[#00F296] w-4"></i>${esc(m.format || '')} · ${n} teams · ${esc(levelLabel(m.level))}</div>
+                ${m.communityId ? `<button onclick="closeVsMatch(); window.openCommunity && openCommunity('${jsq(m.communityId)}', 'games')" class="flex items-center gap-2 text-left"><i class="fa-solid fa-people-roof text-[#00F296] w-4"></i><span class="underline decoration-white/30 underline-offset-2">${esc(m.communityName || 'Community')}</span>${m.payWithCredit ? '<span class="text-[9px] font-black rounded-full px-1.5 py-0.5 bg-[#00F296]/20 text-[#00F296]">CREDIT OK</span>' : ''}</button>` : ''}
                 <div class="flex items-start gap-2"><i class="fa-solid fa-circle-dollar-to-slot text-[#00F296] w-4 mt-0.5"></i><span>${price ? `${money(price)} per team${m.payByHours ? ` · pay by ${esc(new Date(payByMs(m)).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}` : ''}${m.firstToPay !== false ? ' · first to pay is in' : ''}${m.partial ? ' · partial payments OK' : ''}` : 'Free'}</span></div>
                 ${m.message ? `<div class="italic text-white/75">"${esc(m.message)}"</div>` : ''}
             </div>
@@ -756,33 +796,119 @@ function drawPage() {
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs space-y-1">${shown.filter(t => t.state !== 'invited').map(t => `<div class="flex justify-between gap-2"><span class="truncate">${esc(t.name)}</span><span class="${price && paidCents(m, t.teamId) >= price ? 'text-[#00F296]' : 'text-white/70'} font-bold">${price ? `${money(paidCents(m, t.teamId))} / ${money(price)}` : 'Free'}</span></div>`).join('') || '<span class="text-white/45">No teams yet.</span>'}
                 ${price ? `<div class="flex justify-between gap-2 border-t border-white/10 pt-1 font-black"><span>Collected</span><span>${money((m.payments || []).reduce((s, p) => s + (+p.cents || 0), 0))}</span></div>` : ''}</div>
         </div>`;
-    el.innerHTML = `<div class="max-w-2xl mx-auto w-full px-4 pt-3 pb-24 space-y-3">
-        <div class="bg-[#040E13]/90 backdrop-blur-md border-2 border-fuchsia-500/30 px-4 py-3 rounded-3xl shadow-lg flex items-center justify-between gap-3">
+    el.innerHTML = `<div class="max-w-4xl mx-auto w-full px-4 pt-3 pb-24 space-y-3">
+        <div class="bg-[#040E13]/90 backdrop-blur-md border-2 border-emerald-500/30 px-5 py-3.5 rounded-3xl shadow-lg flex items-center justify-between gap-3">
             <button onclick="closeVsMatch()" aria-label="Back" class="w-9 h-9 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center border border-white/20 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
             <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2"><h2 class="text-base font-black tracking-tight truncate">${esc(vsTitleOf(m))}</h2>
-                    <span class="px-2 py-0.5 bg-fuchsia-500/20 text-fuchsia-200 font-black text-[9px] rounded-full uppercase tracking-wider border border-fuchsia-500/40 shrink-0">VS Mode</span></div>
+                    <span class="px-2.5 py-0.5 bg-[#E8262B]/20 text-red-200 font-black text-[9px] rounded-full uppercase tracking-wider border border-[#E8262B]/50 shrink-0">VS</span></div>
                 <p class="text-xs text-white/60 truncate mt-0.5"><i class="fa-solid fa-location-dot text-[#00F296] mr-1"></i>${esc(m.location || '')}</p>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-                ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener" aria-label="Navigate" class="w-9 h-9 bg-[#00F296] text-slate-950 rounded-full flex items-center justify-center"><i class="fa-solid fa-location-arrow text-xs"></i></a>` : ''}
-                <button onclick="shareVs()" aria-label="Share" class="w-9 h-9 bg-[#00F296] text-slate-950 rounded-full flex items-center justify-center"><i class="fa-solid fa-share-nodes text-xs"></i></button>
+                ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener" aria-label="Navigate" class="w-9 h-9 bg-[#00F296] hover:opacity-90 text-slate-950 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(0,242,150,0.4)]"><i class="fa-solid fa-location-arrow text-xs"></i></a>` : ''}
+                <button onclick="shareVs()" aria-label="Share" class="w-9 h-9 bg-[#00F296] hover:opacity-90 text-slate-950 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(0,242,150,0.4)]"><i class="fa-solid fa-share-nodes text-xs"></i></button>
             </div>
         </div>
-        <div class="relative overflow-hidden bg-[#040E13]/95 border-2 border-fuchsia-500/40 rounded-3xl p-4 shadow-2xl">
+        <div class="relative overflow-hidden bg-[#040E13]/95 border-2 border-emerald-500/30 rounded-3xl p-4 shadow-2xl">
             <div class="absolute inset-0 pointer-events-none opacity-30" style="background:radial-gradient(circle at 50% 45%, #E8262B 0%, transparent 60%)"></div>
             <div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72, canTakeSpot, true)}${scoreMid}${slotHtml(slots[1], 72, canTakeSpot, true)}` : slots.map(x => slotHtml(x, 46, canTakeSpot, true)).join(vsBadge(28))}</div>
             <div class="relative text-center text-[11px] font-black text-white/75 mt-2">${statusLine}</div>
         </div>
-        <div class="bg-black/40 border-2 border-fuchsia-500/30 p-1.5 rounded-2xl flex items-center gap-1 overflow-x-auto shadow-md">
-            ${boss ? tabBtn('admin', '<i class="fa-solid fa-gear mr-1"></i> Admin') : ''}${m.livestream && lsKey(m.livestream) ? `<button onclick="vsTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white' : 'text-red-300'}">${m.livestream.status === 'live' ? '🔴 Live' : '▶ Replay'}</button>` : ''}${myTeamIn || mySq ? tabBtn('team', myTeamIn ? '🛡️ My Team' : '🧩 My Squad') : ''}${tabBtn('info', 'Match Info')}${tabBtn('teams', `Teams (${spotsTaken(m)}/${n})`)}${tabBtn('stats', 'Stats')}${tabBtn('comments', `Comments (${V.comments.length})`)}
+        <div data-scroll-hint class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
+            ${boss ? tabBtn('admin', '<i class="fa-solid fa-gear mr-1"></i> Admin') : ''}${m.livestream && lsKey(m.livestream) ? `<button onclick="vsTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white' : 'text-red-300'}">${m.livestream.status === 'live' ? '🔴 Live' : '▶ Replay'}</button>` : ''}${myTeamIn || mySq ? tabBtn('team', myTeamIn ? '🛡️ My Team' : '🧩 My Squad') : ''}${tabBtn('info', 'Game Info')}${tabBtn('teams', `Teams (${spotsTaken(m)}/${n})`)}${tabBtn('stats', 'Game Stats')}${tabBtn('comments', `Comments (${V.comments.length})`)}
         </div>
-        <div class="bg-[#040E13]/95 border-2 border-fuchsia-500/30 rounded-3xl p-4 shadow-2xl">
+        <div class="bg-[#040E13]/95 border-2 border-emerald-500/30 rounded-3xl p-4 shadow-2xl">
             ${tab === 'admin' ? admin : tab === 'team' ? myTeamTabHtml(m) : tab === 'live' ? liveTabHtml(m, boss) : tab === 'stats' ? statsHtml(m) : tab === 'teams' ? teamsTab : tab === 'comments' ? commentsHtml(m) : info}
         </div>
         ${!boss && m.status === 'final' && myEntry ? `<button onclick="appealVs()" class="${DARK} w-full">Appeal the score</button>` : ''}
     </div>`;
 }
+// ---------------------------------------------------------------- 💳 community credit (VS match posted in a community)
+//   Captain: pay it all from my credit, or split it so each player pays a share (team.split = { perCents, uids, paid, at }).
+//   The money moves on the server (vsCreditPay), in one go with the match payment.
+const creditOn = (m) => !!(m && m.communityId && m.payWithCredit && (+m.priceCents || 0) > 0 && (m.status === 'open' || m.status === 'challenge'));
+async function myCreditCents(cid) {
+    try { const s = await getDoc(doc(db, 'artifacts', appId, 'communities', cid, 'credits', myUid())); return s.exists() ? (+s.data().balanceCents || 0) : 0; } catch (e) { return null; }
+}
+async function callCreditPay(matchId, teamId, kind) {
+    const { getFunctions, httpsCallable } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js");
+    const { app } = await import('./firebase-config.js');
+    return (await httpsCallable(getFunctions(app), 'vsCreditPay')({ matchId, teamId, kind })).data;
+}
+const creditError = (e) => {
+    const msg = String((e && e.message) || '');
+    const m = msg.match(/NO_CREDIT:(\d+):(\d+)/);
+    if (m) return `Not enough credit: you have ${money(+m[1])}, this needs ${money(+m[2])}. Ask the community admin to add credit.`;
+    return msg.replace(/^.*?:\s*/, '') || "Couldn't pay. Try again.";
+};
+/** People on the team that can pay a share (have an account). */
+const splitPeople = (m, t) => playersOfTeam(t).filter(p => p.uid);
+window.openVsCreditPay = async function (teamId) {
+    const m = V.open; if (!creditOn(m)) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
+    const left = Math.max(0, (+m.priceCents || 0) - paidCents(m, teamId));
+    const people = splitPeople(m, t);
+    const per = people.length ? Math.ceil(left / people.length) : 0;
+    sheet('vs-credit', `💳 Pay with ${esc(m.communityName || 'community')} credit`, `<p class="text-xs text-white/60">Checking your credit…</p>`);
+    const bal = await myCreditCents(m.communityId);
+    sheet('vs-credit', `💳 Pay with ${esc(m.communityName || 'community')} credit`, `
+        <div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs space-y-1">
+            <div class="flex justify-between"><span class="text-white/60">Left to pay for ${esc(t.name)}</span><b>${money(left)}</b></div>
+            <div class="flex justify-between"><span class="text-white/60">Your credit</span><b class="${bal !== null && bal >= left ? 'text-[#00F296]' : 'text-amber-300'}">${bal === null ? '?' : money(bal)}</b></div>
+        </div>
+        <button onclick="vsCreditPayAll('${jsq(teamId)}')" class="${BTN} w-full py-3 text-sm">Pay it all (${money(left)}) from my credit</button>
+        ${people.length > 1 ? `<button onclick="vsCreditSplit('${jsq(teamId)}')" class="${DARK} w-full py-3 text-sm">Split it: ${people.length} players pay ${money(per)} each</button>
+            <p class="text-[10px] text-white/50">Each player gets a notification and pays their share from their own credit. The team is in once it's all paid.</p>` : ''}
+        ${t.split ? `<button onclick="vsCreditUnsplit('${jsq(teamId)}')" class="text-[11px] font-bold text-red-400 w-full py-1">Stop the split</button>` : ''}`);
+};
+window.vsCreditPayAll = async function (teamId) {
+    const m = V.open; if (!m) return;
+    if (!confirm('Pay the rest of the team fee from your credit?')) return;
+    try { const r = await callCreditPay(m.id, teamId, 'all'); document.getElementById('vs-credit')?.remove(); toast(`Paid ${money(r.paidCents)}. Credit left: ${money(r.balanceCents)}. ✅`); }
+    catch (e) { toast(creditError(e), 'error'); }
+};
+window.vsCreditSplit = async function (teamId) {
+    const m = V.open; if (!m) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
+    const left = Math.max(0, (+m.priceCents || 0) - paidCents(m, teamId));
+    const uids = splitPeople(m, t).map(p => p.uid);
+    if (uids.length < 2) { toast('Add players with a FutNet account to the team first.', 'error'); return; }
+    const perCents = Math.ceil(left / uids.length);
+    try {
+        await changeMatch(m.id, (x) => { const e = x.teams.find(y => y.teamId === teamId); if (!e) return false; e.split = { perCents, uids, paid: {}, at: Date.now(), by: myUid() }; });
+        document.getElementById('vs-credit')?.remove();
+        toast(`Split sent: ${uids.length} players, ${money(perCents)} each. 📣`);
+    } catch (e) { toast("Couldn't split the fee.", 'error'); }
+};
+window.vsCreditUnsplit = async function (teamId) {
+    const m = V.open; if (!m) return;
+    try { await changeMatch(m.id, (x) => { const e = x.teams.find(y => y.teamId === teamId); if (!e) return false; delete e.split; }); document.getElementById('vs-credit')?.remove(); toast('Split stopped. Shares already paid stay paid.'); }
+    catch (e) { toast("Couldn't change it.", 'error'); }
+};
+window.vsCreditPayShare = async function (teamId) {
+    const m = V.open; if (!m) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t || !t.split) return;
+    if (!confirm(`Pay your share (${money(t.split.perCents)}) from your ${m.communityName || 'community'} credit?`)) return;
+    try { const r = await callCreditPay(m.id, teamId, 'share'); toast(`Paid ${money(r.paidCents)}. Credit left: ${money(r.balanceCents)}. ✅`); }
+    catch (e) { toast(creditError(e), 'error'); }
+};
+/** "Pay my share" box (Game Info) for players on a split. */
+function myShareHtml(m) {
+    if (!creditOn(m)) return '';
+    return (m.teams || []).filter(t => t.split && (t.split.uids || []).includes(myUid()) && !(t.split.paid || {})[myUid()] && paidCents(m, t.teamId) < (+m.priceCents || 0)).map(t => `
+        <div class="bg-[#00F296]/10 border border-[#00F296]/50 rounded-2xl p-3 flex items-center gap-3">
+            ${teamLogoHtml(t, 36)}
+            <div class="flex-1 min-w-0"><div class="text-sm font-black">Your share for ${esc(t.name)}</div><div class="text-[11px] text-white/65">${money(t.split.perCents)} from your ${esc(m.communityName || 'community')} credit</div></div>
+            <button onclick="vsCreditPayShare('${jsq(t.teamId)}')" class="${BTN} shrink-0">Pay</button>
+        </div>`).join('');
+}
+/** Split progress under a team: "3 of 7 paid their share". */
+function splitProgressHtml(m, t) {
+    if (!t.split) return '';
+    const paid = Object.keys(t.split.paid || {}).length, n = (t.split.uids || []).length;
+    return `<div class="text-[11px] text-white/65">💳 Split: <b class="text-white">${paid} of ${n}</b> paid their share (${money(t.split.perCents)} each)</div>`;
+}
+
 window.vsOpenTeam = (teamId) => { if (window.openTeam) window.openTeam(teamId); };
 window.shareVs = async function () {
     const m = V.open; if (!m) return;
@@ -1438,6 +1564,7 @@ function drawManage() {
             <div class="flex flex-col items-center gap-1.5">${teamLogoHtml(t, 44)}<span class="font-bold text-white truncate max-w-full text-sm flex items-center gap-1.5">${shirt(kitOf(m, t.teamId), 'text-sm')}${esc(t.name)}</span></div>
             <div class="text-7xl font-black leading-none py-1" style="color:${c}">${goals.length}</div>
             <button onclick="vsGoalPicker('${jsq(t.teamId)}')" class="w-full font-black py-3 rounded-2xl text-base" style="background-color:${c}26;color:${c};border:1.5px solid ${c}66">+ Goal</button>
+            ${lineupBtnHtml(m, t)}
             ${goalList(goals)}
         </div>`; };
     el.innerHTML = `<div class="flex-1 flex flex-col min-h-0 bg-[#060d12] rounded-t-[32px] border-t border-white/10 overflow-hidden" style="margin-top:max(12px, env(safe-area-inset-top))">
@@ -1479,6 +1606,7 @@ function drawManage() {
             <button onclick="vsLiveDelete()" class="w-full text-red-400 font-bold py-2 text-base">Delete live game</button>
             <button onclick="closeVsManage()" class="w-full text-white/60 font-bold py-2 text-base">Close (the game keeps going)</button>
         </div>
+        ${playedGamesAdminHtml(m)}
       </div></div></div>`;
 }
 window.vsLiveToggle = () => saveLive((L) => {
@@ -1527,6 +1655,74 @@ window.vsLiveDelete = async function () {
     if (!confirm('Delete this live game? The goals are thrown away.')) return;
     if (await saveLive(() => null)) { drawManage(); toast('Live game deleted.'); }
 };
+// ---------------------------------------------------------------- 👥 who's playing this game + subs (Match management)
+//   live.onField = { teamId: [playerId] }  (no entry = everyone on the match roster)
+//   live.subs = [{ teamId, outId, outName, inId, inName, minute, at }]
+// Saved with the game when it ends (results[i].onField / .subs) and shown under it.
+const pid = (p) => String(p.id || p.uid || p.name || '');
+const pname = (p) => (p.uid ? personName(p.uid, p.name) : p.name) || 'Player';
+const liveMinute = (L) => L && L.startedAt ? Math.max(1, Math.ceil((L.mode === 'stopwatch' ? liveSecs(L) : ((+L.durationSeconds || 600) - liveSecs(L))) / 60)) : 0;
+function onFieldOf(m, t) {
+    const all = playersOfTeam(t);
+    const ids = ((m.live && m.live.onField) || {})[t.teamId];
+    return Array.isArray(ids) ? all.filter(p => ids.includes(pid(p))) : all;
+}
+function lineupBtnHtml(m, t) {
+    const n = onFieldOf(m, t).length, subs = ((m.live && m.live.subs) || []).filter(s => s.teamId === t.teamId).length;
+    return `<button onclick="openVsLineup('${jsq(t.teamId)}')" class="w-full bg-black/50 border border-white/15 text-white/85 font-bold py-2 rounded-2xl text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-people-group"></i> Playing (${n})${subs ? ` · 🔁 ${subs}` : ''}</button>`;
+}
+window.openVsLineup = function (teamId) {
+    const m = V.open; if (!m || !m.live) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
+    const all = playersOfTeam(t), on = new Set(onFieldOf(m, t).map(pid));
+    const subs = ((m.live.subs) || []).filter(s => s.teamId === teamId);
+    const sel = (id, list, ph) => `<select id="${id}" class="w-full bg-black/60 border border-white/20 rounded-xl px-2 py-2.5 text-white text-xs font-bold"><option value="">${ph}</option>${list.map(p => `<option value="${esc(pid(p))}">${esc(pname(p))}</option>`).join('')}</select>`;
+    sheet('vs-lineup', `👥 ${esc(t.name)}: who's playing`, `
+        <p class="text-[11px] text-white/60">Tick who is on the field this game. Use "Make a sub" when someone comes off.</p>
+        <div class="space-y-1.5">${all.map(p => `<label class="flex items-center gap-3 p-2.5 bg-black/40 rounded-xl border border-white/10 cursor-pointer">
+            <input type="checkbox" class="w-5 h-5 accent-[#00F296]" ${on.has(pid(p)) ? 'checked' : ''} onchange="vsToggleOnField('${jsq(teamId)}','${jsq(pid(p))}', this.checked)">
+            <img src="${esc(personAvatar(p.uid || '', p.avatar, pname(p)))}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
+            <span class="flex-1 min-w-0 text-xs font-bold truncate">${p.number ? esc(p.number) + ' · ' : ''}${esc(pname(p))}</span></label>`).join('') || '<p class="text-xs text-white/50">No players listed for this team.</p>'}</div>
+        ${all.length > 1 ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">🔁 Make a sub</div>
+            <div class="grid grid-cols-2 gap-2">${sel('vs-sub-out', all.filter(p => on.has(pid(p))), '⬇️ Coming off')}${sel('vs-sub-in', all.filter(p => !on.has(pid(p))), '⬆️ Going on')}</div>
+            <button onclick="vsMakeSub('${jsq(teamId)}')" class="${BTN} w-full py-2.5 text-xs">Save sub</button>
+        </div>` : ''}
+        ${subs.length ? `<div class="space-y-1">${subs.map(s => `<div class="text-[11px] text-white/75">🔁 ${s.minute ? esc(s.minute) + "' · " : ''}<span class="text-red-300">⬇ ${esc(s.outName)}</span> · <span class="text-[#00F296]">⬆ ${esc(s.inName)}</span></div>`).join('')}</div>` : ''}`);
+    document.getElementById('vs-lineup').style.zIndex = '200';
+};
+window.vsToggleOnField = async function (teamId, id, onNow) {
+    const m = V.open; if (!m || !m.live) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
+    const cur = onFieldOf(m, t).map(pid);
+    const next = onNow ? [...new Set([...cur, id])] : cur.filter(x => x !== id);
+    await saveLive((L) => L ? { ...L, onField: { ...(L.onField || {}), [teamId]: next } } : false);
+};
+window.vsMakeSub = async function (teamId) {
+    const m = V.open; if (!m || !m.live) return;
+    const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
+    const outId = val('vs-sub-out'), inId = val('vs-sub-in');
+    if (!outId || !inId) { toast('Pick who comes off and who goes on.', 'error'); return; }
+    const all = playersOfTeam(t), P = (id) => all.find(p => pid(p) === id) || {};
+    const cur = onFieldOf(m, t).map(pid);
+    await saveLive((L) => L ? { ...L,
+        onField: { ...(L.onField || {}), [teamId]: [...cur.filter(x => x !== outId), inId] },
+        subs: [...(L.subs || []), { teamId, outId, outName: pname(P(outId)), inId, inName: pname(P(inId)), minute: liveMinute(L), at: Date.now() }] } : false);
+    toast(`Sub: ${pname(P(inId))} on for ${pname(P(outId))}. 🔁`);
+    document.getElementById('vs-lineup')?.remove();
+};
+/** "Played: ..." + subs under a saved game. */
+function gameLineupHtml(m, r) {
+    const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { name: 'Team' };
+    const rows = [r.a, r.b].map(id => {
+        const ids = (r.onField || {})[id]; const subs = (r.subs || []).filter(s => s.teamId === id);
+        if (!Array.isArray(ids) && !subs.length) return '';
+        const names = Array.isArray(ids) ? playersOfTeam(teamOf(id)).filter(p => ids.includes(pid(p)) || subs.some(s => s.outId === pid(p))).map(p => pname(p).split(' ')[0]) : [];
+        return `<div class="text-[10px] text-white/60"><b class="text-white/80">${esc(teamOf(id).name)}:</b> ${esc(names.join(', '))}${subs.map(s => ` · 🔁 ${esc(s.inName.split(' ')[0])} for ${esc(s.outName.split(' ')[0])}${s.minute ? ` (${esc(s.minute)}')` : ''}`).join('')}</div>`;
+    }).join('');
+    return rows ? `<div class="space-y-0.5 border-t border-white/10 pt-2">${rows}</div>` : '';
+}
+
 async function endLiveGame(matchId, silent) {
     let final = false;
     await changeMatch(matchId, (x) => {
@@ -1537,7 +1733,11 @@ async function endLiveGame(matchId, silent) {
         if (!a || !b) return false;
         const goals = L.goals || [];
         const ga = goals.filter(g => g.teamId === a).length, gb = goals.filter(g => g.teamId === b).length;
-        const results = [...(x.results || []), { a, b, ga, gb, goals, at: Date.now(), seconds: L.mode === 'stopwatch' ? liveSecs(L) : (+L.durationSeconds || 600) - liveSecs(L) }];
+        const lineup = {};
+        if (L.onField && typeof L.onField === 'object') { if (L.onField[a]) lineup[a] = L.onField[a]; if (L.onField[b]) lineup[b] = L.onField[b]; }
+        const subs = (L.subs || []).filter(sb => sb.teamId === a || sb.teamId === b);
+        const results = [...(x.results || []), { a, b, ga, gb, goals, at: Date.now(), seconds: L.mode === 'stopwatch' ? liveSecs(L) : (+L.durationSeconds || 600) - liveSecs(L),
+            ...(Object.keys(lineup).length ? { onField: lineup } : {}), ...(subs.length ? { subs } : {}) }];
         // 2 teams: that's the final score. 3-4 teams: the game is saved and the next one can start.
         if (conf.length <= 2) { x.score = { [a]: ga, [b]: gb }; x.forfeit = ''; x.status = 'final'; final = true; }
         x._edit = { live: null, results };
@@ -1593,6 +1793,7 @@ function playedGamesAdminHtml(m) {
                     <span class="flex-1 min-w-0 flex items-center justify-end gap-1.5 text-xs font-black"><span class="truncate">${esc(teamOf(r.b).name)}</span>${shirt(kitOf(m, r.b), 'text-sm')}</span>
                 </div>
                 ${(r.goals || []).length ? `<div class="grid grid-cols-2 gap-2 border-t border-white/10 pt-2"><div class="min-w-0 space-y-0.5">${scorers(r, r.a)}</div><div class="min-w-0 space-y-0.5">${scorers(r, r.b, true)}</div></div>` : ''}
+                ${gameLineupHtml(m, r)}
                 <div class="grid grid-cols-2 gap-2 border-t border-white/10 pt-2.5">
                     <button onclick="vsEditGame(${i})" class="bg-[#00B4AE]/15 hover:bg-[#00B4AE]/25 text-[#00F296] font-bold py-2 rounded-xl text-xs border border-[#00B4AE]/50 flex items-center justify-center gap-1.5"><i class="fa-solid fa-pen text-[10px]"></i> Edit Game</button>
                     <button onclick="vsDeleteGame(${i})" class="bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold py-2 rounded-xl text-xs border border-red-500/40 flex items-center justify-center gap-1.5"><i class="fa-solid fa-trash text-[10px]"></i> Delete Game</button>
@@ -1999,7 +2200,7 @@ function commentsHtml(m) {
             <img src="${esc(personAvatar(c.byUid, c.avatar, c.byName))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover shrink-0">
             <div class="min-w-0 flex-1 ${c.announce ? 'bg-amber-400/10 border-amber-400/40' : 'bg-black/40 border-white/10'} border rounded-2xl px-3 py-2">
                 <div class="flex items-baseline justify-between gap-2"><span class="text-xs font-black truncate">${c.announce ? '📣 ' : ''}${esc(c.byName || 'Player')}${c.announce ? ' <span class="text-[9px] font-black text-amber-300">ORGANIZER</span>' : ''}</span><span class="text-[10px] text-white/45 shrink-0">${msTs(c.at) ? esc(new Date(msTs(c.at)).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : ''}</span></div>
-                <div class="text-sm text-white/90 whitespace-pre-wrap break-words">${esc(c.text)}</div>
+                <div class="text-sm text-white/90 whitespace-pre-wrap break-words">${smartText(c.text)}</div>
                 ${c.byUid === myUid() || m.organizerId === myUid() ? `<button onclick="deleteVsComment('${jsq(c.id)}')" class="text-[10px] text-red-400 font-bold mt-1">Delete</button>` : ''}
             </div></div>`).join('') || '<p class="text-xs text-white/45 text-center py-4">No comments yet. Say something to the teams! 💬</p>'}<div id="vs-comments-end"></div></div>
         ${myUid() ? `<div class="flex gap-2"><input id="vs-comment" class="${INPUT}" maxlength="500" placeholder="Write a comment…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendVsComment()}">
@@ -2265,6 +2466,54 @@ window.vsTeamHtml = teamVsHtml;
 
 // ---------------------------------------------------------------- a player's VS matches (Profile > Games: Upcoming / Previous)
 /** VS matches someone organizes or plays in (their team is in the match). Returns [{ date, time, html }] to mix with normal games. */
+// ---------------------------------------------------------------- 🏆 filtered team standings (Teams > Leaderboards)
+//   With no filter the leaderboard uses each team's saved record. With a filter (teams in the match, format,
+//   day of the week, park) it's worked out from the finished VS matches that fit.
+const FIN = { list: null, loading: null };
+function loadFinished() {
+    if (FIN.list) return Promise.resolve(FIN.list);
+    if (!FIN.loading) FIN.loading = getDocs(query(C('vsMatches'), where('status', '==', 'final'))).then(s => { FIN.list = s.docs.map(d => ({ ...d.data(), id: d.id })); return FIN.list; }).catch(() => { FIN.list = []; return FIN.list; });
+    return FIN.loading;
+}
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dowOf = (ymd) => { const [y, m, d] = String(ymd || '').split('-').map(Number); return y ? DOW[new Date(y, m - 1, d).getDay()] : ''; };
+const parkOf = (m) => String(m.park || String(m.location || '').split(',')[0] || '').trim();
+/** Filter choices that exist in the finished matches. */
+window.vsLeaderOptions = async function () {
+    const list = await loadFinished();
+    const uniqSorted = (a) => [...new Set(a.filter(Boolean))].sort();
+    return {
+        teams: uniqSorted(list.map(m => String(m.teamsCount || 2))),
+        formats: uniqSorted(list.map(m => m.format)),
+        days: DOW.filter(d => list.some(m => dowOf(m.date) === d)),
+        parks: uniqSorted(list.map(parkOf)),
+    };
+};
+/** Standings from finished matches that match the filters: [{ teamId, team (copy from the match), p, w, d, l, gf, ga, pts, gd }]. */
+window.vsStandings = async function (f = {}) {
+    const list = (await loadFinished()).filter(m =>
+        (!f.teams || String(m.teamsCount || 2) === f.teams) && (!f.format || m.format === f.format) &&
+        (!f.day || dowOf(m.date) === f.day) && (!f.park || parkOf(m) === f.park));
+    const tb = {};
+    const add = (t, ga, gb) => { const r = tb[t.teamId] = tb[t.teamId] || { teamId: t.teamId, team: t, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 }; r.p++; r.gf += ga; r.ga += gb; if (ga > gb) r.w++; else if (ga === gb) r.d++; else r.l++; };
+    list.forEach(m => {
+        const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { teamId: id, name: 'Team' };
+        const ids = Object.keys(m.score || {});
+        if ((m.teamsCount || 2) <= 2 && ids.length === 2) { const [a, b] = ids; add(teamOf(a), +m.score[a] || 0, +m.score[b] || 0); add(teamOf(b), +m.score[b] || 0, +m.score[a] || 0); }
+        else (m.results || []).forEach(r => { add(teamOf(r.a), +r.ga || 0, +r.gb || 0); add(teamOf(r.b), +r.gb || 0, +r.ga || 0); });
+    });
+    return Object.values(tb).map(r => ({ ...r, pts: r.w * 3 + r.d, gd: r.gf - r.ga }))
+        .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || b.w - a.w || String(a.team.name).localeCompare(String(b.team.name)));
+};
+
+/** VS matches posted in a community, for its Games tab (Upcoming / Previous). */
+window.vsCommunityCards = function (cid, which) {
+    const today = ymdToday();
+    return V.list.filter(m => m.communityId === cid && m.status !== 'cancelled' && m.status !== 'declined')
+        .filter(m => { const over = m.status === 'final' || (m.date || '') < today; return which === 'prev' ? over : !over; })
+        .sort((a, b) => which === 'prev' ? `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`) : `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+        .map(m => ({ date: m.date || '', time: m.time || '', html: vsCardHtml(m) }));
+};
 window.vsGamesFor = function (uid, which, { beforeOpen = '' } = {}) {
     if (!uid) return [];
     const today = ymdToday();

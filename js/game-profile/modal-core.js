@@ -740,7 +740,7 @@ window.renderEventDetailModalContent = function() {
             ${gameLiveBannerHtml(event, tab)}
 
             <!-- Navigation Tabs Bar -->
-            <div class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
+            <div data-scroll-hint class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
                 ${isCreator ? `<button onclick="switchModalTab('admin')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'admin' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}"><i class="fa-solid fa-gear mr-1"></i> Admin</button>` : ''}
                 ${liveOf(event) ? `<button onclick="switchModalTab('live')" class="flex-1 py-2 px-3 rounded-xl text-xs font-black transition whitespace-nowrap ${tab === 'live' ? 'bg-red-600 text-white shadow' : 'text-red-300 hover:text-white'}">${isLive(event) ? '🔴 Live' : '▶ Replay'}</button>` : ''}
                 <button onclick="switchModalTab('info')" class="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${tab === 'info' ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">Game Info</button>

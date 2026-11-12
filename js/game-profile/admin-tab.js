@@ -166,10 +166,10 @@ export function renderAdminTab(event) {
             const t1ScorersHtml = t1Goals.map(scorer => {
                 const avatar = resolvePlayerAvatar(scorer);
                 return `
-                    <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full border border-white/10 text-xs">
+                    <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1.5 rounded-full border border-white/10 text-xs min-w-0">
                         <i class="fa-solid fa-futbol text-[#00F296] text-[10px]"></i>
-                        <img src="${avatar}" class="w-5 h-5 rounded-full object-cover border border-[#00F296]/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="text-white font-bold">${scorer}</span>
+                        <img src="${avatar}" class="w-5 h-5 shrink-0 rounded-full object-cover border border-[#00F296]/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <span class="text-white font-bold truncate min-w-0 flex-1 whitespace-nowrap">${scorer}</span>
                     </div>
                 `;
             }).join('');
@@ -177,10 +177,10 @@ export function renderAdminTab(event) {
             const t2ScorersHtml = t2Goals.map(scorer => {
                 const avatar = resolvePlayerAvatar(scorer);
                 return `
-                    <div class="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded-full border border-white/10 text-xs">
+                    <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1.5 rounded-full border border-white/10 text-xs min-w-0">
                         <i class="fa-solid fa-futbol text-red-400 text-[10px]"></i>
-                        <img src="${avatar}" class="w-5 h-5 rounded-full object-cover border border-red-400/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
-                        <span class="text-white font-bold">${scorer}</span>
+                        <img src="${avatar}" class="w-5 h-5 shrink-0 rounded-full object-cover border border-red-400/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <span class="text-white font-bold truncate min-w-0 flex-1 whitespace-nowrap">${scorer}</span>
                     </div>
                 `;
             }).join('');
@@ -198,8 +198,8 @@ export function renderAdminTab(event) {
                     </div>
 
                     <div class="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
-                        <div class="space-y-1.5">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
-                        <div class="space-y-1.5">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
+                        <div class="space-y-1.5 min-w-0">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
+                        <div class="space-y-1.5 min-w-0">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals recorded</span>'}</div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">

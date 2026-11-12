@@ -101,6 +101,8 @@ async function notify(recipients, payload, { exclude = [], key = "" } = {}) {
         chatId: payload.chatId || "",
         matchId: payload.matchId || "",
         teamId: payload.teamId || "",
+        tab: payload.tab || "",               // which tab the app should open (e.g. "comments")
+        commentId: payload.commentId || "",
         sound: payload.sound || "",
         read: false,
         source: "server",
@@ -231,6 +233,9 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
     chatId: n.chatId || "",
     matchId: n.matchId || "",
     teamId: n.teamId || "",
+    tab: n.tab || (type === "game_comment" ? "comments" : type === "vs_comment" ? "chat" : ""),
+    commentId: n.commentId || "",
+    link: n.eventId && type === "game_comment" ? `https://futnet.site/#event=${encodeURIComponent(n.eventId)}&tab=comments` : "",
     sound: n.sound || "",
   };
   // Money in: custom "cha-ching" sound (the file ships inside the apps; falls back to the normal sound).
@@ -609,6 +614,8 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
       type: "game_comment",
       senderUid: author,
       eventId,
+      tab: "comments",
+      commentId: String(c.id || ""),
       title: `${commentName(c) || (await nameOf(author))} commented on ${title}`,
       body: clip(commentText(c)),
     }, { exclude: [author] });
@@ -1905,6 +1912,7 @@ const crypto = require("crypto");
 const OWNER_EMAIL_SHA256 = [
   "0cc4e2724ff40ad5f2b24d4a43d906996652b2d33d242c17c1efb4b7ff90d67b",
   "dc33de30406203e7cdf8490b5ef4b5c7f993bdb2989bc3025bc5e4dd6b129378",
+  "903a1d99aac1826f6f04f45b8b6e56911ea4cbfb8a85a4c09631906a726de23a",
 ];
 const isOwner = (auth) => !!(auth && auth.token && auth.token.email &&
   OWNER_EMAIL_SHA256.includes(crypto.createHash("sha256").update(String(auth.token.email).trim().toLowerCase()).digest("hex")));
@@ -2764,6 +2772,25 @@ exports.communityTop = onCall(async (request) => {
     if (!mine.length) continue;
     rows.push({ uid: u, list: mine, games: mine.length, goals: mine.reduce((s, r) => s + r.goals, 0) });
   }
+  // VS matches posted in this community: their goals count too (players picked from the app have a uid).
+  try {
+    const vs = await col("vsMatches").where("communityId", "==", communityId).get();
+    const vsGoals = {}, vsGames = {};
+    vs.docs.forEach((d) => {
+      const m = d.data() || {};
+      if (m.status === "cancelled") return;
+      arr(m.results).forEach((r) => {
+        const seen = new Set();
+        arr(r.goals).forEach((g) => { if (g && g.uid && !g.own) { vsGoals[g.uid] = (vsGoals[g.uid] || 0) + 1; seen.add(g.uid); } });
+        seen.forEach((u) => { vsGames[u] = (vsGames[u] || 0) + 1; });
+      });
+    });
+    Object.entries(vsGoals).forEach(([u, n]) => {
+      const row = rows.find((r) => r.uid === u);
+      if (row) row.goals += n;
+      else rows.push({ uid: u, list: [], games: 0, goals: n });   // games: 0 keeps VS-only players out of the skill list
+    });
+  } catch (e) { logger.warn("vs goals for community", communityId, e.message); }
   const scorers = rows.filter((r) => r.goals > 0).sort((a, b) => (b.goals - a.goals) || (a.games - b.games)).slice(0, 5);
   const candidates = rows.filter((r) => r.games >= 3);
   const positions = await Promise.all(candidates.map((r) => positionOf(r.uid)));
@@ -3498,4 +3525,447 @@ exports.repairPeopleList = onSchedule({ schedule: "every day 04:30", timeZone: D
     added++;
   }
   if (added) logger.info(`people list: added ${added} missing cards`);
+});
+
+// ---------------------------------------------------------------------------
+// VS match posted in a community: pay the team fee with community credit.
+//   kind "all":   a captain pays what's left of the team fee from their own credit.
+//   kind "share": a player pays their share of a split the captain set up (team.split = { perCents, uids, paid }).
+// Everything (credit, ledger, match payment, team confirmed) happens in one transaction.
+// ---------------------------------------------------------------------------
+exports.vsCreditPay = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const { matchId, teamId, kind } = request.data || {};
+  if (!matchId || !teamId || !["all", "share"].includes(kind)) throw new HttpsError("invalid-argument", "Missing match or team.");
+  const mref = col("vsMatches").doc(String(matchId));
+  const dirName = async () => { const d = (await col("directory").doc(uid).get()).data() || {}; return d.name || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Player"; };
+  const name = await dirName();
+  return db.runTransaction(async (tx) => {
+    const ms = await tx.get(mref);
+    if (!ms.exists) throw new HttpsError("not-found", "This match no longer exists.");
+    const m = ms.data();
+    if (!m.communityId || !m.payWithCredit) throw new HttpsError("failed-precondition", "This match doesn't take community credit.");
+    if (m.status !== "open" && m.status !== "challenge") throw new HttpsError("failed-precondition", "This match isn't taking payments.");
+    const teams = arr(m.teams).map((t) => ({ ...t }));
+    const t = teams.find((x) => x.teamId === teamId);
+    if (!t) throw new HttpsError("not-found", "That team isn't in this match.");
+    const price = Math.round(Number(m.priceCents) || 0);
+    const paidSoFar = arr(m.payments).filter((p) => p.teamId === teamId).reduce((s, p) => s + (Number(p.cents) || 0), 0);
+    const left = Math.max(0, price - paidSoFar);
+    if (left <= 0) throw new HttpsError("failed-precondition", "This team is already paid in full.");
+    let amount = 0;
+    if (kind === "all") {
+      const team = (await tx.get(col("teams").doc(String(teamId)))).data() || {};
+      const cap = team.ownerId === uid || arr(team.members).some((p) => p && p.uid === uid && (p.role === "captain" || p.role === "co"));
+      if (!cap) throw new HttpsError("permission-denied", "Only a captain of this team can pay for the whole team.");
+      amount = left;
+    } else {
+      const sp = t.split || {};
+      if (!arr(sp.uids).includes(uid)) throw new HttpsError("permission-denied", "You're not on this team's split.");
+      if ((sp.paid || {})[uid]) throw new HttpsError("failed-precondition", "You already paid your share.");
+      amount = Math.min(left, Math.round(Number(sp.perCents) || 0));
+    }
+    if (amount <= 0) throw new HttpsError("failed-precondition", "Nothing to pay.");
+    const cref = col("communities").doc(m.communityId).collection("credits").doc(uid);
+    const cs = await tx.get(cref);
+    const balance = cs.exists ? Math.round(Number(cs.data().balanceCents) || 0) : 0;
+    if (balance < amount) throw new HttpsError("failed-precondition", `NO_CREDIT:${balance}:${amount}`);
+    const after = balance - amount;
+    // writes
+    tx.set(cref, { uid, name, balanceCents: after, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    tx.set(col("communities").doc(m.communityId).collection("creditLedger").doc(), {
+      uid, name, amountCents: -amount, type: "game", note: kind === "all" ? `VS match fee (${t.name || "team"})` : `VS match: my share (${t.name || "team"})`,
+      eventId: String(matchId), eventTitle: m.title || "VS match", vsMatchId: String(matchId), by: uid, byName: name, balanceAfterCents: after,
+      at: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const payments = arr(m.payments).concat([{ teamId, cents: amount, method: "credit", byUid: uid, byName: name, kind, at: Date.now() }]);
+    if (kind === "share") t.split = { ...(t.split || {}), paid: { ...((t.split || {}).paid || {}), [uid]: amount } };
+    // the team is in once its fee is fully paid (and there's still a spot)
+    let confirmed = teams.filter((x) => x.state === "confirmed").length;
+    const paidOf = (id) => payments.filter((p) => p.teamId === id).reduce((s, p) => s + (Number(p.cents) || 0), 0);
+    teams.forEach((x) => { if (x.state === "pending" && (price <= 0 || paidOf(x.teamId) >= price) && confirmed < (m.teamsCount || 2)) { x.state = "confirmed"; confirmed++; } });
+    tx.update(mref, { payments, teams, updatedBy: uid, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    return { ok: true, paidCents: amount, balanceCents: after, teamPaid: paidOf(teamId) >= price };
+  });
+});
+
+/** A VS match was posted in a community, or a captain split the team fee: tell the right people. */
+exports.onVsCommunity = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+  const matchId = event.params.matchId;
+  const by = after.updatedBy || after.organizerId || "";
+  // a) newly posted in a community -> its members
+  if (after.communityId && (!before || before.communityId !== after.communityId) && after.status !== "cancelled") {
+    try {
+      const { community, all } = await communityMembers(after.communityId);
+      await notify(arr(all), {
+        type: "vs_community", senderUid: after.organizerId || "", matchId, communityId: after.communityId,
+        title: `🆚 New VS match in ${community.name || "your community"}`,
+        body: `${after.title || "VS match"} · ${vsWhen(after)} at ${after.location || "TBD"} · ${after.format || ""}${after.priceCents ? ` · $${(after.priceCents / 100).toFixed(2)} per team` : ""}`,
+      }, { exclude: [after.organizerId], key: `vscomm_${matchId}_${after.communityId}` });
+    } catch (e) { logger.warn("vs community notify", matchId, e.message); }
+  }
+  // b) a captain split the fee -> the players on the split
+  for (const t of arr(after.teams)) {
+    const was = (arr(before && before.teams).find((x) => x.teamId === t.teamId) || {}).split;
+    if (!t.split || (was && was.at === t.split.at)) continue;
+    await notify(arr(t.split.uids), {
+      type: "vs_split", senderUid: by, matchId, teamId: t.teamId, communityId: after.communityId || "",
+      title: `💳 Pay your share for ${t.name || "your team"}`,
+      body: `$${((Number(t.split.perCents) || 0) / 100).toFixed(2)} from your community credit · ${after.title || "VS match"}, ${vsWhen(after)}. Open the match to pay.`,
+    }, { exclude: [by], key: `vssplit_${matchId}_${t.teamId}_${t.split.at || 0}` });
+  }
+});
+
+// ===========================================================================
+// FutNet Manager (futnet.site/manager): owner-only tools. Every action checks isOwner on the server.
+//   verifications/{uid} = { blue: { at, by }, gold: { at, by, name, dob }, lastRealGameAt, blueUntil }
+//     Blue = real person (they showed up to a game). It stays while they play with a "real organizer"
+//     (managerConfig/main.realOrganizers) at least once every 60 days.
+//     Gold = name and birthday checked. Their name and birthday can't change any more (nickname can).
+//   analyticsDaily/{YYYY-MM-DD} = { counts: { "<what was tapped>": n } }   (written by js/track.js)
+//   ownerBooks/main/entries/{id} = { type: 'income'|'expense', amountCents, note, category, date, every: 'once'|'month'|'year' }
+// ===========================================================================
+const BLUE_DAYS = 60;
+const vRef = (uid) => col("verifications").doc(String(uid));
+const mgrConfigRef = () => col("managerConfig").doc("main");
+async function realOrganizers() {
+  const c = (await mgrConfigRef().get()).data() || {};
+  return arr(c.realOrganizers);
+}
+/** Newest game (ms) the person played with a real organizer, in the last 120 days. */
+async function lastRealGame(uid, orgs) {
+  if (!orgs.length) return 0;
+  const games = await endedGames();
+  let best = 0;
+  for (const g of games) {
+    if (!orgs.includes(g.organizerId)) continue;
+    const a = arr(g.attendees).find((x) => uidOf(x) === uid);
+    if (!a || a.attendance === "noshow") continue;
+    const t = Date.parse(String(g.date || "").slice(0, 10) + "T12:00:00Z") || 0;
+    if (t > best) best = t;
+  }
+  return best;
+}
+const blueUntilOf = (v) => Math.max(Number(v.blue && v.blue.at) || 0, Number(v.lastRealGameAt) || 0) + BLUE_DAYS * 86400000;
+
+// Every night: refresh each blue check (it lapses after 60 days without a game with a real organizer).
+exports.verificationSweep = onSchedule({ schedule: "every day 04:10", timeZone: DEFAULT_TZ, timeoutSeconds: 300 }, async () => {
+  const orgs = await realOrganizers();
+  const snap = await col("verifications").get();
+  for (const d of snap.docs) {
+    const v = d.data() || {};
+    if (!v.blue) continue;
+    const last = await lastRealGame(d.id, orgs);
+    const next = { lastRealGameAt: Math.max(Number(v.lastRealGameAt) || 0, last) };
+    next.blueUntil = blueUntilOf({ ...v, ...next });
+    await d.ref.set(next, { merge: true });
+  }
+});
+
+// Gold check: the verified name can't be changed. If it is, it's put back.
+exports.goldNameGuard = onDocumentWritten(`${BASE}/directory/{uid}`, async (event) => {
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+  const uid = event.params.uid;
+  const v = (await vRef(uid).get()).data();
+  if (!v || !v.gold || !v.gold.name) return;
+  if (String(after.name || "").trim() === v.gold.name) return;
+  await col("directory").doc(uid).set({ name: v.gold.name }, { merge: true });
+  const parts = v.gold.name.split(" ");
+  await col("users").doc(uid).collection("profile").doc("data").set({ name: v.gold.name, firstName: parts[0] || "", lastName: parts.slice(1).join(" "), ...(v.gold.dob ? { dob: v.gold.dob } : {}) }, { merge: true });
+});
+
+async function authInfo(uid) {
+  try {
+    const u = await admin.auth().getUser(uid);
+    return { email: u.email || "", providers: u.providerData.map((p) => p.providerId), created: u.metadata.creationTime, lastSignIn: u.metadata.lastSignInTime, disabled: !!u.disabled };
+  } catch (e) { return { missing: true }; }
+}
+/** What a player has done (for troubleshooting, merging and the delete safety checks). */
+async function activityOf(uid) {
+  const snap = await col("eventsList").get();
+  const today = new Date().toISOString().slice(0, 10);
+  let played = 0, upcoming = 0, organized = 0, last = "";
+  const upcomingList = [];
+  snap.docs.forEach((d) => {
+    const g = d.data() || {};
+    if (g.organizerId === uid) organized++;
+    const a = arr(g.attendees).find((x) => uidOf(x) === uid);
+    if (!a) return;
+    const date = String(g.date || "").slice(0, 10);
+    if (g.isSessionEnded || date < today) { if (a.attendance !== "noshow") { played++; if (date > last) last = date; } }
+    else { upcoming++; upcomingList.push({ id: d.id, title: g.title || "Game", date }); }
+  });
+  const comms = await col("communities").get();
+  const communities = [];
+  let creditCents = 0;
+  for (const c of comms.docs) {
+    const [m, cr] = await Promise.all([c.ref.collection("members").doc(uid).get(), c.ref.collection("credits").doc(uid).get()]);
+    const owner = (c.data() || {}).creatorId === uid || (c.data() || {}).adminId === uid;
+    if (m.exists || owner) communities.push({ id: c.id, name: (c.data() || {}).name || "", role: owner ? "owner" : ((m.data() || {}).role || "member") });
+    if (cr.exists) creditCents += Math.round(Number(cr.data().balanceCents) || 0);
+  }
+  const teams = (await col("teams").where("memberUids", "array-contains", uid).get()).docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "", owner: (d.data() || {}).ownerId === uid }));
+  return { played, upcoming, upcomingList: upcomingList.slice(0, 10), organized, lastPlayed: last, communities, teams, creditCents };
+}
+const isActive = (a) => a.played > 0 || a.upcoming > 0 || a.organized > 0 || a.creditCents !== 0 || a.teams.length > 0;
+const confirmWord = (a, name) => (isActive(a) ? `DELETE ${String(name || "").trim().toUpperCase()}` : "DELETE");
+
+/** Replace one uid with another everywhere a player shows up (merge). Returns what changed. */
+async function mergeAccounts(keep, drop, dry) {
+  const out = { games: 0, communities: 0, credits: 0, teams: 0, vs: 0 };
+  const swap = (v) => (v === drop ? keep : v);
+  // games
+  const games = await col("eventsList").get();
+  for (const d of games.docs) {
+    const g = d.data() || {};
+    const touches = g.organizerId === drop || ["attendees", "waitingList", "declinedList"].some((k) => arr(g[k]).some((x) => uidOf(x) === drop))
+      || JSON.stringify(g.teamAssignments || {}).includes(drop) || JSON.stringify(g.teamSlots || {}).includes(drop) || JSON.stringify(g.teamCaptains || {}).includes(drop);
+    if (!touches) continue;
+    out.games++;
+    if (dry) continue;
+    const upd = {};
+    if (g.organizerId === drop) upd.organizerId = keep;
+    ["attendees", "waitingList", "declinedList"].forEach((k) => {
+      if (!arr(g[k]).some((x) => uidOf(x) === drop)) return;
+      const hasKeep = arr(g[k]).some((x) => uidOf(x) === keep);
+      upd[k] = arr(g[k]).filter((x) => !(hasKeep && uidOf(x) === drop)).map((x) => (uidOf(x) === drop ? { ...x, uid: keep } : x));
+    });
+    if (g.teamAssignments) upd.teamAssignments = JSON.parse(JSON.stringify(g.teamAssignments).split(`"${drop}"`).join(`"${keep}"`).split(`"${drop}_guest_`).join(`"${keep}_guest_`));
+    if (g.teamSlots) upd.teamSlots = JSON.parse(JSON.stringify(g.teamSlots).split(`"${drop}"`).join(`"${keep}"`));
+    if (g.teamCaptains) upd.teamCaptains = Object.fromEntries(Object.entries(g.teamCaptains).map(([k, v]) => [k, swap(v)]));
+    await d.ref.update(upd);
+  }
+  // communities: membership + credit
+  const comms = await col("communities").get();
+  for (const c of comms.docs) {
+    const [m, mk, cr, ck] = await Promise.all([c.ref.collection("members").doc(drop).get(), c.ref.collection("members").doc(keep).get(), c.ref.collection("credits").doc(drop).get(), c.ref.collection("credits").doc(keep).get()]);
+    if (m.exists) { out.communities++; if (!dry) { if (!mk.exists) await c.ref.collection("members").doc(keep).set({ ...m.data(), uid: keep }); await m.ref.delete(); } }
+    const bal = cr.exists ? Math.round(Number(cr.data().balanceCents) || 0) : 0;
+    if (cr.exists && bal) {
+      out.credits += bal;
+      if (!dry) {
+        const after = (ck.exists ? Math.round(Number(ck.data().balanceCents) || 0) : 0) + bal;
+        await c.ref.collection("credits").doc(keep).set({ uid: keep, balanceCents: after, updatedAt: FV.serverTimestamp() }, { merge: true });
+        await cr.ref.set({ balanceCents: 0 }, { merge: true });
+        await c.ref.collection("creditLedger").add({ uid: keep, name: "", amountCents: bal, type: "adjust", note: "Accounts merged", by: "manager", byName: "FutNet", balanceAfterCents: after, at: FV.serverTimestamp() });
+      }
+    }
+    const cd = c.data() || {};
+    if (!dry && (cd.creatorId === drop || cd.adminId === drop)) await c.ref.set({ ...(cd.creatorId === drop ? { creatorId: keep } : {}), ...(cd.adminId === drop ? { adminId: keep } : {}) }, { merge: true });
+  }
+  // teams
+  const teams = await col("teams").where("memberUids", "array-contains", drop).get();
+  for (const d of teams.docs) {
+    out.teams++;
+    if (dry) continue;
+    const t = d.data() || {};
+    const hasKeep = arr(t.memberUids).includes(keep);
+    await d.ref.update({
+      memberUids: uniq(arr(t.memberUids).map(swap)),
+      members: arr(t.members).filter((p) => !(hasKeep && p.uid === drop)).map((p) => (p.uid === drop ? { ...p, uid: keep } : p)),
+      ...(t.ownerId === drop ? { ownerId: keep } : {}),
+    });
+  }
+  // VS matches: organizer + goals
+  const vs = await col("vsMatches").get();
+  for (const d of vs.docs) {
+    const m = d.data() || {};
+    if (m.organizerId !== drop && !JSON.stringify(m.results || []).includes(drop) && !JSON.stringify(m.live || {}).includes(drop)) continue;
+    out.vs++;
+    if (dry) continue;
+    const fix = (x) => JSON.parse(JSON.stringify(x).split(`"${drop}"`).join(`"${keep}"`));
+    await d.ref.update({ ...(m.organizerId === drop ? { organizerId: keep } : {}), results: fix(m.results || []), ...(m.live ? { live: fix(m.live) } : {}) });
+  }
+  return out;
+}
+
+exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (request) => {
+  if (!isOwner(request.auth)) throw new HttpsError("permission-denied", "Only the FutNet owner can use the manager.");
+  const me = request.auth.uid;
+  const d = request.data || {};
+  const action = String(d.action || "");
+  const now = Date.now();
+
+  if (action === "hello") {
+    // first visit: the owner counts as a "real organizer"
+    const c = (await mgrConfigRef().get()).data() || {};
+    if (!arr(c.realOrganizers).includes(me)) await mgrConfigRef().set({ realOrganizers: uniq([...arr(c.realOrganizers), me]) }, { merge: true });
+    const [dir, events, comms, vs, tt, ver] = await Promise.all([col("directory").count().get(), col("eventsList").count().get(), col("communities").count().get(), col("vsMatches").count().get(), col("tournaments").count().get().catch(() => null), col("verifications").get()]);
+    let blue = 0, gold = 0;
+    ver.docs.forEach((x) => { const v = x.data() || {}; if (v.gold) gold++; if (v.blue && blueUntilOf(v) > now) blue++; });
+    return { me, players: dir.data().count, games: events.data().count, communities: comms.data().count, vsMatches: vs.data().count, tournaments: tt ? tt.data().count : 0, blue, gold };
+  }
+  if (action === "search") {
+    const q = String(d.q || "").trim().toLowerCase();
+    if (q.length < 2) return { list: [] };
+    const dir = await col("directory").get();
+    const ver = {};
+    (await col("verifications").get()).docs.forEach((x) => { ver[x.id] = x.data(); });
+    const list = dir.docs.map((x) => ({ uid: x.id, ...(x.data() || {}) })).filter((p) => String(p.name || "").toLowerCase().includes(q) || String(p.nickname || "").toLowerCase().includes(q) || p.uid.toLowerCase() === q)
+      .slice(0, 30).map((p) => ({ uid: p.uid, name: p.name || "", nickname: p.nickname || "", avatar: String(p.avatar || "").startsWith("http") ? p.avatar : "", hidden: !!(p.hidden || p.deleted || p.mergedInto), verification: ver[p.uid] || null }));
+    // emails help tell duplicate accounts apart
+    await Promise.all(list.map(async (p) => { p.auth = await authInfo(p.uid); }));
+    return { list };
+  }
+  if (action === "player") {
+    const uid = String(d.uid || "");
+    const [card, prof, v] = await Promise.all([col("directory").doc(uid).get(), col("users").doc(uid).collection("profile").doc("data").get(), vRef(uid).get()]);
+    const c = card.data() || {};
+    delete c.chats; delete c.fcmTokens; delete c.fcmToken; delete c.fcmToke;
+    const p = prof.data() || {};
+    return { uid, card: c, profile: { firstName: p.firstName || "", lastName: p.lastName || "", nickname: p.nickname || "", dob: p.dob || "", email: p.email || "", position: p.position || "" },
+      auth: await authInfo(uid), verification: v.data() || null, activity: await activityOf(uid) };
+  }
+  if (action === "verify") {
+    const uid = String(d.uid || ""), level = d.level, on = !!d.on;
+    if (!uid || !["blue", "gold"].includes(level)) throw new HttpsError("invalid-argument", "Missing player.");
+    const v = (await vRef(uid).get()).data() || {};
+    if (!on) { await vRef(uid).set({ [level]: FV.delete() }, { merge: true }); return { ok: true }; }
+    if (level === "blue") {
+      const lastRealGameAt = await lastRealGame(uid, await realOrganizers());
+      const next = { blue: { at: now, by: me }, lastRealGameAt: Math.max(Number(v.lastRealGameAt) || 0, lastRealGameAt) };
+      next.blueUntil = blueUntilOf({ ...v, ...next });
+      await vRef(uid).set(next, { merge: true });
+      return { ok: true, blueUntil: next.blueUntil };
+    }
+    const name = String(d.name || "").trim(), dob = String(d.dob || "").trim();
+    if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) throw new HttpsError("invalid-argument", "Enter the checked name and birthday (YYYY-MM-DD).");
+    await vRef(uid).set({ gold: { at: now, by: me, name, dob } }, { merge: true });
+    // the checked name and birthday become their profile's (and are locked from now on)
+    const parts = name.split(" ");
+    await col("directory").doc(uid).set({ name, dob }, { merge: true });
+    await col("users").doc(uid).collection("profile").doc("data").set({ name, firstName: parts[0] || "", lastName: parts.slice(1).join(" "), dob }, { merge: true });
+    return { ok: true };
+  }
+  if (action === "verifications") {
+    const snap = await col("verifications").get();
+    const list = [];
+    for (const x of snap.docs) {
+      const v = x.data() || {};
+      if (!v.blue && !v.gold) continue;
+      const c = (await col("directory").doc(x.id).get()).data() || {};
+      list.push({ uid: x.id, name: c.name || "", avatar: String(c.avatar || "").startsWith("http") ? c.avatar : "", ...v, blueUntil: v.blue ? blueUntilOf(v) : 0 });
+    }
+    return { list: list.sort((a, b) => (a.blueUntil || 9e15) - (b.blueUntil || 9e15)) };
+  }
+  if (action === "config") {
+    if (Array.isArray(d.realOrganizers)) await mgrConfigRef().set({ realOrganizers: uniq(d.realOrganizers.map(String)) }, { merge: true });
+    const c = (await mgrConfigRef().get()).data() || {};
+    const names = {};
+    await Promise.all(arr(c.realOrganizers).map(async (u) => { names[u] = ((await col("directory").doc(u).get()).data() || {}).name || u; }));
+    return { realOrganizers: arr(c.realOrganizers), names };
+  }
+  if (action === "adminThreads") {
+    const adminUid = await futnetAdminUid();
+    const mineCard = (await col("directory").doc(me).get()).data() || {};
+    const adminCard = adminUid ? ((await col("directory").doc(adminUid).get()).data() || {}) : {};
+    // Welcome chats are sent from the owner's account shown as "FutNet Admin": they live on the owner's card.
+    const threads = [...arr(mineCard.chats).filter((t) => t && t.adminThread), ...arr(adminCard.chats)]
+      .map((t) => ({ id: t.id, name: t.name || "", avatar: t.avatar || "", last: arr(t.messages).slice(-1)[0] || null, messages: arr(t.messages).slice(-30) }))
+      .filter((t) => t.last).sort((a, b) => (Number(b.last.createdAt) || 0) - (Number(a.last.createdAt) || 0)).slice(0, 80);
+    let reports = [];
+    try { reports = (await col("reports").orderBy("createdAt", "desc").limit(30).get()).docs.map((x) => ({ id: x.id, ...x.data(), createdAt: x.data().createdAt && x.data().createdAt.toMillis ? x.data().createdAt.toMillis() : x.data().createdAt })); } catch (e) { /* no reports yet */ }
+    return { threads, reports };
+  }
+  if (action === "adminReply") {
+    const to = String(d.to || ""), text = String(d.text || "").trim().slice(0, 2000);
+    if (!to || !text) throw new HttpsError("invalid-argument", "Write a message.");
+    await sendServerDM(me, to, text, { asName: FUTNET_ADMIN_NAME, asAvatar: FUTNET_ADMIN_AVATAR, adminThread: true });
+    return { ok: true };
+  }
+  if (action === "analytics") {
+    const days = Math.min(90, Math.max(1, Number(d.days) || 7));
+    const totals = {}, perDay = [];
+    for (let i = 0; i < days; i++) {
+      const day = new Date(now - i * 86400000).toISOString().slice(0, 10);
+      const x = (await col("analyticsDaily").doc(day).get()).data() || {};
+      const counts = x.counts || {};
+      let n = 0;
+      Object.entries(counts).forEach(([k, v]) => { totals[k] = (totals[k] || 0) + (Number(v) || 0); n += Number(v) || 0; });
+      perDay.push({ day, taps: n, users: arr(x.users).length });
+    }
+    return { totals: Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 80), perDay: perDay.reverse() };
+  }
+  if (action === "books") {
+    const ref = col("ownerBooks").doc("main").collection("entries");
+    if (d.add) {
+      const e = d.add;
+      const cents = Math.round(Number(e.amountCents) || 0);
+      if (!cents || !["income", "expense"].includes(e.type)) throw new HttpsError("invalid-argument", "Enter an amount.");
+      await ref.add({ type: e.type, amountCents: Math.abs(cents), note: String(e.note || "").slice(0, 120), category: String(e.category || "").slice(0, 40),
+        date: /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : new Date().toISOString().slice(0, 10), every: ["once", "month", "year"].includes(e.every) ? e.every : "once", at: now });
+    }
+    if (d.remove) await ref.doc(String(d.remove)).delete();
+    const list = (await ref.get()).docs.map((x) => ({ id: x.id, ...x.data() }));
+    // the older owner-only costs from the community money tracker count too
+    let older = [];
+    try { older = (await col("ownerBooks").doc(me).collection("fixedCosts").get()).docs.map((x) => ({ id: "fc_" + x.id, type: "expense", amountCents: x.data().amountCents, note: x.data().name, category: "App costs", date: x.data().startDate || "", every: x.data().every || "month", old: true })); } catch (e) { /* none */ }
+    return { list: [...list, ...older].sort((a, b) => String(b.date).localeCompare(String(a.date))) };
+  }
+  if (action === "mergePreview" || action === "merge") {
+    const keep = String(d.keep || ""), drop = String(d.drop || "");
+    if (!keep || !drop || keep === drop) throw new HttpsError("invalid-argument", "Pick two different accounts.");
+    const [kc, dc] = await Promise.all([col("directory").doc(keep).get(), col("directory").doc(drop).get()]);
+    if (!kc.exists || !dc.exists) throw new HttpsError("not-found", "One of the accounts doesn't exist.");
+    const keepName = (kc.data() || {}).name || "", dropName = (dc.data() || {}).name || "";
+    if (action === "mergePreview") return { keepName, dropName, keepAuth: await authInfo(keep), dropAuth: await authInfo(drop), changes: await mergeAccounts(keep, drop, true), confirmWord: `MERGE ${dropName.toUpperCase()}` };
+    if (String(d.confirm || "").trim() !== `MERGE ${dropName.toUpperCase()}`) throw new HttpsError("failed-precondition", `Type MERGE ${dropName.toUpperCase()} to confirm.`);
+    const changes = await mergeAccounts(keep, drop, false);
+    await col("directory").doc(drop).set({ mergedInto: keep, hidden: true, mergedAt: now }, { merge: true });
+    try { await admin.auth().updateUser(drop, { disabled: true }); } catch (e) { /* no login */ }
+    await col("managerLog").add({ action: "merge", keep, drop, keepName, dropName, changes, by: me, at: now });
+    return { ok: true, changes };
+  }
+  if (action === "deletePreview" || action === "delete") {
+    const uid = String(d.uid || "");
+    const c = (await col("directory").doc(uid).get()).data();
+    if (!c) throw new HttpsError("not-found", "No such player.");
+    if (uid === me) throw new HttpsError("failed-precondition", "You can't delete your own account here.");
+    const activity = await activityOf(uid);
+    const word = confirmWord(activity, c.name);
+    if (action === "deletePreview") return { name: c.name || "", auth: await authInfo(uid), activity, active: isActive(activity), confirmWord: word };
+    if (String(d.confirm || "").trim() !== word) throw new HttpsError("failed-precondition", `Type ${word} to confirm.`);
+    if (activity.creditCents > 0 && !d.forceCredit) throw new HttpsError("failed-precondition", "They still have community credit. Refund or remove it first (or tick the credit box).");
+    // Soft delete: hidden and can't sign in. "Restore" undoes it; "Delete forever" only after 30 days.
+    await col("directory").doc(uid).set({ deleted: true, hidden: true, deletedAt: now }, { merge: true });
+    try { await admin.auth().updateUser(uid, { disabled: true }); } catch (e) { /* no login */ }
+    await col("managerLog").add({ action: "delete", uid, name: c.name || "", activity, by: me, at: now });
+    return { ok: true };
+  }
+  if (action === "restore") {
+    const uid = String(d.uid || "");
+    await col("directory").doc(uid).set({ deleted: FV.delete(), hidden: FV.delete(), deletedAt: FV.delete(), mergedInto: FV.delete() }, { merge: true });
+    try { await admin.auth().updateUser(uid, { disabled: false }); } catch (e) { /* no login */ }
+    await col("managerLog").add({ action: "restore", uid, by: me, at: now });
+    return { ok: true };
+  }
+  if (action === "purge") {
+    const uid = String(d.uid || "");
+    const c = (await col("directory").doc(uid).get()).data() || {};
+    if (!c.deleted || now - (Number(c.deletedAt) || now) < 30 * 86400000) throw new HttpsError("failed-precondition", "Only accounts deleted more than 30 days ago can be deleted forever.");
+    if (String(d.confirm || "").trim() !== `FOREVER ${String(c.name || "").toUpperCase()}`) throw new HttpsError("failed-precondition", `Type FOREVER ${String(c.name || "").toUpperCase()} to confirm.`);
+    try { await admin.auth().deleteUser(uid); } catch (e) { /* already gone */ }
+    await col("users").doc(uid).collection("profile").doc("data").delete().catch(() => {});
+    await col("people").doc(uid).delete().catch(() => {});
+    await col("directory").doc(uid).delete();
+    await col("managerLog").add({ action: "purge", uid, name: c.name || "", by: me, at: now });
+    return { ok: true };
+  }
+  if (action === "deleted") {
+    const snap = await col("directory").where("hidden", "==", true).get();
+    return { list: snap.docs.map((x) => ({ uid: x.id, name: (x.data() || {}).name || "", deletedAt: (x.data() || {}).deletedAt || 0, mergedInto: (x.data() || {}).mergedInto || "" })) };
+  }
+  if (action === "fixName") {
+    const uid = String(d.uid || "");
+    const dir = { [uid]: (await col("directory").doc(uid).get()).data() || {} };
+    dir[uid].name = "";
+    await fillMissingNames(dir);
+    return { ok: true, name: dir[uid].name || "" };
+  }
+  throw new HttpsError("invalid-argument", "Unknown action.");
 });

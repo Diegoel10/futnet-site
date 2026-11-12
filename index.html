@@ -144,6 +144,18 @@
                     <i class="fa-solid fa-chevron-right text-white/40 text-xs"></i>
                 </button>
 
+                <!-- Create Tournament Option -->
+                <button onclick="closeCreateActionSheet(); (window.openCreateTourney ? openCreateTourney() : import('./js/tournaments.js').then(() => openCreateTourney()));" class="w-full flex items-center justify-between p-4 bg-black/60 hover:bg-black border border-amber-400/40 rounded-2xl transition shadow-lg group">
+                    <div class="flex items-center space-x-3.5">
+                        <div class="w-11 h-11 rounded-xl bg-amber-400/20 border border-amber-400/50 flex items-center justify-center text-xl">🏆</div>
+                        <div class="text-left">
+                            <div class="text-sm font-black text-white group-hover:text-amber-300 transition">Create Tournament</div>
+                            <div class="text-[11px] text-white/60 font-medium">Teams sign up; groups or knockout picked by how many join</div>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-white/40 text-xs"></i>
+                </button>
+
                 <!-- Create Community Option -->
                 <button onclick="closeCreateActionSheet(); showCommunityCreation();" class="w-full flex items-center justify-between p-4 bg-black/60 hover:bg-black border border-emerald-500/40 rounded-2xl transition shadow-lg group">
                     <div class="flex items-center space-x-3.5">
@@ -695,6 +707,11 @@
         import './js/leaderboard.js';
         import './js/spot-offers.js';
         import './js/themes.js';
+        import './js/scroll-hint.js';
+        import './js/badges.js';
+        import './js/track.js';
+        // Tournaments load once the page is ready (never slows down opening the app)
+        (window.requestIdleCallback || ((f) => setTimeout(f, 2500)))(() => import('./js/tournaments.js').catch(() => {}));
         import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -784,9 +801,12 @@
                 id = hashMatch ? decodeURIComponent(hashMatch[1]) : queryId;
                 // Captains link (#event=ID&caps=1): open the team builder on Caps mode
                 const capsFlag = /[#&?]caps=1\b/.test(window.location.hash + window.location.search);
-                if (id) { sessionStorage.setItem('futnet_pending_event', id); sessionStorage.setItem('futnet_pending_caps', capsFlag ? '1' : ''); }
+                // Comment link (#event=ID&tab=comments): open the game on its Comments tab
+                const tabM = (window.location.hash + '&' + window.location.search).match(/[#&?]tab=(comments)\b/);
+                if (id) { sessionStorage.setItem('futnet_pending_event', id); sessionStorage.setItem('futnet_pending_caps', capsFlag ? '1' : ''); sessionStorage.setItem('futnet_pending_tab', tabM ? tabM[1] : ''); }
                 else id = sessionStorage.getItem('futnet_pending_event');
                 window.deepLinkCaps = sessionStorage.getItem('futnet_pending_caps') === '1';
+                window.deepLinkTab = sessionStorage.getItem('futnet_pending_tab') || '';
             } catch (e) { /* storage blocked: the link still works when the person is already signed in */ }
             window.deepLinkEventId = id || null;
         })();
@@ -832,7 +852,9 @@
                     window.openEventDetails(id);
                     if (window.deepLinkCaps && typeof window.openCapsMode === 'function') setTimeout(() => window.openCapsMode(id), 400);
                     window.deepLinkCaps = false;
-                    try { sessionStorage.removeItem('futnet_pending_caps'); } catch (e) {}
+                    if (window.deepLinkTab && typeof window.switchModalTab === 'function') { const t = window.deepLinkTab; setTimeout(() => window.switchModalTab(t), 400); }
+                    window.deepLinkTab = '';
+                    try { sessionStorage.removeItem('futnet_pending_caps'); sessionStorage.removeItem('futnet_pending_tab'); } catch (e) {}
                     finish();
                     return;
                 }

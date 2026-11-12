@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <title>FutNet Manager</title>
+    <link rel="icon" href="img/FutnetJustLogo.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        html, body { background: #01060A; color: #fff; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+        .card { background: rgba(4,14,19,.95); border: 1px solid rgba(0,242,150,.25); border-radius: 18px; padding: 14px; }
+        .btn { background: linear-gradient(90deg,#00F296,#00B4AE); color: #04120c; font-weight: 900; border-radius: 12px; padding: 9px 14px; font-size: 13px; }
+        .btn-dark { background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.18); color: #fff; font-weight: 700; border-radius: 12px; padding: 9px 14px; font-size: 13px; }
+        .btn-red { background: rgba(239,68,68,.18); border: 1px solid rgba(239,68,68,.5); color: #fca5a5; font-weight: 800; border-radius: 12px; padding: 9px 14px; font-size: 13px; }
+        .inp { width: 100%; background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.18); border-radius: 12px; padding: 9px 12px; color: #fff; font-size: 14px; }
+        .lbl { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.55); margin-bottom: 4px; }
+        .tab { padding: 8px 12px; border-radius: 12px; font-size: 12px; font-weight: 800; white-space: nowrap; color: rgba(255,255,255,.7); }
+        .tab.on { background: #00F296; color: #04120c; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div id="app" class="max-w-3xl mx-auto px-4 py-6 space-y-4">
+        <div class="text-center text-white/60 text-sm py-20"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading…</div>
+    </div>
+    <script type="module" src="js/manager.js"></script>
+</body>
+</html>

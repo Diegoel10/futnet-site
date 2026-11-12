@@ -17,6 +17,8 @@ let startedFor = null;
 const toList = (snap) => snap.docs.map(d => { const x = d.data(); if (!x.uid) x.uid = d.id; return x; });
 
 function publish(list) {
+    // Accounts deleted or merged from futnet.site/manager don't show anywhere
+    list = list.filter(x => !(x && (x.hidden || x.deleted || x.mergedInto)));
     window.directoryList = list;
     window.cachedDirectoryList = list;
     const w = waiters; waiters = [];

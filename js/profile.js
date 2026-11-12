@@ -41,7 +41,7 @@ window.renderProfileTab = function() {
                     </div>
                     <div class="space-y-0.5">
                         <div class="flex items-center gap-2">
-                            <h2 class="text-base font-black text-white">${fullName}</h2>
+                            <h2 class="text-base font-black text-white">${fullName}${window.badgeHtml && window.currentUser ? window.badgeHtml(window.currentUser.uid) : ""}</h2>
                         </div>
                         ${nickname ? `<p class="text-xs text-white/80 font-medium">${nickname}</p>` : ''}
                     </div>
@@ -294,6 +294,14 @@ window.handleSaveProfile = async function(e) {
     if (!window.currentUser) return;
 
     // Never save a blank name (it shows as "Player" everywhere)
+    // Gold verified: name and birthday stay as checked (only the nickname and the rest can change)
+    const gold = window.myVerification && window.myVerification.gold;
+    if (gold) {
+        const parts = String(gold.name || '').split(' ');
+        document.getElementById('edit-firstname').value = parts[0] || window.userProfile.firstName || '';
+        document.getElementById('edit-lastname').value = parts.slice(1).join(' ');
+        if (gold.dob && document.getElementById('edit-dob')) document.getElementById('edit-dob').value = gold.dob;
+    }
     const newFirst = document.getElementById('edit-firstname').value.trim();
     if (!newFirst) { if (window.showToast) window.showToast('Please enter your first name.', 'error'); return; }
     window.userProfile.firstName = newFirst;

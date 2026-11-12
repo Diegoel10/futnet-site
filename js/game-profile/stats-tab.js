@@ -50,21 +50,21 @@ export function renderStatsTab(event) {
                                 <span class="text-xs font-black tracking-wide truncate max-w-[120px] flex items-center gap-1.5">${liveActive.teamB}<span class="w-2 h-2 rounded-full bg-[#00F296] inline-block animate-ping"></span></span>
                             </div>
                             <div class="grid grid-cols-2 gap-2 pt-1 border-t border-white/10 text-xs">
-                                <div class="space-y-1">
+                                <div class="space-y-1 min-w-0">
                                     ${(liveActive.team1Goals || []).map(scorer => `
                                         <div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10">
                                             <i class="fa-solid fa-futbol text-[#00F296] text-[9px]"></i>
-                                            <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 rounded-full object-cover">
-                                            <span class="text-white font-bold text-[10px]">${scorer}</span>
+                                            <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 shrink-0 rounded-full object-cover">
+                                            <span class="text-white font-bold text-[10px] truncate min-w-0 whitespace-nowrap">${scorer}</span>
                                         </div>
                                     `).join('')}
                                 </div>
-                                <div class="space-y-1">
+                                <div class="space-y-1 min-w-0">
                                     ${(liveActive.team2Goals || []).map(scorer => `
                                         <div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10">
                                             <i class="fa-solid fa-futbol text-red-400 text-[9px]"></i>
-                                            <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 rounded-full object-cover">
-                                            <span class="text-white font-bold text-[10px]">${scorer}</span>
+                                            <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 shrink-0 rounded-full object-cover">
+                                            <span class="text-white font-bold text-[10px] truncate min-w-0 whitespace-nowrap">${scorer}</span>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -83,18 +83,18 @@ export function renderStatsTab(event) {
                         const isFinished = m.isFinished !== undefined ? m.isFinished : true;
 
                         const t1ScorersHtml = t1Goals.map(scorer => `
-                            <div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 text-xs">
+                            <div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 text-xs min-w-0">
                                 <i class="fa-solid fa-futbol text-[#00F296] text-[9px]"></i>
-                                <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 rounded-full object-cover border border-[#00F296]/40">
-                                <span class="text-white font-bold text-[10px]">${scorer}</span>
+                                <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 shrink-0 rounded-full object-cover border border-[#00F296]/40">
+                                <span class="text-white font-bold text-[10px] truncate min-w-0 whitespace-nowrap">${scorer}</span>
                             </div>
                         `).join('');
 
                         const t2ScorersHtml = t2Goals.map(scorer => `
-                            <div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 text-xs">
+                            <div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 text-xs min-w-0">
                                 <i class="fa-solid fa-futbol text-red-400 text-[9px]"></i>
-                                <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 rounded-full object-cover border border-red-400/40">
-                                <span class="text-white font-bold text-[10px]">${scorer}</span>
+                                <img src="${resolvePlayerAvatar(scorer)}" class="w-4 h-4 shrink-0 rounded-full object-cover border border-red-400/40">
+                                <span class="text-white font-bold text-[10px] truncate min-w-0 whitespace-nowrap">${scorer}</span>
                             </div>
                         `).join('');
 
@@ -110,8 +110,8 @@ export function renderStatsTab(event) {
                                     <span class="text-xs font-black tracking-wide truncate max-w-[120px]">${teamB}</span>
                                 </div>
                                 <div class="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
-                                    <div class="space-y-1">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
-                                    <div class="space-y-1">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
+                                    <div class="space-y-1 min-w-0">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
+                                    <div class="space-y-1 min-w-0">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
                                 </div>
                             </div>
                         `;

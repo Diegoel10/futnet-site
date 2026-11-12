@@ -20,6 +20,7 @@ import { computePlayerStats } from './leaderboard.js';
 import './money-tracker.js';
 import './analytics.js';
 import { renderWhatsApp, typingBubbleHtml, typingText, watchTyping, msOf, uploadMedia, showUploadProgress, hideUploadProgress, mediaErrorText } from './wa-chat.js';
+import { smartText } from './smart-text.js';
 
 const DEFAULT_THUMB = 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800';
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -805,7 +806,8 @@ window.refreshCommunityGamesTab = () => {
     }
     if (!(S.activeId && S.tab === 'games')) return;
     // Redraw only when this community's games changed (not when any game anywhere changed).
-    const sig = S.activeId + '|' + JSON.stringify((window.eventsList || []).filter(e => e.communityId === S.activeId));
+    const sig = S.activeId + '|' + JSON.stringify((window.eventsList || []).filter(e => e.communityId === S.activeId))
+        + '|' + JSON.stringify(((window.__vsState && window.__vsState.list) || []).filter(m => m.communityId === S.activeId));
     if (sig === window._commGamesSig) return;
     window._commGamesSig = sig;
     renderCommunityPage();
@@ -1309,8 +1311,22 @@ window.showCommunityMembers = (id, highlightUid) => {
 // [tab, label, value, -, how many they played on this tab, its word]
 const LB_TABS = [['wins', 'Most Won Matches', 'matchesWon', 'won', 'played', 'match'], ['sessions', 'Most Won Sessions', 'sessionsWon', 'won', 'sessionsPlayed', 'session'], ['goals', 'Most Goals', 'goals', 'goals', 'played', 'match']];
 const lbPlayed = (r, t) => { const n = r[t[4]] || 0; return `${n} ${t[5]}${n === 1 ? '' : (t[5] === 'match' ? 'es' : 's')}`; };
+// Leaderboard filters (per community): how many teams, format (8v8...), day of the week, park.
+const LBF = {};   // communityId -> { teams, format, day, park }
+const LB_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const lbDow = (ev) => { const [y, m, d] = String(ev.date || '').slice(0, 10).split('-').map(Number); return y ? LB_DOW[new Date(y, m - 1, d).getDay()] : ''; };
+const lbPark = (ev) => String(ev.location || '').split(',')[0].trim();
 function leaderboardHtml(c, tab) {
-    const events = (window.eventsList || []).filter(e => e.communityId === c.id);
+    const all = (window.eventsList || []).filter(e => e.communityId === c.id);
+    const f = LBF[c.id] || {};
+    const events = all.filter(e => (!f.teams || String(e.teamsCount || '') === f.teams) && (!f.format || e.format === f.format)
+        && (!f.day || lbDow(e) === f.day) && (!f.park || lbPark(e) === f.park));
+    const uniqSorted = (a) => [...new Set(a.filter(Boolean))].sort((x, y) => String(x).localeCompare(String(y), undefined, { numeric: true }));
+    const opts = { teams: uniqSorted(all.map(e => e.teamsCount ? String(e.teamsCount) : '')), formats: uniqSorted(all.map(e => e.format)),
+        days: LB_DOW.filter(d => all.some(e => lbDow(e) === d)), parks: uniqSorted(all.map(lbPark)) };
+    const filtered = !!(f.teams || f.format || f.day || f.park);
+    const sel = (key, label, list, fmt = (x) => x) => `<select onchange="setCommunityLbFilter('${jsArg(c.id)}','${tab}','${key}', this.value)" class="min-w-0 bg-black/60 border ${f[key] ? 'border-[#00F296] text-[#00F296]' : 'border-white/15 text-white/80'} rounded-lg px-2 py-1.5 text-[11px] font-bold">
+        <option value="">${label}</option>${list.map(v => `<option value="${esc(v)}" ${f[key] === v ? 'selected' : ''}>${esc(fmt(v))}</option>`).join('')}</select>`;
     const cur = LB_TABS.find(t => t[0] === tab) || LB_TABS[0];
     const rows = computePlayerStats(events).filter(p => p[cur[2]] > 0)
         .sort((a, b) => b[cur[2]] - a[cur[2]] || (b[cur[4]] || 0) - (a[cur[4]] || 0) || String(a.name).localeCompare(String(b.name))).slice(0, 25);
@@ -1318,19 +1334,28 @@ function leaderboardHtml(c, tab) {
         <div class="grid grid-cols-3 gap-1 bg-black/50 border border-white/10 rounded-xl p-1">
             ${LB_TABS.map(t => `<button onclick="setCommunityLeaderboardTab('${jsArg(c.id)}','${t[0]}')" class="py-2 px-1 rounded-lg text-[10px] font-black leading-tight transition ${t[0] === cur[0] ? 'bg-[#00F296] text-slate-950' : 'text-white/70 hover:text-white'}">${t[1]}</button>`).join('')}
         </div>
+        <div class="grid grid-cols-2 gap-1.5">
+            ${sel('teams', 'Any # of teams', opts.teams, (v) => `${v} teams`)}${sel('format', 'Any format', opts.formats)}
+            ${sel('day', 'Any day', opts.days)}${sel('park', 'Any park', opts.parks)}
+        </div>
+        ${filtered ? `<div class="flex items-center justify-between text-[11px]"><span class="text-white/55">${events.length} of ${all.length} games</span><button onclick="setCommunityLbFilter('${jsArg(c.id)}','${tab}','','')" class="font-bold text-[#00F296]">✕ Clear filters</button></div>` : ''}
         ${rows.length ? `<div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
             <div ${r.uid ? `onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(c.id)}')"` : ''} class="flex items-center gap-3 p-2.5 text-xs ${r.uid ? 'cursor-pointer hover:bg-white/5' : ''}">
                 <span class="w-6 text-center font-black text-white/60">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
                 ${avatarImg({ uid: r.uid, name: r.name, avatar: r.avatar }, 'w-8 h-8 rounded-full object-cover')}
-                <span class="flex-1 truncate font-bold text-white">${esc(r.name)}</span>
+                <span class="flex-1 truncate font-bold text-white">${esc(r.name)}${r.uid && window.badgeHtml ? window.badgeHtml(r.uid) : ''}</span>
                 <span class="text-white/50 text-[10px]">${lbPlayed(r, cur)}</span>
                 <span class="font-black text-[#00F296] w-10 text-right">${r[cur[2]]}</span>
             </div>`).join('')}</div>`
-        : '<p class="text-xs text-white/50 italic text-center py-6">Nothing here yet. Finish a community match and the rankings will show up.</p>'}`;
+        : `<p class="text-xs text-white/50 italic text-center py-6">${filtered ? 'No games match these filters yet.' : 'Nothing here yet. Finish a community match and the rankings will show up.'}</p>`}`;
 }
 window.setCommunityLeaderboardTab = (id, tab) => {
     const c = window.communitiesCache[id]; const box = document.getElementById('lb-body'); if (!c || !box) return;
     box.innerHTML = leaderboardHtml(c, tab);
+};
+window.setCommunityLbFilter = (id, tab, key, v) => {
+    LBF[id] = key ? { ...(LBF[id] || {}), [key]: v } : {};
+    window.setCommunityLeaderboardTab(id, tab);
 };
 window.showCommunityLeaderboard = (id) => {
     const c = window.communitiesCache[id]; if (!c) return;
@@ -1339,8 +1364,13 @@ window.showCommunityLeaderboard = (id) => {
 
 // ------------------------------------------------------------------ GAMES TAB + COMMUNITY GAME CREATION
 function gamesTab(c, isMember) {
-    const { up, prev } = communityGames(c.id);
-    const card = (ev) => (window.renderEventCardHtml ? window.renderEventCardHtml(ev) : '');
+    const { up: up0, prev: prev0 } = communityGames(c.id);
+    // VS matches posted in this community show here too, in date order with the games.
+    const vsUp = window.vsCommunityCards ? window.vsCommunityCards(c.id, 'up') : [], vsPrev = window.vsCommunityCards ? window.vsCommunityCards(c.id, 'prev') : [];
+    const mix = (games, vs, newestFirst) => [...games.map(ev => ({ date: String(ev.date || '').slice(0, 10), time: String(ev.time || ''), ev })), ...vs]
+        .sort((a, b) => { const k = `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`); return newestFirst ? -k : k; });
+    const up = mix(up0, vsUp, false), prev = mix(prev0, vsPrev, true);
+    const card = (row) => row.html || (window.renderEventCardHtml ? window.renderEventCardHtml(row.ev) : '');
     if (!isMember && c.matchesVisibleToNonMembers === false) {
         return `<p class="text-xs text-white/60 text-center py-6">Games are visible to members only. Join this community to see them.</p>`;
     }
@@ -1561,7 +1591,7 @@ function feedTab(c, isMember, isAdmin) {
 
 // "@Diego Ponce" in a post or comment, highlighted when that person is in the community.
 function mentionText(text) {
-    let html = esc(text || '');
+    let html = smartText(text || '');   // phones / addresses / links tappable
     const names = S.members.map(m => memberName(m)).filter(n => n && n !== 'Player').sort((a, b) => b.length - a.length);
     names.forEach(n => {
         const e = esc(n);

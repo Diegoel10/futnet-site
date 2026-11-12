@@ -71,7 +71,7 @@ export async function mutateEvent(eventId, mutator, hooks) {
             return { aborted: false, event: { ...before, ...clean } };
         });
 
-        if (!result.aborted) applyLocal(eventId, result.event);
+        if (!result.aborted) { applyLocal(eventId, result.event); redrawSoon(eventId); }
         return { ok: true, aborted: result.aborted, event: result.event };
     } catch (err) {
         console.error('mutateEvent failed:', err);
@@ -91,6 +91,20 @@ export function applyLocal(eventId, fresh) {
     const local = list.find(ev => ev.id === eventId);
     if (!local) return;
     Object.assign(local, fresh); // never delete keys: the local copy may hold derived fields such as `id`
+}
+
+/** Show a saved change right away (e.g. a removed guest), instead of waiting for the live update from the server. */
+function redrawSoon(eventId) {
+    setTimeout(() => {
+        try {
+            if (window.activeModalEventId === eventId && window.renderEventDetailModalContent) {
+                const act = (window.eventsList || []).find(ev => ev.id === eventId);
+                window._activeEventSig = eventId + '|' + (act ? JSON.stringify(act) : '');
+                window.renderEventDetailModalContent();
+            }
+            if (window.renderEvents) window.renderEvents();
+        } catch (e) { /* the live update will redraw */ }
+    }, 0);
 }
 
 window.mutateEvent = mutateEvent;
