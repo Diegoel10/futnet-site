@@ -234,7 +234,7 @@ function wrapEvents() {
             if (next) next.insertAdjacentHTML('beforebegin', vsCardHtml(m)); else grid.insertAdjacentHTML('beforeend', vsCardHtml(m));
         });
     };
-    w._vs = true; window.renderEvents = w;
+    w._vs = true; w._tt = orig._tt; window.renderEvents = w;
 }
 window.__vsWrapEvents = wrapEvents;
 setTimeout(wrapEvents, 0); setTimeout(wrapEvents, 1500);

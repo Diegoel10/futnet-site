@@ -101,6 +101,7 @@ async function notify(recipients, payload, { exclude = [], key = "" } = {}) {
         chatId: payload.chatId || "",
         matchId: payload.matchId || "",
         teamId: payload.teamId || "",
+        tourneyId: payload.tourneyId || "",
         tab: payload.tab || "",               // which tab the app should open (e.g. "comments")
         commentId: payload.commentId || "",
         sound: payload.sound || "",
@@ -130,6 +131,7 @@ function muteKeyOf(n) {
   if (n.type === "chat_community" && n.communityId) return `cchat_${n.communityId}`;
   if (n.type === "chat_team" && n.teamId) return `tchat_${n.teamId}`;
   if (n.type === "vs_comment" && n.matchId) return `vs_${n.matchId}`;
+  if (n.type === "tourney_chat" && n.tourneyId) return `tt_${n.tourneyId}`;
   return "";
 }
 // Who blocked a person: kept by the server only (outside the app's data), so nobody can read it.
@@ -233,9 +235,11 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
     chatId: n.chatId || "",
     matchId: n.matchId || "",
     teamId: n.teamId || "",
+    tourneyId: n.tourneyId || "",
     tab: n.tab || (type === "game_comment" ? "comments" : type === "vs_comment" ? "chat" : ""),
     commentId: n.commentId || "",
-    link: n.eventId && type === "game_comment" ? `https://futnet.site/#event=${encodeURIComponent(n.eventId)}&tab=comments` : "",
+    link: n.eventId && type === "game_comment" ? `https://futnet.site/#event=${encodeURIComponent(n.eventId)}&tab=comments`
+      : n.tourneyId ? `https://futnet.site/#tourney=${encodeURIComponent(n.tourneyId)}${n.tab ? "&tab=" + encodeURIComponent(n.tab) : ""}` : "",
     sound: n.sound || "",
   };
   // Money in: custom "cha-ching" sound (the file ships inside the apps; falls back to the normal sound).
@@ -1921,7 +1925,7 @@ const cleanName = (s) => String(s || "").replace(/\s+/g, " ").trim();
 /** Name on a directory card: name, else first + last, else nickname. */
 const cardName = (d) => cleanName((d && d.name) || `${(d && d.firstName) || ""} ${(d && d.lastName) || ""}`) || cleanName(d && d.nickname);
 /** Name from a private profile: first + last (that is what the person typed). */
-const profileName = (p) => cleanName(`${(p && p.firstName) || ""} ${(p && p.lastName) || ""}`) || cleanName(p && p.name);
+const profileName = (p) => (p && p.showAs === "nickname" && cleanName(p.nickname)) || cleanName(`${(p && p.firstName) || ""} ${(p && p.lastName) || ""}`) || cleanName(p && p.name);   // "Go by my nickname" wins
 /** Only short web links are copied into rosters (big uploaded photos are looked up from the card). */
 const shareableAvatar = (a) => (typeof a === "string" && a.startsWith("http") && a.length <= 500 ? a : "");
 const realName = (n) => !!n && !/^(player|someone|member)$/i.test(n);
@@ -2099,7 +2103,7 @@ exports.syncAllNames = onCall({ timeoutSeconds: 540, memory: "512MiB" }, async (
     let name = cardName(card);
     if (realName(want) && want !== name) {
       fixed.push({ uid: c.id, from: name || "(empty)", to: want });
-      if (fix) await c.ref.set({ name: want, firstName: cleanName(prof.firstName), lastName: cleanName(prof.lastName) }, { merge: true });
+      if (fix) await c.ref.set(prof.showAs === "nickname" ? { name: want, firstName: FV.delete(), lastName: FV.delete() } : { name: want, firstName: cleanName(prof.firstName), lastName: cleanName(prof.lastName) }, { merge: true });
       name = want;
     }
     if (realName(name)) everyone.set(c.id, { name, avatar: shareableAvatar(card.avatar) });
@@ -2751,7 +2755,7 @@ async function fillMissingNames(dir) {
     if (String(d.name || `${d.firstName || ""} ${d.lastName || ""}`).trim()) return;
     try {
       const p = (await db.collection("artifacts").doc(APP_ID).collection("users").doc(u).collection("profile").doc("data").get()).data() || {};
-      let name = String(p.name || `${p.firstName || ""} ${p.lastName || ""}`).trim();
+      let name = String((p.showAs === "nickname" && p.nickname) || p.name || `${p.firstName || ""} ${p.lastName || ""}`).trim();
       if (!name || name === "Player") { try { name = String((await admin.auth().getUser(u)).displayName || "").trim(); } catch (e) { /* no auth name */ } }
       if (!name || name === "Player") return;
       dir[u] = { ...d, name };
@@ -3666,17 +3670,32 @@ exports.verificationSweep = onSchedule({ schedule: "every day 04:10", timeZone: 
   }
 });
 
-// Gold check: the verified name can't be changed. If it is, it's put back.
+// The name everyone sees (directory.name) is guarded:
+//   "Go by my nickname" on -> the nickname (so nobody sees their real name), from any app.
+//   Gold verified        -> the checked name (or the nickname, if they chose that). Real name and birthday stay locked.
 exports.goldNameGuard = onDocumentWritten(`${BASE}/directory/{uid}`, async (event) => {
   const after = event.data.after.exists ? event.data.after.data() : null;
   if (!after) return;
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  if (event.data.before.exists && String(before.name || "") === String(after.name || "") && before.firstName === after.firstName) return;   // chats, tokens... not a name change
   const uid = event.params.uid;
-  const v = (await vRef(uid).get()).data();
-  if (!v || !v.gold || !v.gold.name) return;
-  if (String(after.name || "").trim() === v.gold.name) return;
-  await col("directory").doc(uid).set({ name: v.gold.name }, { merge: true });
-  const parts = v.gold.name.split(" ");
-  await col("users").doc(uid).collection("profile").doc("data").set({ name: v.gold.name, firstName: parts[0] || "", lastName: parts.slice(1).join(" "), ...(v.gold.dob ? { dob: v.gold.dob } : {}) }, { merge: true });
+  const [prof, ver] = await Promise.all([col("users").doc(uid).collection("profile").doc("data").get(), vRef(uid).get()]);
+  const p = prof.data() || {}, v = ver.data() || {};
+  const nick = cleanName(p.nickname);
+  const want = p.showAs === "nickname" && nick ? nick : (v.gold && v.gold.name ? v.gold.name : "");
+  if (want && String(after.name || "").trim() !== want) {
+    await col("directory").doc(uid).set({ name: want, ...(p.showAs === "nickname" ? { firstName: FV.delete(), lastName: FV.delete() } : {}) }, { merge: true });
+  } else if (p.showAs === "nickname" && (after.firstName || after.lastName)) {
+    await col("directory").doc(uid).set({ firstName: FV.delete(), lastName: FV.delete() }, { merge: true });   // keep the real name off the public card
+  }
+  // gold: the checked name stays in their private profile too
+  if (v.gold && v.gold.name) {
+    const parts = v.gold.name.split(" ");
+    const first = parts[0] || "", last = parts.slice(1).join(" ");
+    if (p.firstName !== first || p.lastName !== last || (v.gold.dob && p.dob !== v.gold.dob)) {
+      await col("users").doc(uid).collection("profile").doc("data").set({ firstName: first, lastName: last, ...(v.gold.dob ? { dob: v.gold.dob } : {}) }, { merge: true });
+    }
+  }
 });
 
 async function authInfo(uid) {
@@ -3784,6 +3803,147 @@ async function mergeAccounts(keep, drop, dry) {
   return out;
 }
 
+/** Best photo for the manager lists: their card's photo, else their profile's, else their sign-in photo. */
+const realPic = (a) => !!a && /^(https?:|data:image)/.test(String(a)) && !/person-circle\.svg|dicebear/.test(String(a));
+async function photoOf(uid, card) {
+  const c = card || {};
+  if (realPic(c.avatar)) return c.avatar;
+  if (realPic(c.photoURL)) return c.photoURL;
+  try { const p = (await col("users").doc(uid).collection("profile").doc("data").get()).data() || {}; if (realPic(p.avatar)) return p.avatar; if (realPic(p.photoURL)) return p.photoURL; } catch (e) { /* none */ }
+  try { const u = await admin.auth().getUser(uid); if (realPic(u.photoURL)) return u.photoURL; } catch (e) { /* none */ }
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// Beta mode: only approved people can create games, VS matches, tournaments and communities.
+//   appConfig/main = { creatorsOnly, creators: [uid], adminUid }  (everyone can read it; only the manager changes it)
+// The app hides "Create" for others; this server check also removes anything created around it.
+// ---------------------------------------------------------------------------
+const appConfigRef = () => col("appConfig").doc("main");
+async function guardCreate(kind, ref, creatorUid) {
+  try {
+    const c = (await appConfigRef().get()).data() || {};
+    if (!c.creatorsOnly || !creatorUid || arr(c.creators).includes(creatorUid)) return;
+    await ref.delete();
+    if (kind === "community") { try { await ref.collection("members").doc(creatorUid).delete(); } catch (e) { /* none */ } }
+    await notify([creatorUid], {
+      type: "beta_blocked", senderUid: c.adminUid || "",
+      title: "FutNet is in beta",
+      body: `Only approved organizers can create ${kind === "game" ? "games" : kind === "vs" ? "VS matches" : kind === "tournament" ? "tournaments" : "communities"} for now. Message FutNet Admin to get approved.`,
+    }, { key: `beta_${ref.id}` });
+    logger.info(`beta: removed ${kind} ${ref.id} by ${creatorUid}`);
+  } catch (e) { logger.warn("beta guard", kind, e.message); }
+}
+exports.betaGuardGame = onDocumentCreated(`${BASE}/eventsList/{id}`, (e) => guardCreate("game", e.data.ref, (e.data.data() || {}).organizerId));
+exports.betaGuardVs = onDocumentCreated(`${BASE}/vsMatches/{id}`, (e) => guardCreate("vs", e.data.ref, (e.data.data() || {}).organizerId));
+exports.betaGuardTourney = onDocumentCreated(`${BASE}/tournaments/{id}`, (e) => guardCreate("tournament", e.data.ref, (e.data.data() || {}).organizerId));
+exports.betaGuardCommunity = onDocumentCreated(`${BASE}/communities/{id}`, (e) => { const d = e.data.data() || {}; return guardCreate("community", e.data.ref, d.creatorId || d.adminId); });
+
+// ---------------------------------------------------------------------------
+// Tournaments: tell everyone in it how it's going.
+//   - organizer: a team registered
+//   - players: you were put on your team's list
+//   - everyone in it: the draw is out, game times are out, results, champions, organizer updates, cancelled
+//   - tournament chat messages; and a reminder the evening before each game
+// ---------------------------------------------------------------------------
+const ttPeople = (t) => uniq([t.organizerId, ...arr(t.participantUids), ...arr(t.teams).map((x) => x.joinedBy)]);
+const ttRosterUids = (x) => arr(x && x.roster).map((r) => (r && typeof r === "object" ? r.uid : "")).filter(Boolean);
+const ttTeamPeople = (t, teamId) => { const x = arr(t.teams).find((y) => y.teamId === teamId); return x ? uniq([x.joinedBy, ...ttRosterUids(x)]) : []; };
+const ttName = (t, id) => (arr(t.teams).find((x) => x.teamId === id) || {}).name || "TBD";
+const ttLabel = (m) => m.stage === "group" ? `Group ${m.group}` : m.stage === "qf" ? "Quarter-final" : m.stage === "sf" ? "Semi-final" : m.stage === "final" ? "Final" : "League";
+const ttWhen = (m) => {
+  if (!m.date) return "time TBA";
+  const [y, mo, d] = m.date.split("-").map(Number);
+  const day = new Date(Date.UTC(y, mo - 1, d, 12)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  if (!m.time) return day;
+  const [h, mi] = m.time.split(":").map(Number);
+  return `${day} ${((h + 11) % 12) + 1}:${String(mi || 0).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+};
+exports.onTourneyWritten = onDocumentUpdated(`${BASE}/tournaments/{id}`, async (event) => {
+  const before = event.data.before.data() || {}, t = event.data.after.data() || {};
+  const id = event.params.id, name = t.name || "the tournament";
+  const by = t.updatedBy || "";
+  const base = { tourneyId: id, senderUid: by };
+  const jobs = [];
+  try {
+    // a team registered
+    const had = new Set(arr(before.teams).map((x) => x.teamId));
+    arr(t.teams).filter((x) => !had.has(x.teamId)).forEach((x) => {
+      jobs.push(notify([t.organizerId], { ...base, type: "tourney_join", title: `🏆 ${x.name || "A team"} registered`, body: `${name}: ${arr(t.teams).length}/${t.maxTeams || 8} teams.`, tab: "teams" }, { exclude: [x.joinedBy], key: `ttjoin_${id}_${x.teamId}` }));
+    });
+    // players put on a team's list
+    arr(t.teams).forEach((x) => {
+      const old = new Set(ttRosterUids(arr(before.teams).find((y) => y.teamId === x.teamId)));
+      const added = ttRosterUids(x).filter((u) => !old.has(u));
+      if (added.length) jobs.push(notify(added, { ...base, type: "tourney_roster", title: `🏆 You're in: ${name}`, body: `${x.joinedByName || "Your captain"} put you on ${x.name || "the team"}'s list.`, tab: "teams" }, { exclude: [x.joinedBy], key: `ttrost_${id}_${x.teamId}` }));
+    });
+    // the step changed
+    if (before.status !== t.status) {
+      const all = ttPeople(t);
+      if (t.status === "waiting") {
+        jobs.push(...arr(t.teams).map((x) => {
+          const first = arr(t.matches).find((m) => m.a === x.teamId || m.b === x.teamId);
+          const vs = first ? (first.a === x.teamId ? ttName(t, first.b) : ttName(t, first.a)) : "";
+          return notify(ttTeamPeople(t, x.teamId), { ...base, type: "tourney_step", title: `🎲 The draw is out: ${name}`, body: first ? `${x.name}: ${ttLabel(first)} vs ${vs === "TBD" ? "a team to be decided" : vs}. Game times coming soon.` : "See who plays who.", tab: "bracket" }, { key: `ttdraw_${id}_${x.teamId}_${Date.now()}` });
+        }));
+        jobs.push(notify([t.organizerId], { ...base, type: "tourney_step", title: "🎲 Draw confirmed", body: `Everyone in ${name} was told. Next: set the game times.`, tab: "admin" }, { exclude: [by], key: `ttdrawo_${id}_${Date.now()}` }));
+      } else if (t.status === "set") {
+        jobs.push(...arr(t.teams).map((x) => {
+          const first = arr(t.matches).find((m) => m.a === x.teamId || m.b === x.teamId);
+          return notify(ttTeamPeople(t, x.teamId), { ...base, type: "tourney_step", title: `📅 Game times are out: ${name}`, body: first ? `${x.name}'s first game: ${ttLabel(first)}, ${ttWhen(first)}.` : "Check when you play.", tab: "bracket" }, { exclude: [by], key: `tttimes_${id}_${x.teamId}_${Date.now()}` });
+        }));
+      } else if (t.status === "final" && t.championId) {
+        jobs.push(notify(all, { ...base, type: "tourney_step", title: `🏆 ${ttName(t, t.championId)} are the champions!`, body: `${name} is over. See the final results.`, tab: "info" }, { key: `ttchamp_${id}_${t.championId}` }));
+      } else if (t.status === "cancelled") {
+        jobs.push(notify(all, { ...base, type: "tourney_step", title: `❌ ${name} was cancelled`, body: "The organizer cancelled the tournament." }, { exclude: [by], key: `ttcancel_${id}` }));
+      }
+    } else if (["set", "running"].includes(t.status)) {
+      // a game time changed after the times were out: tell those two teams
+      const old = new Map(arr(before.matches).map((m) => [m.id, m]));
+      arr(t.matches).forEach((m) => {
+        const o = old.get(m.id);
+        if (!o || m.done || (o.date === m.date && o.time === m.time && (o.place || "") === (m.place || ""))) return;
+        jobs.push(notify([...ttTeamPeople(t, m.a), ...ttTeamPeople(t, m.b)], { ...base, type: "tourney_time", title: `📅 Time change: ${ttLabel(m)}`, body: `${ttName(t, m.a)} vs ${ttName(t, m.b)} is now ${ttWhen(m)}${m.place ? " at " + m.place : ""}.`, tab: "bracket" }, { exclude: [by], key: `tttime_${id}_${m.id}_${m.date}_${m.time}` }));
+      });
+    }
+    // a game finished
+    const wasDone = new Set(arr(before.matches).filter((m) => m.done).map((m) => m.id));
+    arr(t.matches).filter((m) => m.done && !wasDone.has(m.id) && m.stage !== "final").forEach((m) => {
+      jobs.push(notify(ttPeople(t), { ...base, type: "tourney_result", title: `⚽ ${ttLabel(m)}: ${ttName(t, m.a)} ${m.ga}-${m.gb} ${ttName(t, m.b)}`, body: `${name}${m.pens ? ` · ${ttName(t, m.pens)} won on penalties` : ""}`, tab: "bracket" }, { exclude: [by], key: `ttres_${id}_${m.id}` }));
+    });
+    // organizer update
+    const anns = arr(t.announcements), oldAnns = arr(before.announcements);
+    const last = anns[anns.length - 1];
+    if (last && (!oldAnns.length || oldAnns[oldAnns.length - 1].at !== last.at)) {
+      jobs.push(notify(ttPeople(t), { ...base, type: "tourney_update", title: `📣 ${name}`, body: String(last.text || "").slice(0, 300), tab: "info" }, { exclude: [last.by], key: `ttann_${id}_${last.at}` }));
+    }
+    await Promise.all(jobs);
+  } catch (e) { logger.warn("onTourneyWritten", id, e.message); }
+});
+exports.onTourneyChat = onDocumentCreated(`${BASE}/tournaments/{id}/chat/{msgId}`, async (event) => {
+  const msg = event.data.data() || {};
+  try {
+    const t = (await col("tournaments").doc(event.params.id).get()).data() || {};
+    if (!t.name || t.status === "cancelled") return;
+    await notify(ttPeople(t), { tourneyId: event.params.id, senderUid: msg.uid || "", type: "tourney_chat", title: `💬 ${t.name}`, body: `${msg.name || "Someone"}: ${String(msg.text || "").slice(0, 200)}`, tab: "chat" }, { exclude: [msg.uid], key: `ttchat_${event.params.msgId}` });
+  } catch (e) { logger.warn("onTourneyChat", e.message); }
+});
+exports.tourneyReminders = onSchedule({ schedule: "every day 18:00", timeZone: DEFAULT_TZ, timeoutSeconds: 120 }, async () => {
+  const tomorrow = new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date(Date.now() + 86400000));
+  const snap = await col("tournaments").where("status", "in", ["set", "running"]).get();
+  for (const d of snap.docs) {
+    const t = d.data() || {};
+    const games = arr(t.matches).filter((m) => m.date === tomorrow && !m.done);
+    for (const m of games) {
+      const who = m.a && m.b ? [...ttTeamPeople(t, m.a), ...ttTeamPeople(t, m.b)] : [];
+      if (!who.length) continue;
+      await notify(who, { tourneyId: d.id, type: "tourney_reminder", title: `⏰ Tomorrow: ${ttLabel(m)}`, body: `${ttName(t, m.a)} vs ${ttName(t, m.b)}, ${ttWhen(m)} at ${m.place || t.location || "the park"}. ${t.name || ""}`, tab: "bracket" }, { key: `ttrem_${d.id}_${m.id}_${tomorrow}` });
+    }
+    // the organizer: one line for the whole day
+    if (games.length) await notify([t.organizerId], { tourneyId: d.id, type: "tourney_reminder", title: `⏰ ${t.name || "Tournament"} tomorrow`, body: `${games.length} game${games.length === 1 ? "" : "s"} on the schedule.`, tab: "admin" }, { key: `ttremo_${d.id}_${tomorrow}` });
+  }
+});
+
 exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (request) => {
   if (!isOwner(request.auth)) throw new HttpsError("permission-denied", "Only the FutNet owner can use the manager.");
   const me = request.auth.uid;
@@ -3800,6 +3960,14 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     ver.docs.forEach((x) => { const v = x.data() || {}; if (v.gold) gold++; if (v.blue && blueUntilOf(v) > now) blue++; });
     return { me, players: dir.data().count, games: events.data().count, communities: comms.data().count, vsMatches: vs.data().count, tournaments: tt ? tt.data().count : 0, blue, gold };
   }
+  if (action === "list") {
+    // everyone, light (for the type-ahead list). Photos only when they're a normal web link (keeps it fast).
+    const [dir, ver] = await Promise.all([col("people").get(), col("verifications").get()]);
+    const vmap = {}; ver.docs.forEach((x) => { const v = x.data() || {}; vmap[x.id] = v.gold ? "gold" : v.blue && blueUntilOf(v) > now ? "blue" : ""; });
+    const list = dir.docs.map((x) => { const p = x.data() || {}; return { uid: x.id, name: p.name || "", nickname: p.nickname || "", avatar: realPic(p.avatar) && String(p.avatar).startsWith("http") ? p.avatar : "", hidden: !!(p.hidden || p.deleted || p.mergedInto), badge: vmap[x.id] || "" }; })
+      .filter((p) => p.name).sort((a, b) => a.name.localeCompare(b.name));
+    return { list };
+  }
   if (action === "search") {
     const q = String(d.q || "").trim().toLowerCase();
     if (q.length < 2) return { list: [] };
@@ -3807,9 +3975,9 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     const ver = {};
     (await col("verifications").get()).docs.forEach((x) => { ver[x.id] = x.data(); });
     const list = dir.docs.map((x) => ({ uid: x.id, ...(x.data() || {}) })).filter((p) => String(p.name || "").toLowerCase().includes(q) || String(p.nickname || "").toLowerCase().includes(q) || p.uid.toLowerCase() === q)
-      .slice(0, 30).map((p) => ({ uid: p.uid, name: p.name || "", nickname: p.nickname || "", avatar: String(p.avatar || "").startsWith("http") ? p.avatar : "", hidden: !!(p.hidden || p.deleted || p.mergedInto), verification: ver[p.uid] || null }));
-    // emails help tell duplicate accounts apart
-    await Promise.all(list.map(async (p) => { p.auth = await authInfo(p.uid); }));
+      .slice(0, 30).map((p) => ({ uid: p.uid, name: p.name || "", nickname: p.nickname || "", card: p, hidden: !!(p.hidden || p.deleted || p.mergedInto), verification: ver[p.uid] || null }));
+    // emails help tell duplicate accounts apart; photos from wherever they have one
+    await Promise.all(list.map(async (p) => { p.auth = await authInfo(p.uid); p.avatar = await photoOf(p.uid, p.card); delete p.card; }));
     return { list };
   }
   if (action === "player") {
@@ -3818,6 +3986,7 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     const c = card.data() || {};
     delete c.chats; delete c.fcmTokens; delete c.fcmToken; delete c.fcmToke;
     const p = prof.data() || {};
+    c.avatar = await photoOf(uid, c);
     return { uid, card: c, profile: { firstName: p.firstName || "", lastName: p.lastName || "", nickname: p.nickname || "", dob: p.dob || "", email: p.email || "", position: p.position || "" },
       auth: await authInfo(uid), verification: v.data() || null, activity: await activityOf(uid) };
   }
@@ -3838,8 +4007,10 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     await vRef(uid).set({ gold: { at: now, by: me, name, dob } }, { merge: true });
     // the checked name and birthday become their profile's (and are locked from now on)
     const parts = name.split(" ");
-    await col("directory").doc(uid).set({ name, dob }, { merge: true });
-    await col("users").doc(uid).collection("profile").doc("data").set({ name, firstName: parts[0] || "", lastName: parts.slice(1).join(" "), dob }, { merge: true });
+    const prof = (await col("users").doc(uid).collection("profile").doc("data").get()).data() || {};
+    const nickOn = prof.showAs === "nickname" && cleanName(prof.nickname);
+    await col("users").doc(uid).collection("profile").doc("data").set({ ...(nickOn ? {} : { name }), firstName: parts[0] || "", lastName: parts.slice(1).join(" "), dob }, { merge: true });
+    if (!nickOn) await col("directory").doc(uid).set({ name }, { merge: true });
     return { ok: true };
   }
   if (action === "verifications") {
@@ -3849,9 +4020,22 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
       const v = x.data() || {};
       if (!v.blue && !v.gold) continue;
       const c = (await col("directory").doc(x.id).get()).data() || {};
-      list.push({ uid: x.id, name: c.name || "", avatar: String(c.avatar || "").startsWith("http") ? c.avatar : "", ...v, blueUntil: v.blue ? blueUntilOf(v) : 0 });
+      list.push({ uid: x.id, name: c.name || "", avatar: await photoOf(x.id, c), ...v, blueUntil: v.blue ? blueUntilOf(v) : 0 });
     }
     return { list: list.sort((a, b) => (a.blueUntil || 9e15) - (b.blueUntil || 9e15)) };
+  }
+  if (action === "gate") {
+    const cur = (await appConfigRef().get()).data() || {};
+    const upd = { adminUid: (await futnetAdminUid()) || me };
+    if (typeof d.creatorsOnly === "boolean") upd.creatorsOnly = d.creatorsOnly;
+    let creators = uniq([...arr(cur.creators), me]);   // the owner can always create
+    if (d.add) creators = uniq([...creators, String(d.add)]);
+    if (d.remove && d.remove !== me) creators = creators.filter((u) => u !== d.remove);
+    upd.creators = creators;
+    await appConfigRef().set(upd, { merge: true });
+    const names = {};
+    await Promise.all(creators.map(async (u) => { names[u] = ((await col("directory").doc(u).get()).data() || {}).name || u; }));
+    return { creatorsOnly: upd.creatorsOnly ?? !!cur.creatorsOnly, creators, names };
   }
   if (action === "config") {
     if (Array.isArray(d.realOrganizers)) await mgrConfigRef().set({ realOrganizers: uniq(d.realOrganizers.map(String)) }, { merge: true });

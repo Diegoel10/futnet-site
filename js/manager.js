@@ -88,35 +88,62 @@ function home() {
         </div>`);
 }
 
-// ---------------------------------------------------------------- players
+// ---------------------------------------------------------------- players (everyone, filters as you type)
+const initials = (n) => String(n || '?').split(' ').map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+const pic = (p, size = 40) => p.avatar ? `<img src="${esc(p.avatar)}" onerror="this.outerHTML='<div class=&quot;rounded-full bg-white/10 flex items-center justify-center font-black text-white/70&quot; style=&quot;width:${size}px;height:${size}px;font-size:${Math.round(size / 2.6)}px&quot;>${esc(initials(p.name))}</div>'" class="rounded-full object-cover shrink-0" style="width:${size}px;height:${size}px">`
+    : `<div class="rounded-full bg-white/10 flex items-center justify-center font-black text-white/70 shrink-0" style="width:${size}px;height:${size}px;font-size:${Math.round(size / 2.6)}px">${esc(initials(p.name))}</div>`;
 function players() {
     body(`<div class="card space-y-3">
-            <div class="lbl">Find a player (name, nickname or user id)</div>
-            <div class="flex gap-2"><input id="q" class="inp" placeholder="e.g. David" onkeydown="if(event.key==='Enter')mgrSearch()"><button onclick="mgrSearch()" class="btn">Search</button></div>
-            <p class="text-[11px] text-white/45">Tip: duplicate accounts usually have the same name with different emails. Open one and use "Merge into another account".</p>
-        </div><div id="results" class="space-y-2"></div>`);
+            <div class="lbl">Players <span id="pl-count" class="text-white/40"></span></div>
+            <input id="q" class="inp" placeholder="Start typing a name, nickname or user id…" oninput="mgrFilter()" onkeydown="if(event.key==='Enter')mgrSearch()" autocomplete="off">
+            <div class="flex flex-wrap gap-1.5 text-[11px]">
+                ${[['all', 'Everyone'], ['blue', 'Blue ✓'], ['gold', 'Gold ✓'], ['none', 'Not verified'], ['dupes', 'Same name (duplicates?)'], ['hidden', 'Deleted / merged']].map(([k, l]) => `<button onclick="mgrPlFilter('${k}')" class="${(S.plf || 'all') === k ? 'btn' : 'btn-dark'} !py-1 !px-2.5 text-[11px]">${l}</button>`).join('')}
+            </div>
+            <p class="text-[11px] text-white/45">Press Enter (or Search) to also see emails and sign-in type, to tell duplicate accounts apart.</p>
+            <button onclick="mgrSearch()" class="btn-dark !py-1.5 text-[12px]">Search with emails</button>
+        </div><div id="results" class="space-y-2"><div class="text-white/60 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Loading players…</div></div>`);
     setTimeout(() => $('q')?.focus(), 50);
+    if (S.all) mgrFilter();
+    else call('list').then(r => { S.all = r.list; mgrFilter(); }).catch(() => { $('results').innerHTML = ''; });
 }
+window.mgrPlFilter = (k) => { S.plf = k; players(); };
+window.mgrFilter = () => {
+    const all = S.all || []; if (!$('results')) return;
+    const q = val('q').toLowerCase(), f = S.plf || 'all';
+    const counts = {}; all.forEach(p => { const k = p.name.toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
+    let list = all.filter(p => f === 'hidden' ? p.hidden : !p.hidden)
+        .filter(p => f === 'blue' ? p.badge === 'blue' : f === 'gold' ? p.badge === 'gold' : f === 'none' ? !p.badge : f === 'dupes' ? counts[p.name.toLowerCase()] > 1 : true)
+        .filter(p => !q || p.name.toLowerCase().includes(q) || p.nickname.toLowerCase().includes(q) || p.uid.toLowerCase() === q);
+    if (q) list.sort((a, b) => (b.name.toLowerCase().startsWith(q) ? 1 : 0) - (a.name.toLowerCase().startsWith(q) ? 1 : 0));
+    $('pl-count').textContent = `(${list.length}${list.length !== all.length ? ' of ' + all.length : ''})`;
+    $('results').innerHTML = list.slice(0, 150).map(p => `<button onclick="mgrPlayer('${jsq(p.uid)}')" class="card !py-2.5 w-full text-left flex items-center gap-3 ${p.hidden ? 'opacity-50' : ''}">
+        ${pic(p)}
+        <div class="flex-1 min-w-0"><div class="font-black truncate">${esc(p.name)} ${p.badge === 'gold' ? GOLD : p.badge === 'blue' ? BLUE : ''}${counts[p.name.toLowerCase()] > 1 ? ' <span class="text-[10px] text-amber-300">×' + counts[p.name.toLowerCase()] + '</span>' : ''}</div>
+            <div class="text-[11px] text-white/45 truncate">${p.nickname ? '"' + esc(p.nickname) + '" · ' : ''}${esc(p.uid)}</div></div>
+        <i class="fa-solid fa-chevron-right text-white/40"></i></button>`).join('') + (list.length > 150 ? `<p class="text-[11px] text-white/45 text-center">Showing 150 of ${list.length}. Keep typing to narrow it down.</p>` : '') || '<p class="text-sm text-white/50">Nobody matches.</p>';
+};
 window.mgrSearch = async () => {
-    const q = val('q'); if (q.length < 2) return;
-    $('results').innerHTML = '<div class="text-white/60 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Searching…</div>';
+    const q = val('q'); if (q.length < 2) return toast('Type at least 2 letters.', true);
+    $('results').innerHTML = '<div class="text-white/60 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Searching with emails…</div>';
     const r = await call('search', { q }).catch(() => ({ list: [] }));
     $('results').innerHTML = r.list.map(p => `<button onclick="mgrPlayer('${jsq(p.uid)}')" class="card w-full text-left flex items-center gap-3 ${p.hidden ? 'opacity-50' : ''}">
-        <img src="${esc(p.avatar || AV)}" onerror="this.src='${AV}'" class="w-10 h-10 rounded-full object-cover">
+        ${pic(p)}
         <div class="flex-1 min-w-0"><div class="font-black truncate">${esc(p.name || '(no name)')} ${p.verification && p.verification.gold ? GOLD : p.verification && p.verification.blue ? BLUE : ''} ${p.hidden ? '<span class="text-[10px] text-red-300">HIDDEN</span>' : ''}</div>
             <div class="text-[11px] text-white/55 truncate">${esc(p.auth && p.auth.email || 'no email')} · ${esc((p.auth && p.auth.providers || []).join(', ').replace('.com', ''))} · ${esc(p.uid)}</div></div>
         <i class="fa-solid fa-chevron-right text-white/40"></i></button>`).join('') || '<p class="text-sm text-white/50">Nobody found.</p>';
 };
 window.mgrPlayer = async (uid) => {
     S.tab = 'players'; loading();
-    const p = await call('player', { uid }).catch(() => null); if (!p) return players();
+    const [p, g] = await Promise.all([call('player', { uid }).catch(() => null), S.gate ? Promise.resolve(S.gate) : call('gate').catch(() => null)]);
+    if (g) S.gate = g;
+    if (!p) return players();
     S.player = p;
     const a = p.activity, v = p.verification || {}, au = p.auth || {};
     const blueOn = v.blue && Math.max(+v.blue.at || 0, +v.lastRealGameAt || 0) + 60 * 86400000 > Date.now();
     const blueUntil = v.blue ? Math.max(+v.blue.at || 0, +v.lastRealGameAt || 0) + 60 * 86400000 : 0;
     body(`<button onclick="mgrTab('players')" class="btn-dark"><i class="fa-solid fa-chevron-left mr-1"></i>Back</button>
         <div class="card flex items-center gap-3">
-            <img src="${esc(p.card.avatar || AV)}" onerror="this.src='${AV}'" class="w-16 h-16 rounded-full object-cover">
+            ${pic({ avatar: p.card.avatar, name: p.card.name }, 64)}
             <div class="min-w-0 flex-1"><div class="text-lg font-black">${esc(p.card.name || '(no name)')} ${v.gold ? GOLD : blueOn ? BLUE : ''}</div>
                 <div class="text-[11px] text-white/55">${esc(au.email || 'no email')} · ${esc((au.providers || []).join(', '))}${au.disabled ? ' · <b class="text-red-300">CAN\'T SIGN IN</b>' : ''}</div>
                 <div class="text-[11px] text-white/45">Joined ${esc(au.created || '?')} · last sign-in ${esc(au.lastSignIn || '?')}</div>
@@ -149,6 +176,10 @@ window.mgrPlayer = async (uid) => {
                 <div><div class="lbl">Birthday</div><input id="g-dob" type="date" class="inp" value="${esc(p.profile.dob || '')}"></div></div>
                 <button onclick="mgrGold('${jsq(p.uid)}')" class="btn w-full">Give gold (locks name + birthday)</button>`}
             </div>
+        </div>
+        <div class="card flex items-center justify-between gap-3">
+            <div><div class="font-black text-sm">🧪 Can create games and matches</div><div class="text-[11px] text-white/55">Only matters while beta mode is ON (Settings).</div></div>
+            ${(S.gate && S.gate.creators || []).includes(p.uid) ? `<button onclick="mgrGateAllow('${jsq(p.uid)}', false)" class="btn-dark shrink-0">Approved ✓ · Remove</button>` : `<button onclick="mgrGateAllow('${jsq(p.uid)}', true)" class="btn shrink-0">Allow to create</button>`}
         </div>
         <div class="card space-y-2">
             <div class="lbl">Troubleshoot</div>
@@ -318,9 +349,20 @@ window.mgrDelBook = async (id) => { if (!confirm('Delete this line?')) return; c
 // ---------------------------------------------------------------- settings
 async function settings() {
     loading();
-    const [c, del] = await Promise.all([call('config').catch(() => ({ realOrganizers: [], names: {} })), call('deleted').catch(() => ({ list: [] }))]);
+    const [c, del, g] = await Promise.all([call('config').catch(() => ({ realOrganizers: [], names: {} })), call('deleted').catch(() => ({ list: [] })), call('gate').catch(() => ({ creatorsOnly: false, creators: [], names: {} }))]);
     S.orgs = c.realOrganizers;
-    body(`<div class="card space-y-2">
+    S.gate = g;
+    body(`<div class="card space-y-3 ${g.creatorsOnly ? 'border-amber-400/60' : ''}">
+            <div class="flex items-center justify-between gap-3">
+                <div><div class="font-black">🧪 Beta mode: only approved people create</div>
+                    <div class="text-[11px] text-white/55">When ON, other players can't create games, VS matches, tournaments or communities. They see "FutNet is in beta, message the admin".</div></div>
+                <button onclick="mgrGate(${!g.creatorsOnly})" class="${g.creatorsOnly ? 'btn' : 'btn-dark'} shrink-0">${g.creatorsOnly ? 'ON' : 'OFF'}</button>
+            </div>
+            <div class="lbl pt-1">Approved to create (${g.creators.length})</div>
+            ${g.creators.map(u => `<div class="flex items-center gap-2 text-sm"><span class="flex-1">${esc(g.names[u] || u)}${u === (S.hello || {}).me ? ' (you)' : ''}</span>${u === (S.hello || {}).me ? '' : `<button onclick="mgrGateRemove('${jsq(u)}')" class="text-red-300 text-[12px] font-bold">Remove</button>`}</div>`).join('')}
+            <p class="text-[11px] text-white/45">To approve someone: Players > open them > "Allow to create".</p>
+        </div>
+        <div class="card space-y-2">
             <div class="lbl">Real organizers (keep blue checks alive)</div>
             <p class="text-[11px] text-white/55">Players keep their blue check while they play a game run by one of these at least once every 60 days.</p>
             ${c.realOrganizers.map(u => `<div class="flex items-center gap-2 text-sm"><span class="flex-1">${esc(c.names[u] || u)}</span><button onclick="mgrDelOrg('${jsq(u)}')" class="text-red-300 text-[12px] font-bold">Remove</button></div>`).join('')}
@@ -331,5 +373,11 @@ async function settings() {
             ${del.list.map(x => `<button onclick="mgrPlayer('${jsq(x.uid)}')" class="w-full text-left text-sm flex items-center gap-2 py-1"><span class="flex-1">${esc(x.name || x.uid)}</span><span class="text-[11px] text-white/50">${x.mergedInto ? 'merged' : 'deleted ' + dt(x.deletedAt)}</span></button>`).join('') || '<p class="text-sm text-white/50">None.</p>'}
         </div>`);
 }
+window.mgrGate = async (on) => {
+    if (!confirm(on ? 'Turn ON beta mode? Only approved people will be able to create.' : 'Turn OFF beta mode? Everyone will be able to create again.')) return;
+    await call('gate', { creatorsOnly: on }); toast(on ? 'Beta mode ON 🧪' : 'Beta mode OFF'); settings();
+};
+window.mgrGateRemove = async (u) => { if (!confirm('Remove this person from the approved list?')) return; await call('gate', { remove: u }); settings(); };
+window.mgrGateAllow = async (u, on) => { S.gate = await call('gate', on ? { add: u } : { remove: u }); toast(on ? 'Approved to create ✅' : 'Not approved any more.'); window.mgrPlayer(u); };
 window.mgrAddOrg = async () => { const u = val('o-uid'); if (!u) return; await call('config', { realOrganizers: [...S.orgs, u] }); settings(); };
 window.mgrDelOrg = async (u) => { if (!confirm('Remove this organizer?')) return; await call('config', { realOrganizers: S.orgs.filter(x => x !== u) }); settings(); };

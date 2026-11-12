@@ -559,7 +559,8 @@ window.saveMyName = async function() {
     const full = `${first} ${last}`.trim();
     try {
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { firstName: first, lastName: last, name: full }, { merge: true });
-        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: full }, { merge: true });
+        const up = window.userProfile || {};
+        await setDoc(doc(db, 'artifacts', appId, 'directory', user.uid), { uid: user.uid, name: up.showAs === 'nickname' && up.nickname ? up.nickname : full }, { merge: true });
         window.userProfile = { ...(window.userProfile || {}), firstName: first, lastName: last, name: full };
         if (Array.isArray(window.directoryList)) window.directoryList.forEach(d => { if (String(d.uid) === String(user.uid)) d.name = full; });
         document.getElementById('name-prompt-modal')?.remove();

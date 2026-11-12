@@ -43,7 +43,7 @@ window.renderProfileTab = function() {
                         <div class="flex items-center gap-2">
                             <h2 class="text-base font-black text-white">${fullName}${window.badgeHtml && window.currentUser ? window.badgeHtml(window.currentUser.uid) : ""}</h2>
                         </div>
-                        ${nickname ? `<p class="text-xs text-white/80 font-medium">${nickname}</p>` : ''}
+                        ${nickname ? `<p class="text-xs text-white/80 font-medium">${nickname}${p.showAs === 'nickname' ? ' <span class="text-[10px] text-[#00F296]">· others see this name</span>' : ''}</p>` : ''}
                     </div>
                 </div>
             </div>
@@ -185,6 +185,15 @@ window.openEditProfileModal = function() {
                     <input type="text" id="edit-nickname" value="${p.nickname || ''}" placeholder="Optional, leave blank if none" class="w-full bg-black/80 border border-white/20 rounded-xl px-3 py-2.5 font-bold text-white">
                 </div>
 
+                <div class="bg-black/50 border border-white/15 rounded-xl p-3 space-y-2">
+                    <label class="block font-black uppercase text-[10px] tracking-wider text-white/60">Other players see me as</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex items-center gap-2 bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-bold cursor-pointer"><input type="radio" name="edit-showas" value="name" ${p.showAs !== 'nickname' ? 'checked' : ''} class="accent-[#00F296]"> My name</label>
+                        <label class="flex items-center gap-2 bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-bold cursor-pointer"><input type="radio" name="edit-showas" value="nickname" ${p.showAs === 'nickname' ? 'checked' : ''} class="accent-[#00F296]"> My nickname</label>
+                    </div>
+                    <p class="text-[10px] text-white/50">With "My nickname", your real name is hidden from everyone (rosters, chats, stats). Your checkmark still shows.</p>
+                </div>
+
                 <div class="grid grid-cols-1 gap-3">
                     <div>
                         <label class="block font-black uppercase text-[10px] tracking-wider text-white/60 mb-1">Birthday</label>
@@ -307,6 +316,9 @@ window.handleSaveProfile = async function(e) {
     window.userProfile.firstName = newFirst;
     window.userProfile.lastName = document.getElementById('edit-lastname').value.trim();
     window.userProfile.nickname = document.getElementById('edit-nickname').value.trim();
+    const showAs = document.querySelector('input[name="edit-showas"]:checked')?.value === 'nickname' ? 'nickname' : 'name';
+    if (showAs === 'nickname' && !window.userProfile.nickname) { if (window.showToast) window.showToast('Type a nickname first, or pick "My name".', 'error'); return; }
+    window.userProfile.showAs = showAs;
     window.userProfile.avatar = document.getElementById('edit-avatar').value;
     // Favorite position from the soccer field (keeps the old value when nothing was tapped).
     const pick = window.readPositionPicker ? window.readPositionPicker('ep') : { spot: '', spot2: '', group: '' };
@@ -322,9 +334,11 @@ window.handleSaveProfile = async function(e) {
         await setDoc(doc(db, 'artifacts', appId, 'users', window.currentUser.uid, 'profile', 'data'), window.userProfile);
         
         const fullName = `${window.userProfile.firstName || ''} ${window.userProfile.lastName || ''}`.trim();
+        // The name everyone sees: the nickname if they chose that (their real name stays private)
+        const publicName = window.userProfile.showAs === 'nickname' && window.userProfile.nickname ? window.userProfile.nickname : fullName;
         await setDoc(doc(db, 'artifacts', appId, 'directory', window.currentUser.uid), {
             uid: window.currentUser.uid,
-            name: fullName,
+            name: publicName,
             nickname: window.userProfile.nickname || '',
             avatar: window.userProfile.avatar || '',
             position: window.userProfile.position || 'Player',
