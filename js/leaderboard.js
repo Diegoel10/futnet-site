@@ -9,7 +9,14 @@ export function findScorer(gName, people) {
     if (same.length) return same.find(p => p.uid) || same[0];
     const pre = named.filter(p => { const n = norm(p.name); return g.startsWith(n + ' ') || n.startsWith(g + ' '); });
     const ids = new Set(pre.map(p => p.uid || p.name));
-    return ids.size === 1 ? pre[0] : null;
+    if (ids.size === 1) return pre[0];
+    if (ids.size > 1) return null;
+    // Same first name, and one last name starts with the other: "John Z" = "John Zolnowski" (only one such player).
+    const [gf, ...gr] = g.split(' '); const gl = gr.join(' ');
+    if (!gl) return null;
+    const abbr = named.filter(p => { const [f, ...r] = norm(p.name).split(' '); const l = r.join(' '); return f === gf && l && (l.startsWith(gl) || gl.startsWith(l)); });
+    const ids2 = new Set(abbr.map(p => p.uid || p.name));
+    return ids2.size === 1 ? abbr[0] : null;
 }
 window.findScorer = findScorer;
 // js/leaderboard.js

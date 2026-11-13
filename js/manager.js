@@ -397,13 +397,19 @@ window.mgrGoalCheck = async (uid) => {
     const total = r.rows.filter(x => x.ended && !x.cancelled).reduce((n, x) => n + x.counted, 0);
     box.innerHTML = `<div class="text-[11px] text-white/55 py-1">Names looked for: ${r.names.map(esc).join(', ')} · <b class="text-white">${total} goals counted</b> in ended games</div>
         ${r.rows.map(x => {
-            const bad = x.entries.length > x.counted || !x.inGame || !x.ended || !x.community;
+            const bad = x.entries.length > x.counted || !x.inGame || !x.ended || !x.community || (x.unmatched || []).length;
             return `<div class="border-t border-white/10 py-2 text-[12px] ${bad ? 'bg-amber-400/5' : ''}">
                 <div class="flex items-center justify-between gap-2"><b>${esc(x.date)} · ${esc(x.title)}</b><span class="font-black ${x.counted === x.entries.length ? 'text-[#00F296]' : 'text-amber-300'}">${x.counted} of ${x.entries.length} goals count</span></div>
                 <div class="text-[11px] text-white/55">${x.community ? esc(x.community) : '<b class="text-amber-300">not in a community</b>'} · ${x.ended ? 'ended' : '<b class="text-amber-300">NOT ended (stats wait for End event)</b>'}${x.cancelled ? ' · <b class="text-red-300">cancelled</b>' : ''}${x.inGame ? '' : ' · <b class="text-amber-300">they\'re NOT on this game\'s roster/teams</b>'}</div>
-                ${x.entries.map(e => `<div class="text-[11px] text-white/70 pl-2">Match ${e.match}: saved as <code class="text-white">${esc(e.saved)}</code>${e.finished ? '' : ' (match not finished)'}</div>`).join('')}
+                ${x.entries.map(e => `<div class="text-[11px] text-white/70 pl-2">Match ${e.match}: saved as <code class="text-white">${esc(e.saved)}</code>${e.finished ? '' : ' (match not finished)'}${e.mine ? '' : ` <button onclick="mgrGiveGoal('${jsq(uid)}','${jsq(x.id)}',${e.match},${e.team},${e.idx},'${jsq(e.saved)}')" class="text-[#00F296] font-bold underline">It's theirs → count it</button>`}</div>`).join('')}
+                ${(x.unmatched || []).length ? `<div class="text-[11px] text-amber-200 pl-2 pt-1">Goals in this game that don't match anyone (old name, nickname, guest?):</div>${x.unmatched.map(e => `<div class="text-[11px] text-white/70 pl-4">Match ${e.match}: <code class="text-white">${esc(e.saved)}</code> <button onclick="mgrGiveGoal('${jsq(uid)}','${jsq(x.id)}',${e.match},${e.team},${e.idx},'${jsq(e.saved)}')" class="text-[#00F296] font-bold underline">Give to ${esc(r.current || 'them')}</button></div>`).join('')}` : ''}
             </div>`;
         }).join('') || '<div class="text-sm text-white/50">No games found.</div>'}`;
+};
+window.mgrGiveGoal = async (uid, eventId, match, team, idx, saved) => {
+    if (!confirm(`Count "${saved}" (match ${match}) as this player's goal? It gets re-saved under their current name.`)) return;
+    try { const r = await call('giveGoal', { uid, eventId, match, team, idx, saved }); toast(`Goal now counts for ${r.name} ✅`); window.mgrGoalCheck(uid); }
+    catch (e) { toast((e && e.message) || "Couldn't change it.", 'error'); }
 };
 window.mgrGateAllow = async (u, on) => { S.gate = await call('gate', on ? { add: u } : { remove: u }); toast(on ? 'Approved to create ✅' : 'Not approved any more.'); window.mgrPlayer(u); };
 window.mgrAddOrg = async () => { const u = val('o-uid'); if (!u) return; await call('config', { realOrganizers: [...S.orgs, u] }); settings(); };

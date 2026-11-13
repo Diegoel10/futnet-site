@@ -2598,6 +2598,30 @@ const teamPlayers = (g, i) => {
 };
 
 /** One finished game from one player's point of view (null = they weren't in it). */
+// Who scored a goal saved by name. Names change ("John Zolnowski" -> "John Z", "Joubert" -> "Joubert Bernard"),
+// so after the exact name we try: one name starting with the other, then same first name with a last name that
+// starts with the other's ("John Z" = "John Zolnowski"). Only when exactly ONE player in that game fits.
+const normName = (x) => String(x || "").trim().toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+function namesFit(a, b) {
+  if (!a || !b || a === b) return a === b && !!a;
+  if (a.startsWith(b + " ") || b.startsWith(a + " ")) return true;
+  const [fa, ...ra] = a.split(" "), [fb, ...rb] = b.split(" ");
+  const la = ra.join(" "), lb = rb.join(" ");
+  return fa === fb && !!la && !!lb && (la.startsWith(lb) || lb.startsWith(la));
+}
+function goalOwner(g, goal) {
+  if (!goal || ownGoal(goal)) return "";
+  if (typeof goal === "object" && (goal.uid || goal.userId)) return String(goal.uid || goal.userId);
+  const gname = normName(typeof goal === "object" ? (goal.name || goal.scorer || goal.playerName || "") : goal);
+  if (!gname) return "";
+  const n = teamCount(g);
+  const people = [...arr(g.attendees), ...Array.from({ length: n }, (_, i) => teamPlayers(g, i)).flat()]
+    .filter((p) => p && p.name && uidOf(p)).map((p) => ({ uid: uidOf(p), name: normName(p.name) }));
+  const exact = uniq(people.filter((p) => p.name === gname).map((p) => p.uid));
+  if (exact.length) return exact.length === 1 ? exact[0] : "";
+  const fit = uniq(people.filter((p) => namesFit(p.name, gname)).map((p) => p.uid));
+  return fit.length === 1 ? fit[0] : "";
+}
 function playerGame(g, uid) {
   const att = arr(g.attendees).find((a) => uidOf(a) === uid);
   const n = teamCount(g);
@@ -2613,12 +2637,7 @@ function playerGame(g, uid) {
     if (typeof goal === "object" && (goal.uid || goal.userId)) return (goal.uid || goal.userId) === uid;
     const gname = String(typeof goal === "object" ? (goal.name || goal.scorer || "") : goal).trim().toLowerCase().split(/\s+/).filter(Boolean).join(" ");
     if (myNames.has(gname)) return true;
-    // Names change ("Joubert" -> "Joubert Bernard"): a name that starts with the other counts when only one player matches.
-    const people = [...arr(g.attendees), ...Array.from({ length: n }, (_, i) => teamPlayers(g, i)).flat()]
-      .filter((p) => p && p.name).map((p) => ({ uid: uidOf(p) || p.name, name: String(p.name).trim().toLowerCase().split(/\s+/).join(" ") }));
-    if (people.some((p) => p.name === gname)) return false;
-    const pre = uniq(people.filter((p) => gname.startsWith(p.name + " ") || p.name.startsWith(gname + " ")).map((p) => p.uid));
-    return pre.length === 1 && pre[0] === uid;
+    return goalOwner(g, goal) === uid;
   };
   const pick = (idx, name, fb) => (Number.isInteger(idx) && idx >= 0 && idx < n) ? idx : (names.indexOf(name) !== -1 ? names.indexOf(name) : fb);
   const table = names.map((nm, i) => ({ i, pts: 0, gf: 0, ga: 0 }));
@@ -4216,19 +4235,42 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
       const inGame = arr(g.attendees).some((a) => uidOf(a) === uid) || Array.from({ length: n }, (_, i) => teamPlayers(g, i)).flat().some((p) => uidOf(p) === uid);
       const gname = (x) => norm(typeof x === "object" && x ? (x.name || x.scorer || x.playerName || "") : x);
       const guid = (x) => (typeof x === "object" && x ? String(x.uid || x.userId || "") : "");
-      const entries = [];
-      arr(g.matches).forEach((m, mi) => [...arr(m && m.team1Goals), ...arr(m && m.team2Goals)].forEach((x) => {
+      const entries = [], unmatched = [];
+      arr(g.matches).forEach((m, mi) => [["team1Goals", 1], ["team2Goals", 2]].forEach(([key, team]) => arr(m && m[key]).forEach((x, gi) => {
         const nm = gname(x);
-        if (guid(x) === uid || names.has(nm) || [...firsts].some((f) => nm.split(" ")[0] === f)) entries.push({ match: mi + 1, saved: typeof x === "object" ? JSON.stringify(x).slice(0, 80) : String(x), finished: m.isFinished !== false });
-      }));
+        const saved = typeof x === "object" ? JSON.stringify(x).slice(0, 80) : String(x);
+        const owner = goalOwner(g, x);
+        if (guid(x) === uid || names.has(nm) || owner === uid || [...firsts].some((f) => nm.split(" ")[0] === f)) entries.push({ match: mi + 1, team, idx: gi, saved, finished: m.isFinished !== false, mine: owner === uid || names.has(nm) });
+        // goals nobody in the game can be matched to (old names, nicknames, guests…): you can give them to this player
+        else if (inGame && nm && !ownGoal(x) && !owner && typeof x !== "object") unmatched.push({ match: mi + 1, team, idx: gi, saved });
+      })));
       if (!inGame && !entries.length) continue;
       const counted = inGame ? ((playerGame(g, uid) || {}).goals || 0) : 0;
       if (g.communityId && !comms[g.communityId]) comms[g.communityId] = ((await col("communities").doc(g.communityId).get()).data() || {}).name || g.communityId;
       rows.push({ id: g.id, title: g.title || "Game", date: String(g.date || "").slice(0, 10), community: g.communityId ? comms[g.communityId] : "", ended: !!g.isSessionEnded,
-        inGame, counted, entries, cancelled: !!g.isCancelled });
+        inGame, counted, entries, unmatched, cancelled: !!g.isCancelled });
     }
     rows.sort((a, b) => (a.date < b.date ? 1 : -1));
-    return { names: [...names], rows: rows.slice(0, 80) };
+    return { names: [...names], rows: rows.slice(0, 80), current: cardName(card) };
+  }
+  // Give a goal to this player: the goal (saved under an old name / nickname) is re-saved under their current name.
+  if (action === "giveGoal") {
+    const uid = String(d.uid || ""), eventId = String(d.eventId || ""), match = Number(d.match) - 1, key = Number(d.team) === 2 ? "team2Goals" : "team1Goals", idx = Number(d.idx);
+    const name = cardName((await col("directory").doc(uid).get()).data() || {});
+    if (!uid || !eventId || !name || name === "Player") throw new HttpsError("invalid-argument", "This player has no name yet.");
+    const ref = col("eventsList").doc(eventId);
+    await db.runTransaction(async (tx) => {
+      const g = (await tx.get(ref)).data();
+      const m = g && arr(g.matches)[match];
+      const list = m ? arr(m[key]).slice() : [];
+      if (String(list[idx]) !== String(d.saved)) throw new HttpsError("failed-precondition", "That goal changed. Check again.");
+      list[idx] = name;
+      const matches = arr(g.matches).slice(); matches[match] = { ...m, [key]: list };
+      tx.update(ref, { matches });
+    });
+    ratingIndex.at = 0; endedCache.at = 0;
+    await col("managerLog").add({ action: "giveGoal", eventId, uid, from: String(d.saved), to: name, by: me, at: FV.serverTimestamp() });
+    return { ok: true, name };
   }
   if (action === "verify") {
     const uid = String(d.uid || ""), level = d.level, on = !!d.on;
