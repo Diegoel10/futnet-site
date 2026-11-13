@@ -1686,6 +1686,8 @@ window.toggleSessionEnded = async function(eventId) {
     if (res.ok) {
         window.showToast(ended ? "Event ended! Everyone is getting the results 🏆" : "Event reopened.");
         if (ended && window.openSessionResults) window.openSessionResults(eventId);
+        // Offer to send the celebration cards to the comments / community feed.
+        if (ended && window.openEndShare) setTimeout(() => window.openEndShare(eventId), 900);
     }
 };
 

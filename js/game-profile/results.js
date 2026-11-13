@@ -3,7 +3,9 @@
 // then goal difference, then goals scored), the full standings, each team with its players'
 // photos, and the top scorers. Same rules as the app and the community leaderboard.
 import { escapeHtml, isOwnGoal } from './event-store.js';
-import { openCelebrationCards } from './celebration-cards.js';
+import { openCelebrationCards, makeCelebrationCards } from './celebration-cards.js';
+import { postFilesToComments, postFilesToFeed, canPostToFeed } from './card-share.js';
+import { showUploadProgress, hideUploadProgress } from '../wa-chat.js';
 
 const FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -282,12 +284,10 @@ window.openCelebration = function(eventId) {
 };
 
 /** 📸 The 3 WhatsApp images: champions, top scorers, losers. */
-window.shareCelebrationCards = function(eventId) {
-    if (!isCelebrationOwner()) return;
-    const ev = (window.eventsList || []).find(e => e.id === eventId);
-    if (!ev) return;
+/** What the celebration cards need from a game (or null when there's no winner yet). */
+function celebrationInputs(ev) {
     const r = computeSessionResults(ev);
-    if (!r.winner) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
+    if (!r.winner) return null;
     const caps = ev.teamCaptains || {};
     const isCap = (p, teamIndex) => {
         const capUid = caps[teamIndex] ?? caps[String(teamIndex)];
@@ -304,7 +304,67 @@ window.shareCelebrationCards = function(eventId) {
         location: ev.locationName || ev.location || ev.venue || '',
         format: ev.format || ev.gameFormat || '',
     };
-    openCelebrationCards(results, info, { accent, logo: 'img/celebration_logo.png', communityId: ev.communityId || '', eventId: ev.id });
+    return { results, info, opts: { accent, logo: 'img/celebration_logo.png', communityId: ev.communityId || '', eventId: ev.id } };
+}
+window.shareCelebrationCards = function(eventId) {
+    if (!isCelebrationOwner()) return;
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    if (!ev) return;
+    const x = celebrationInputs(ev);
+    if (!x) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
+    openCelebrationCards(x.results, x.info, x.opts);
+};
+
+// After "End event": send the celebration cards (Champions, Top scorers, Losers) straight to the game comments
+// and/or the community feed, or open them to look first.
+window.openEndShare = function(eventId) {
+    if (!isCelebrationOwner()) return;
+    const ev = (window.eventsList || []).find(e => e.id === eventId);
+    if (!ev || !celebrationInputs(ev)) return;
+    const feed = canPostToFeed(ev.communityId);
+    document.getElementById('end-share')?.remove();
+    const m = document.createElement('div');
+    m.id = 'end-share';
+    m.className = 'fixed inset-0 z-[240] flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm sm:p-4';
+    const row = (id, on, title, sub) => `<label class="flex items-start gap-3 bg-black/40 border border-white/10 rounded-2xl p-3 cursor-pointer">
+        <input id="${id}" type="checkbox" ${on ? 'checked' : ''} class="w-5 h-5 mt-0.5 accent-amber-400 shrink-0">
+        <span><span class="block text-sm font-black text-white">${title}</span><span class="block text-[11px] text-white/55">${sub}</span></span></label>`;
+    m.innerHTML = `<div class="bg-[#040E13] border border-amber-400/50 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-5 space-y-3 text-white" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between"><div class="text-base font-black">🎉 Send the celebration cards?</div>
+            <button onclick="document.getElementById('end-share').remove()" class="w-8 h-8 rounded-full bg-black/60 border border-white/15"><i class="fa-solid fa-xmark text-xs"></i></button></div>
+        <p class="text-[11px] text-white/60">Champions, Top scorers and the Losers card.</p>
+        ${row('es-comments', true, '💬 Game comments', 'One message per card.')}
+        ${feed ? row('es-feed', true, '📣 Community feed', 'One post with all the cards.') : ''}
+        <button onclick="sendEndShare('${escapeHtml(String(eventId))}')" class="w-full bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-xl text-sm">Send</button>
+        <button onclick="document.getElementById('end-share').remove(); shareCelebrationCards('${escapeHtml(String(eventId))}')" class="w-full bg-black/50 border border-white/20 text-white font-bold py-2.5 rounded-xl text-xs">👀 Let me see them first</button>
+    </div>`;
+    m.onclick = () => m.remove();
+    document.body.appendChild(m);
+};
+window.sendEndShare = async function(eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const toComments = !!document.getElementById('es-comments')?.checked, toFeed = !!document.getElementById('es-feed')?.checked;
+    if (!toComments && !toFeed) { window.showToast && window.showToast('Tick at least one.', 'error'); return; }
+    document.getElementById('end-share')?.remove();
+    const x = celebrationInputs(ev); if (!x) return;
+    const done = [];
+    try {
+        showUploadProgress('Making the celebration cards…', null);
+        const cards = await makeCelebrationCards(x.results, x.info, x.opts);
+        const slugT = (x.info.title || 'futnet').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const files = [];
+        for (const c of cards) { try { files.push(new File([await new Promise(r => c.canvas.toBlob(r, 'image/jpeg', 0.9))], `${slugT}-${c.key}.jpg`, { type: 'image/jpeg' })); } catch (e) { /* photo blocked */ } }
+        hideUploadProgress();
+        if (!files.length) throw new Error('no cards');
+        const caption = `🏆 ${x.info.title || 'Game'} results${x.info.date ? ' · ' + (window.fmtGameDate || String)(x.info.date) : ''}`;
+        if (toComments) { await postFilesToComments(ev.id, files, caption); done.push('comments'); }
+        if (toFeed && await postFilesToFeed(ev.communityId, files, caption)) done.push('community feed');
+        window.showToast && window.showToast(`Celebration cards sent 🎉 (${done.join(' + ')})`);
+    } catch (e) {
+        console.error('end share', e);
+        hideUploadProgress();
+        window.showToast && window.showToast(`Some cards didn't send${done.length ? ` (sent to ${done.join(', ')})` : ''}. Use "📸 Make share images" on the results page.`, 'error');
+    }
 };
 
 window.computeSessionResults = computeSessionResults;

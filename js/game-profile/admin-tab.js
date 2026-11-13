@@ -274,7 +274,7 @@ export function renderAdminTab(event) {
                     ${tool(`openTwoPageGameWizard('${event.id}', 'edit')`, '✏️', 'Edit')}
                     ${tool(`openTwoPageGameWizard('${event.id}', 'copy')`, '📋', 'Copy')}
                     ${event.livestream && event.livestream.status === 'live' ? '' : tool(`openStartLivestream('${event.id}')`, '🔴', 'Go live')}
-                    ${event.teamsSet && event.teamsSet.at ? tool(`setTeamsReady('${event.id}', false)`, '↩️', 'Unset teams') : tool(`setTeamsReady('${event.id}', true)`, '✅', 'Teams set', 'bg-[#00F296] text-slate-950 font-black rounded-xl text-xs px-2 transition')}
+                    ${event.teamsSet && event.teamsSet.at ? tool(`openTeamsSetShare('${event.id}')`, '📸', 'Share teams') + tool(`setTeamsReady('${event.id}', false)`, '↩️', 'Unset teams') : tool(`setTeamsReady('${event.id}', true)`, '✅', 'Teams set', 'bg-[#00F296] text-slate-950 font-black rounded-xl text-xs px-2 transition')}
                     ${tool(`switchGameProfileTab('manage-matches')`, '⏱️', 'Match management', liveActive ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black rounded-xl text-xs px-2 transition' : DARKT)}
                     ${tool(`toggleSessionEnded('${event.id}')`, isSessionEnded ? '↩️' : '🏁', isSessionEnded ? 'Reopen event' : 'End event', isSessionEnded ? DARKT : 'bg-amber-400 text-slate-950 font-black rounded-xl text-xs px-2 transition')}
                     ${tool(`confirmCancelGame('${event.id}')`, '❌', 'Cancel game', DARKT + ' !text-red-400')}

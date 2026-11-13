@@ -287,6 +287,15 @@ export function renderTeamsTab() {
                 <div class="text-[11px] text-white/60">${esc(iv.byName || 'A captain')} invited you to join</div></div>
                 <button onclick="answerInvite('${jsq(iv.id)}', false)" class="${DARK}">Decline</button>
                 <button onclick="answerInvite('${jsq(iv.id)}', true)" class="${BTN}">Join</button></div>`).join('')}</div>` : '';
+    // Friend requests: the red number on the Teams button counts these (they used to live in the old Friends tab).
+    const reqIds = (window.receivedRequestsList || []).map(f => String(typeof f === 'object' && f ? (f.uid || f.id || '') : f)).filter(Boolean);
+    const dirOf = (u) => [...(window.cachedDirectoryList || []), ...(window.directoryList || [])].find(d => String(d.uid || d.id) === u) || {};
+    const friendReqs = reqIds.length ? `<div class="text-[10px] font-black text-[#00F296] uppercase tracking-wider">👋 Friend requests (${reqIds.length})</div>
+            <div class="space-y-2">${reqIds.map(u => { const d = dirOf(u); const nm = d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim() || 'Player'; return `<div class="flex items-center gap-3 bg-[#00F296]/10 border border-[#00F296]/40 rounded-2xl p-3">
+                <img src="${esc(avatarOf(u, nm, d.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(u)}','${jsq(nm)}','')" class="w-10 h-10 rounded-full object-cover cursor-pointer">
+                <div class="flex-1 min-w-0 text-sm font-black text-white truncate">${esc(nm)}</div>
+                <button onclick="denyFriendRequest('${jsq(u)}')" class="${DARK}">Ignore</button>
+                <button onclick="acceptFriendRequest('${jsq(u)}')" class="${BTN}">Accept</button></div>`; }).join('')}</div>` : '';
     const noTeam = hasTeams ? '' : `<div class="${CARD} text-center space-y-3 py-6"><div class="text-4xl">🛡️</div><div class="text-sm font-black text-white">No team yet</div>
                     <p class="text-[11px] text-white/55">Create your team, add your players, set your lineup, then play VS Mode games against other teams. Or find a team below.</p>
                     <button onclick="openCreateTeam()" class="${BTN}">+ Create a team</button></div>`;
@@ -295,13 +304,13 @@ export function renderTeamsTab() {
             <div><h2 class="text-xl font-black text-white">Teams</h2><p class="text-white/65 text-xs">Your teams, players and lineups. Challenge other teams in VS Mode.</p></div>
             <button onclick="openCreateTeam()" class="${BTN} shrink-0">+ Create team</button>
         </div>
-        ${invites}${window.vsChallengesHtml ? window.vsChallengesHtml(T.mine.filter(t => canManage(t)).map(t => t.id)) : ''}${noTeam}
+        ${friendReqs}${invites}${window.vsChallengesHtml ? window.vsChallengesHtml(T.mine.filter(t => canManage(t)).map(t => t.id)) : ''}${noTeam}
         <div class="flex gap-2 overflow-x-auto">${hasTeams ? chip('mine', 'My teams') : ''}${chip('find', 'Find teams')}${chip('agents', 'Free agents')}${chip('leaders', '🏆 Leaderboards')}</div>
         ${body}
     </div>`;
     if (sec === 'find') { const i = document.getElementById('teams-search'); if (i && document.activeElement !== i && T._typing) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
 }
-window.teamsSection = (k) => { T.section = k; if (k === 'find' || k === 'leaders') loadAll(); if (k === 'agents') loadAgents(); renderTeamsTab(); };
+window.teamsSection = (k) => { T.section = k; if (k === 'find' || k === 'leaders') loadAll(); if (k === 'agents') loadAgents(); if (k === 'leaders') T.leadRows = null; renderTeamsTab(); };
 
 // ---- Leaderboards: team standings (3 points a win, 1 a draw). Records come from VS Mode games.
 //      team.record = { w, d, l, gf, ga }  (saved by the server when a VS game ends)
@@ -316,28 +325,35 @@ function leadersHtml() {
     const lv = T.leadLevel || 'all';
     const f = T.leadF || {};
     const filtered = !!(f.teams || f.format || f.day || f.park);
-    // Filters on: work it out from the finished VS matches that fit (loaded once).
-    if (filtered && window.vsStandings && !T.leadRows) {
+    // Worked out from the played VS matches (2 teams or more), filters or not.
+    if (window.vsStandings && !T.leadRows) {
         const key = JSON.stringify(f);
         window.vsStandings(f).then(rows => { if (JSON.stringify(T.leadF || {}) === key) { T.leadRows = rows; renderTeamsTab(); } });
     }
     if (!T.leadOpts && window.vsLeaderOptions) { T.leadOpts = {}; window.vsLeaderOptions().then(o => { T.leadOpts = o; renderTeamsTab(); }); }
     const byId = (id) => T.all.find(t => t.id === id);
-    const list = filtered
-        ? (T.leadRows || []).map(r => ({ ...r, t: { ...(r.team || {}), ...(byId(r.teamId) || {}), id: r.teamId } })).filter(r => lv === 'all' || r.t.level === lv).slice(0, 50)
-        : standings(T.all.filter(t => lv === 'all' || t.level === lv)).slice(0, 50);
+    // (temporary free-agent squads aren't real teams: they're not in the standings)
+    const fromGames = (T.leadRows || []).filter(r => !T.all.length || byId(r.teamId)).map(r => ({ ...r, t: { ...(r.team || {}), ...(byId(r.teamId) || {}), id: r.teamId } }));
+    const seen = new Set(fromGames.map(r => r.teamId));
+    // No filters: every team shows (teams that haven't played yet at the bottom with 0s).
+    const rest = filtered ? [] : standings(T.all.filter(t => !seen.has(t.id))).map(r => ({ ...r, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, gd: 0 }));
+    const list = (window.vsStandings ? [...fromGames, ...rest] : standings(T.all)).filter(r => lv === 'all' || r.t.level === lv).slice(0, 50);
     const played = list.some(r => r.p > 0);
     const chip = (k, l) => `<button onclick="teamsLeadLevel('${k}')" class="px-3 py-1.5 rounded-lg text-[11px] font-black ${lv === k ? 'bg-white text-slate-950' : 'bg-white/10 text-white/75'}">${l}</button>`;
     const o = T.leadOpts || {};
     const sel = (key, label, opts, fmt = (x) => x) => `<select onchange="teamsLeadFilter('${key}', this.value)" class="min-w-0 bg-black/60 border ${f[key] ? 'border-[#00F296] text-[#00F296]' : 'border-white/15 text-white/80'} rounded-lg px-2 py-1.5 text-[11px] font-bold">
         <option value="">${label}</option>${(opts || []).map(v => `<option value="${esc(v)}" ${f[key] === v ? 'selected' : ''}>${esc(fmt(v))}</option>`).join('')}</select>`;
     return `<div class="flex gap-1.5 overflow-x-auto">${chip('all', 'All')}${LEVELS.map(([k, l]) => chip(k, l)).join('')}</div>
-        <div class="grid grid-cols-2 gap-1.5">
+        <div class="flex items-center gap-2">
+            <button onclick="document.getElementById('tl-filter-box').classList.toggle('hidden')" class="shrink-0 flex items-center gap-1.5 bg-black/60 border ${filtered ? 'border-[#00F296] text-[#00F296]' : 'border-white/15 text-white/80'} rounded-lg px-3 py-1.5 text-[11px] font-black"><i class="fa-solid fa-sliders"></i> Filter${filtered ? ` (${[f.teams, f.format, f.day, f.park].filter(Boolean).length})` : ''}</button>
+            <div class="flex-1 min-w-0 flex flex-wrap gap-1 text-[10px] font-bold">${[f.teams && `${f.teams} teams`, f.format, f.day, f.park].filter(Boolean).map(x => `<span class="bg-[#00F296]/15 text-[#00F296] rounded-full px-2 py-0.5">${esc(x)}</span>`).join('') || '<span class="text-white/45 py-0.5">All VS games</span>'}</div>
+            ${filtered ? `<button onclick="teamsLeadFilter('', '')" class="shrink-0 text-[11px] font-bold text-white/60">✕ Clear</button>` : ''}
+        </div>
+        <div id="tl-filter-box" class="hidden grid grid-cols-2 gap-1.5 bg-black/40 border border-white/10 rounded-xl p-2">
             ${sel('teams', 'Any # of teams', o.teams, (v) => `${v} teams`)}${sel('format', 'Any format', o.formats)}
             ${sel('day', 'Any day', o.days)}${sel('park', 'Any park', o.parks)}
         </div>
-        ${filtered ? `<button onclick="teamsLeadFilter('', '')" class="text-[11px] font-bold text-[#00F296]">✕ Clear filters</button>` : ''}
-        ${filtered && !T.leadRows ? '<p class="text-[11px] text-white/55">Loading…</p>' : played ? '' : '<p class="text-[11px] text-white/55">' + (filtered ? 'No finished VS games match these filters yet.' : 'Standings fill up as teams play VS Mode games. 3 points for a win, 1 for a draw.') + '</p>'}
+        ${!T.leadRows && window.vsStandings ? '<p class="text-[11px] text-white/60"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Loading…</p>' : played ? '' : '<p class="text-[11px] text-white/55">' + (filtered ? 'No finished VS games match these filters yet.' : 'Standings fill up as teams play VS Mode games. 3 points for a win, 1 for a draw.') + '</p>'}
         <div class="${CARD} !p-0 overflow-hidden">
             <div class="grid grid-cols-[28px_1fr_28px_28px_28px_28px_36px_36px] gap-1 px-3 py-2 text-[9px] font-black uppercase text-white/45 border-b border-white/10">
                 <span>#</span><span>Team</span><span class="text-center">P</span><span class="text-center">W</span><span class="text-center">D</span><span class="text-center">L</span><span class="text-center">GD</span><span class="text-center text-[#00F296]">Pts</span></div>
@@ -345,7 +361,7 @@ function leadersHtml() {
                 <span class="font-black ${i < 3 && played ? 'text-[#FACC15]' : 'text-white/50'}">${i + 1}</span>
                 <span class="flex items-center gap-2 min-w-0">${teamLogoHtml(r.t, 26)}<span class="font-bold truncate">${esc(r.t.name)}</span></span>
                 <span class="text-center text-white/70">${r.p}</span><span class="text-center text-white/70">${r.w}</span><span class="text-center text-white/70">${r.d}</span><span class="text-center text-white/70">${r.l}</span>
-                <span class="text-center text-white/70">${r.gd > 0 ? '+' : ''}${r.gd}</span><span class="text-center font-black text-[#00F296]">${r.pts}</span></div>`).join('') || (filtered && !T.leadRows ? '' : '<p class="text-xs text-white/45 text-center py-6">No teams yet.</p>')}
+                <span class="text-center text-white/70">${r.gd > 0 ? '+' : ''}${r.gd}</span><span class="text-center font-black text-[#00F296]">${r.pts}</span></div>`).join('') || (!T.leadRows ? '' : '<p class="text-xs text-white/45 text-center py-6">No teams yet.</p>')}
         </div>`;
 }
 window.teamsLeadFilter = (key, v) => { T.leadF = key ? { ...(T.leadF || {}), [key]: v } : {}; T.leadRows = null; renderTeamsTab(); };

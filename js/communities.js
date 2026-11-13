@@ -1328,18 +1328,26 @@ function leaderboardHtml(c, tab) {
     const sel = (key, label, list, fmt = (x) => x) => `<select onchange="setCommunityLbFilter('${jsArg(c.id)}','${tab}','${key}', this.value)" class="min-w-0 bg-black/60 border ${f[key] ? 'border-[#00F296] text-[#00F296]' : 'border-white/15 text-white/80'} rounded-lg px-2 py-1.5 text-[11px] font-bold">
         <option value="">${label}</option>${list.map(v => `<option value="${esc(v)}" ${f[key] === v ? 'selected' : ''}>${esc(fmt(v))}</option>`).join('')}</select>`;
     const cur = LB_TABS.find(t => t[0] === tab) || LB_TABS[0];
-    const rows = computePlayerStats(events).filter(p => p[cur[2]] > 0)
+    // Working out everyone's stats is the slow part: remember it until the games change.
+    const sig = `${c.id}|${f.teams || ''}|${f.format || ''}|${f.day || ''}|${f.park || ''}|${events.length}|${events.reduce((n, e) => n + (e.matches || []).length + (e.isSessionEnded ? 1000 : 0), 0)}`;
+    if (!LB_CACHE[sig]) LB_CACHE[sig] = computePlayerStats(events);
+    const rows = LB_CACHE[sig].filter(p => p[cur[2]] > 0)
         .sort((a, b) => b[cur[2]] - a[cur[2]] || (b[cur[4]] || 0) - (a[cur[4]] || 0) || String(a.name).localeCompare(String(b.name))).slice(0, 25);
     return `
         <div class="grid grid-cols-3 gap-1 bg-black/50 border border-white/10 rounded-xl p-1">
             ${LB_TABS.map(t => `<button onclick="setCommunityLeaderboardTab('${jsArg(c.id)}','${t[0]}')" class="py-2 px-1 rounded-lg text-[10px] font-black leading-tight transition ${t[0] === cur[0] ? 'bg-[#00F296] text-slate-950' : 'text-white/70 hover:text-white'}">${t[1]}</button>`).join('')}
         </div>
-        <div class="grid grid-cols-2 gap-1.5">
+        <div class="flex items-center gap-2">
+            <button onclick="document.getElementById('lb-filter-box').classList.toggle('hidden')" class="shrink-0 flex items-center gap-1.5 bg-black/60 border ${filtered ? 'border-[#00F296] text-[#00F296]' : 'border-white/15 text-white/80'} rounded-lg px-3 py-1.5 text-[11px] font-black"><i class="fa-solid fa-sliders"></i> Filter${filtered ? ` (${[f.teams, f.format, f.day, f.park].filter(Boolean).length})` : ''}</button>
+            <div class="flex-1 min-w-0 flex flex-wrap gap-1 text-[10px] font-bold">${[f.teams && `${f.teams} teams`, f.format, f.day, f.park].filter(Boolean).map(x => `<span class="bg-[#00F296]/15 text-[#00F296] rounded-full px-2 py-0.5">${esc(x)}</span>`).join('') || `<span class="text-white/45 py-0.5">All ${all.length} games</span>`}</div>
+            ${filtered ? `<button onclick="setCommunityLbFilter('${jsArg(c.id)}','${tab}','','')" class="shrink-0 text-[11px] font-bold text-white/60">✕ Clear</button>` : ''}
+        </div>
+        <div id="lb-filter-box" class="hidden grid grid-cols-2 gap-1.5 bg-black/40 border border-white/10 rounded-xl p-2">
             ${sel('teams', 'Any # of teams', opts.teams, (v) => `${v} teams`)}${sel('format', 'Any format', opts.formats)}
             ${sel('day', 'Any day', opts.days)}${sel('park', 'Any park', opts.parks)}
         </div>
-        ${filtered ? `<div class="flex items-center justify-between text-[11px]"><span class="text-white/55">${events.length} of ${all.length} games</span><button onclick="setCommunityLbFilter('${jsArg(c.id)}','${tab}','','')" class="font-bold text-[#00F296]">✕ Clear filters</button></div>` : ''}
-        ${rows.length ? `<div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
+        ${filtered ? `<div class="text-[11px] text-white/55">${events.length} of ${all.length} games</div>` : ''}
+        <div data-lb-list>${rows.length ? `<div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
             <div ${r.uid ? `onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(c.id)}')"` : ''} class="flex items-center gap-3 p-2.5 text-xs ${r.uid ? 'cursor-pointer hover:bg-white/5' : ''}">
                 <span class="w-6 text-center font-black text-white/60">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
                 ${avatarImg({ uid: r.uid, name: r.name, avatar: r.avatar }, 'w-8 h-8 rounded-full object-cover')}
@@ -1347,11 +1355,15 @@ function leaderboardHtml(c, tab) {
                 <span class="text-white/50 text-[10px]">${lbPlayed(r, cur)}</span>
                 <span class="font-black text-[#00F296] w-10 text-right">${r[cur[2]]}</span>
             </div>`).join('')}</div>`
-        : `<p class="text-xs text-white/50 italic text-center py-6">${filtered ? 'No games match these filters yet.' : 'Nothing here yet. Finish a community match and the rankings will show up.'}</p>`}`;
+        : `<p class="text-xs text-white/50 italic text-center py-6">${filtered ? 'No games match these filters yet.' : 'Nothing here yet. Finish a community match and the rankings will show up.'}</p>`}</div>`;
 }
+const LB_CACHE = {};
+// Show "Loading…" first, then work it out (it can take a second with lots of games).
 window.setCommunityLeaderboardTab = (id, tab) => {
     const c = window.communitiesCache[id]; const box = document.getElementById('lb-body'); if (!c || !box) return;
-    box.innerHTML = leaderboardHtml(c, tab);
+    const list = box.querySelector('[data-lb-list]');
+    if (list) list.innerHTML = '<div class="text-center text-xs text-white/60 py-8"><i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Loading…</div>';
+    setTimeout(() => { box.innerHTML = leaderboardHtml(c, tab); }, 30);
 };
 window.setCommunityLbFilter = (id, tab, key, v) => {
     LBF[id] = key ? { ...(LBF[id] || {}), [key]: v } : {};
@@ -1359,7 +1371,8 @@ window.setCommunityLbFilter = (id, tab, key, v) => {
 };
 window.showCommunityLeaderboard = (id) => {
     const c = window.communitiesCache[id]; if (!c) return;
-    modalShell('community-leaderboard-modal', 'Leaderboard', esc(c.name), `<div id="lb-body" class="space-y-3">${leaderboardHtml(c, 'wins')}</div>`);
+    modalShell('community-leaderboard-modal', 'Leaderboard', esc(c.name), `<div id="lb-body" class="space-y-3"><div data-lb-list><div class="text-center text-xs text-white/60 py-8"><i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Loading…</div></div></div>`);
+    setTimeout(() => { const box = document.getElementById('lb-body'); if (box) box.innerHTML = leaderboardHtml(c, 'wins'); }, 30);
 };
 
 // ------------------------------------------------------------------ GAMES TAB + COMMUNITY GAME CREATION

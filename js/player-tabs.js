@@ -130,7 +130,7 @@ const ls = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) 
 
 /** Tabs + their content for your own profile (profile.js puts this under the header). */
 export function myProfileTabsHtml() {
-    const tab = ls.get('futnet.profileTab', 'basic');
+    const tab = 'basic';   // your profile always opens on Basic info
     return `${tabsBar('my-profile-tabs', [['basic', 'Basic info'], ['player', 'Player info'], ['stats', 'Stats'], ['events', 'Events']], tab, 'myProfileTab')}
         <div id="my-profile-tab-body" class="space-y-3"></div>`;
 }

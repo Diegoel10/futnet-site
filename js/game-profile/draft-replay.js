@@ -231,7 +231,9 @@ window.openDraftReplay = async function(eventId) {
 };
 
 // ---------------------------------------------------------------- squad card: one team on its half of the pitch
-async function drawSquad(ctx, d, t, ti, pitch) {
+// me = { uid, line } makes it that player's own card: a gold "YOU" ring on them and their line on top
+// ("DAVID, YOU'RE ON TEAM 2 · WEAR RED").
+async function drawSquad(ctx, d, t, ti, pitch, me = null) {
     background(ctx, d.bg, t.ring);
     header(ctx, d.logo);
     const ev = d.ev;
@@ -269,6 +271,7 @@ async function drawSquad(ctx, d, t, ti, pitch) {
             const label = li === lines.length - 1 ? 'GK' : (li === 0 ? 'FWD' : (li === lines.length - 2 ? 'DEF' : 'MID'));
             if (p) {
                 avatar(ctx, d.imgs[String(p.uid)], p.name, x, y, r, t.ring, { glow: true, ringWidth: 5 });
+                if (me && String(p.uid) === String(me.uid)) youMark(ctx, x, y, r);
                 if (p === t.captain) {
                     ctx.save(); ctx.beginPath(); ctx.arc(x + r * 0.78, y - r * 0.78, r * 0.36, 0, Math.PI * 2); ctx.fillStyle = GOLD; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#0b0f14'; ctx.stroke(); ctx.restore();
                     text(ctx, 'C', x + r * 0.78, y - r * 0.75, { font: `900 ${Math.round(r * 0.44)}px ${BODY}`, color: '#0b0f14', shadow: false });
@@ -307,13 +310,54 @@ async function drawSquad(ctx, d, t, ti, pitch) {
         bench.slice(0, 5).forEach((p, i) => {
             const yy = y + 50 + i * 62;
             avatar(ctx, d.imgs[String(p.uid)], p.name, rx + 46, yy, 24, t.ring, { glow: false, ringWidth: 3 });
+            if (me && String(p.uid) === String(me.uid)) youMark(ctx, rx + 46, yy, 24);
             text(ctx, String(p.name || 'Player'), rx + 84, yy, { font: fitFont(ctx, String(p.name || 'Player'), BODY, 800, 28, rw - 100), align: 'left' });
         });
         if (bench.length > 5) text(ctx, `+${bench.length - 5} more`, rx + rw / 2, y + 50 + 5 * 62, { font: `800 24px ${BODY}`, color: 'rgba(255,255,255,0.7)' });
     }
-    text(ctx, (d.info || d.title).toUpperCase(), W / 2, 130, { font: fitFont(ctx, (d.info || d.title).toUpperCase(), BODY, 800, 28, W - 700), color: GREEN });
+    const headline = me && me.line ? me.line.toUpperCase() : (d.info || d.title).toUpperCase();
+    text(ctx, headline, W / 2, 130, { font: fitFont(ctx, headline, BODY, 900, me ? 34 : 28, W - 600), color: me ? GOLD : GREEN });
     footer(ctx);
 }
+function youMark(ctx, x, y, r) {
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, r + 9, 0, Math.PI * 2); ctx.lineWidth = 7; ctx.strokeStyle = GOLD; ctx.shadowColor = GOLD; ctx.shadowBlur = 24; ctx.stroke(); ctx.restore();
+    const w = 74, h = 30;
+    ctx.save(); rr(ctx, x - w / 2, y - r - 16 - h, w, h, 15); ctx.fillStyle = GOLD; ctx.fill(); ctx.restore();
+    text(ctx, 'YOU', x, y - r - 16 - h / 2 + 1, { font: `900 20px ${BODY}`, color: '#0b0f14', shadow: false });
+}
+
+/** The team card images as files: "All teams" + one per team. [{ key, title, teamIndex, file }] */
+export async function teamCardFiles(ev) {
+    await loadFonts();
+    const d = await dataOf(ev);
+    const pitch = await loadImage('img/TeamBuildField.png');
+    const out = [];
+    const make = async (key, title, teamIndex, fn) => {
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        await fn(c.getContext('2d'));
+        let file = null;
+        try { file = new File([await toBlob(c)], `${slug(d.title)}-${key}.jpg`, { type: 'image/jpeg' }); } catch (e) { /* photo blocked */ }
+        out.push({ key, title, teamIndex, file });
+    };
+    await make('teams', 'All teams', -1, async (ctx) => drawFrame(ctx, d, { shownPicks: [], heading: 'THE TEAMS', sub: (d.info || d.title).toUpperCase(), finalTeams: true }));
+    for (let i = 0; i < d.teams.length; i++) {
+        if (!d.teams[i].players.length) continue;
+        await make(`team-${i + 1}`, d.teams[i].name, i, (ctx) => drawSquad(ctx, d, d.teams[i], i, pitch));
+    }
+    return out;
+}
+/** One player's own card (their team, a gold YOU on them, their line on top). Returns a File, or null. */
+let personalCache = null;
+export async function personalCardFile(ev, teamIndex, uid, line) {
+    await loadFonts();
+    if (!personalCache || personalCache.id !== ev.id) personalCache = { id: ev.id, d: await dataOf(ev), pitch: await loadImage('img/TeamBuildField.png') };
+    const { d, pitch } = personalCache;
+    const t = d.teams[teamIndex]; if (!t) return null;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    await drawSquad(c.getContext('2d'), d, t, teamIndex, pitch, { uid, line });
+    try { return new File([await toBlob(c)], `${slug(d.title)}-my-team.jpg`, { type: 'image/jpeg' }); } catch (e) { return null; }
+}
+export const resetPersonalCards = () => { personalCache = null; };
 
 // ---------------------------------------------------------------- team cards (images): all teams + one per squad
 window.openTeamCard = async function(eventId) {

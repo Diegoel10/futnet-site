@@ -55,9 +55,8 @@ window.renderProfileTab = function() {
         </div>
     `;
 
-    let tab = 'basic';
-    try { tab = localStorage.getItem('futnet.profileTab') || 'basic'; } catch (e) { /* private mode */ }
-    window.myProfileTab(tab);
+    // Always opens on Basic info.
+    window.myProfileTab('basic');
 };
 
 window.profileEventsTabState = 'upcoming';

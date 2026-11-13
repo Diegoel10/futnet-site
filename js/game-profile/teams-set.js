@@ -8,6 +8,9 @@
 //   The admin can tap "Unset" to make changes quietly again.
 // Saved on the game: teamsSet = { at, by, byName } (or null).
 import { mutateEvent, escapeHtml as esc, jsArg } from './event-store.js';
+import { teamCardFiles, personalCardFile, resetPersonalCards } from './draft-replay.js';
+import { postFilesToComments, postFilesToFeed, canPostToFeed } from './card-share.js';
+import { showUploadProgress, hideUploadProgress } from '../wa-chat.js';
 
 const toast = (m, t) => window.showToast && window.showToast(m, t);
 const meUid = () => String((window.currentUser && window.currentUser.uid) || '');
@@ -114,5 +117,77 @@ window.setTeamsReady = async function (eventId, on) {
     toast(on ? 'Teams set ✅ Everyone was told their team.' : 'Teams unset. Make your changes, then tap "Teams set" again.');
     if (window.renderEventDetailModalContent) window.renderEventDetailModalContent();
     window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId } }));
+    if (on) setTimeout(() => window.openTeamsSetShare(eventId), 400);
+};
+
+// ---------------------------------------------------------------- after "Teams set": share the team cards
+//   ☑ Team cards in the game comments ("All teams" + one per team)
+//   ☐ Team cards in the community feed (community games)
+//   ☑ Each player's OWN card in their inbox: their team with a gold "YOU" on them, and
+//     "Hey David! You're on Team 2. Please wear red. See you Thu 8:00 PM ⚽"
+window.openTeamsSetShare = function (eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const { teams } = teamsOf(ev);
+    const players = teams.flatMap(t => t.players.filter(p => p.uid && !String(p.uid).startsWith('usr_') && String(p.uid) !== meUid()));
+    const feed = canPostToFeed(ev.communityId);
+    document.getElementById('teams-share')?.remove();
+    const m = document.createElement('div');
+    m.id = 'teams-share';
+    m.className = 'fixed inset-0 z-[240] flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm sm:p-4';
+    const row = (id, on, title, sub) => `<label class="flex items-start gap-3 bg-black/40 border border-white/10 rounded-2xl p-3 cursor-pointer">
+        <input id="${id}" type="checkbox" ${on ? 'checked' : ''} class="w-5 h-5 mt-0.5 accent-[#00F296] shrink-0">
+        <span><span class="block text-sm font-black text-white">${title}</span><span class="block text-[11px] text-white/55">${sub}</span></span></label>`;
+    m.innerHTML = `<div class="bg-[#040E13] border border-[#00F296]/40 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-5 space-y-3 text-white" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between"><div class="text-base font-black">📸 Share the teams?</div>
+            <button onclick="document.getElementById('teams-share').remove()" class="w-8 h-8 rounded-full bg-black/60 border border-white/15"><i class="fa-solid fa-xmark text-xs"></i></button></div>
+        ${row('ts-comments', true, '💬 Team cards in the game comments', '"All teams" + one card per team.')}
+        ${feed ? row('ts-feed', false, '📣 Team cards in the community feed', 'One post with all the cards.') : ''}
+        ${row('ts-inbox', true, `✉️ Each player's own card in their inbox (${players.length})`, 'Their team with a gold "YOU" on them: "You\'re on Team 2. Please wear red."')}
+        <button id="ts-go" onclick="sendTeamsSetShare('${jsArg(eventId)}')" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-xl text-sm">Send</button>
+        <button onclick="document.getElementById('teams-share').remove()" class="w-full text-white/60 font-bold py-2 text-xs">Not now</button>
+    </div>`;
+    m.onclick = () => m.remove();
+    document.body.appendChild(m);
+};
+window.sendTeamsSetShare = async function (eventId) {
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
+    const want = { comments: !!document.getElementById('ts-comments')?.checked, feed: !!document.getElementById('ts-feed')?.checked, inbox: !!document.getElementById('ts-inbox')?.checked };
+    if (!want.comments && !want.feed && !want.inbox) { toast('Tick at least one.', 'error'); return; }
+    document.getElementById('teams-share')?.remove();
+    const caption = `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + (window.fmtGameDate || String)(ev.date) : ''}`;
+    const done = [];
+    try {
+        if (want.comments || want.feed) {
+            showUploadProgress('Making the team cards…', null);
+            const files = (await teamCardFiles(ev)).map(c => c.file).filter(Boolean);
+            hideUploadProgress();
+            if (!files.length) throw new Error('no cards');
+            if (want.comments) { await postFilesToComments(ev.id, files, caption); done.push('comments'); }
+            if (want.feed && await postFilesToFeed(ev.communityId, files, caption)) done.push('feed');
+        }
+        if (want.inbox) {
+            resetPersonalCards();
+            const { teams } = teamsOf(ev);
+            const when = [ev.date ? (window.fmtGameDate || String)(ev.date) : '', ev.time || ''].filter(Boolean).join(' ');
+            const list = teams.flatMap(t => t.players.filter(p => p.uid && !String(p.uid).startsWith('usr_') && String(p.uid) !== meUid()).map(p => ({ p, t })));
+            let sent = 0;
+            for (let k = 0; k < list.length; k++) {
+                const { p, t } = list[k];
+                showUploadProgress(`Sending ${String(p.name || 'player').split(' ')[0]}'s card (${k + 1} of ${list.length})…`, k / list.length);
+                const first = String(p.name || '').split(' ')[0] || 'there';
+                const cn = colorName(t.color);
+                const file = await personalCardFile(ev, t.i, p.uid, `${first}, you're on ${t.name}${cn ? ' · wear ' + cn : ''}`);
+                const text = `Hey ${first}! 👕 You're on ${t.name}${cn ? `. Please wear ${cn.toLowerCase()}` : ''}.${when ? ` See you ${when} ⚽` : ''}\n${ev.title || ''}`;
+                if (await window.sendDirectMessage(p.uid, text, file)) sent++;
+            }
+            hideUploadProgress();
+            done.push(`${sent} inbox${sent === 1 ? '' : 'es'}`);
+        }
+        toast(`Sent ✅ ${done.join(' · ')}`);
+    } catch (e) {
+        console.error('teams share', e);
+        hideUploadProgress();
+        toast(`Some of it didn't send${done.length ? ` (sent: ${done.join(', ')})` : ''}. Try again from Admin > Teams set.`, 'error');
+    }
 };
 window.teamsSetButtonHtml = teamsSetButtonHtml;

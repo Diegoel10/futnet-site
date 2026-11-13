@@ -8,6 +8,26 @@ import { uploadMedia, showUploadProgress, hideUploadProgress, MEDIA_LABEL } from
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const toast = (m, t) => window.showToast && window.showToast(m, t);
 
+/** Posts images to a game's comments: one message per image (the first one carries the caption). */
+export async function postFilesToComments(eventId, files, caption) {
+    if (!window.postGameComment) throw new Error('comments not loaded');
+    try {
+        for (let k = 0; k < files.length; k++) {
+            const msg = `Sending image ${k + 1} of ${files.length}…`;
+            showUploadProgress(msg, 0);
+            const media = await uploadMedia(files[k], `comments/${eventId}`, (p) => showUploadProgress(msg, p));
+            const ok = await window.postGameComment(eventId, k === 0 && caption ? caption : MEDIA_LABEL.image, media);
+            if (!ok) throw new Error('comment failed');
+        }
+    } finally { hideUploadProgress(); }
+}
+/** Posts images to a community feed (one post with every image). */
+export async function postFilesToFeed(communityId, files, caption) {
+    if (!window.postToCommunityFeed) return false;
+    return !!(await window.postToCommunityFeed(communityId, caption || '', files));
+}
+export const canPostToFeed = (communityId) => !!(communityId && window.postToCommunityFeed && (window.myCommunityRoles || {})[communityId]);
+
 /**
  * Puts the share box at the top of `host`.
  * items: [{ title, file }] (file can be null when the image couldn't be made)
@@ -47,20 +67,14 @@ export function mountShareBar(host, items, opts = {}) {
         if (!chosen.length) { toast('Tick at least one image.', 'error'); return; }
         const b = e.currentTarget; b.disabled = true; const label = b.innerHTML;
         try {
-            for (let k = 0; k < chosen.length; k++) {
-                const msg = `Sending image ${k + 1} of ${chosen.length}…`;
-                showUploadProgress(msg, 0);
-                const media = await uploadMedia(chosen[k].file, `comments/${opts.eventId}`, (p) => showUploadProgress(msg, p));
-                const ok = await window.postGameComment(opts.eventId, k === 0 && opts.caption ? opts.caption : MEDIA_LABEL.image, media);
-                if (!ok) throw new Error('comment failed');
-            }
+            await postFilesToComments(opts.eventId, chosen.map(c => c.file), opts.caption);
             b.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Sent to the comments';
             toast(`Shared ${chosen.length} image${chosen.length === 1 ? '' : 's'} in the game comments.`);
         } catch (err) {
             console.error('share to comments', err);
             toast("Couldn't share to the comments. Try again.", 'error');
             b.disabled = false; b.innerHTML = label;
-        } finally { hideUploadProgress(); }
+        }
     });
 
     box.querySelector('[data-to="feed"]')?.addEventListener('click', async (e) => {

@@ -191,6 +191,12 @@ window.mgrPlayer = async (uid) => {
             ${a.upcomingList.length ? `<div class="text-[12px] text-white/70">Upcoming: ${a.upcomingList.map(g => `${esc(g.title)} (${esc(g.date)})`).join(', ')}</div>` : ''}
         </div>
         <div class="card space-y-2">
+            <div class="lbl">⚽ Goal check</div>
+            <p class="text-[11px] text-white/55">Every game they're in (or that has a goal with their name): how many goals count for them, and how each goal was saved. Use it when someone says their goals are missing.</p>
+            <button onclick="mgrGoalCheck('${jsq(p.uid)}')" class="btn-dark">Check goals</button>
+            <div id="goal-box"></div>
+        </div>
+        <div class="card space-y-2">
             <div class="lbl">Duplicate account? Merge</div>
             <p class="text-[11px] text-white/55">Moves THIS account's games, communities, credit, teams and VS goals into the other account, then hides this one (it can't sign in any more). You'll see what moves before anything changes.</p>
             <div class="flex gap-2"><input id="m-keep" class="inp" placeholder="User id of the account to KEEP"><button onclick="mgrMergePreview('${jsq(p.uid)}')" class="btn-dark">Preview</button></div>
@@ -383,6 +389,22 @@ window.mgrGate = async (on) => {
     await call('gate', { creatorsOnly: on }); toast(on ? 'Beta mode ON 🧪' : 'Beta mode OFF'); settings();
 };
 window.mgrGateRemove = async (u) => { if (!confirm('Remove this person from the approved list?')) return; await call('gate', { remove: u }); settings(); };
+window.mgrGoalCheck = async (uid) => {
+    const box = document.getElementById('goal-box'); if (!box) return;
+    box.innerHTML = '<div class="text-sm text-white/60 py-2"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Looking through every game…</div>';
+    const r = await call('goalCheck', { uid }).catch(() => null);
+    if (!r) { box.innerHTML = '<div class="text-sm text-red-300">Couldn\'t check.</div>'; return; }
+    const total = r.rows.filter(x => x.ended && !x.cancelled).reduce((n, x) => n + x.counted, 0);
+    box.innerHTML = `<div class="text-[11px] text-white/55 py-1">Names looked for: ${r.names.map(esc).join(', ')} · <b class="text-white">${total} goals counted</b> in ended games</div>
+        ${r.rows.map(x => {
+            const bad = x.entries.length > x.counted || !x.inGame || !x.ended || !x.community;
+            return `<div class="border-t border-white/10 py-2 text-[12px] ${bad ? 'bg-amber-400/5' : ''}">
+                <div class="flex items-center justify-between gap-2"><b>${esc(x.date)} · ${esc(x.title)}</b><span class="font-black ${x.counted === x.entries.length ? 'text-[#00F296]' : 'text-amber-300'}">${x.counted} of ${x.entries.length} goals count</span></div>
+                <div class="text-[11px] text-white/55">${x.community ? esc(x.community) : '<b class="text-amber-300">not in a community</b>'} · ${x.ended ? 'ended' : '<b class="text-amber-300">NOT ended (stats wait for End event)</b>'}${x.cancelled ? ' · <b class="text-red-300">cancelled</b>' : ''}${x.inGame ? '' : ' · <b class="text-amber-300">they\'re NOT on this game\'s roster/teams</b>'}</div>
+                ${x.entries.map(e => `<div class="text-[11px] text-white/70 pl-2">Match ${e.match}: saved as <code class="text-white">${esc(e.saved)}</code>${e.finished ? '' : ' (match not finished)'}</div>`).join('')}
+            </div>`;
+        }).join('') || '<div class="text-sm text-white/50">No games found.</div>'}`;
+};
 window.mgrGateAllow = async (u, on) => { S.gate = await call('gate', on ? { add: u } : { remove: u }); toast(on ? 'Approved to create ✅' : 'Not approved any more.'); window.mgrPlayer(u); };
 window.mgrAddOrg = async () => { const u = val('o-uid'); if (!u) return; await call('config', { realOrganizers: [...S.orgs, u] }); settings(); };
 window.mgrDelOrg = async (u) => { if (!confirm('Remove this organizer?')) return; await call('config', { realOrganizers: S.orgs.filter(x => x !== u) }); settings(); };

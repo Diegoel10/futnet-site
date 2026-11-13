@@ -3313,12 +3313,20 @@ async function vsPeople(m) {
   return uniq([m.organizerId, ...players, ...squadPeople(m)]);
 }
 function vsResult(m) {
-  // { teamId: { w, d, l, gf, ga } } for a final 2-team match
+  // { teamId: { w, d, l, gf, ga } }: a final 2-team match by its score; 3+ team matches by every game played
+  // (same as the website's team standings).
+  if (!m || m.status === "cancelled" || m.status === "declined") return {};
   const ids = Object.keys(m.score || {});
-  if (m.status !== "final" || ids.length !== 2) return {};
-  const [a, b] = ids, ga = +m.score[a] || 0, gb = +m.score[b] || 0;
   const one = (f, g) => ({ w: f > g ? 1 : 0, d: f === g ? 1 : 0, l: f < g ? 1 : 0, gf: f, ga: g });
-  return { [a]: one(ga, gb), [b]: one(gb, ga) };
+  if ((Number(m.teamsCount) || 2) <= 2 && ids.length === 2) {
+    if (m.status !== "final") return {};
+    const [a, b] = ids, ga = +m.score[a] || 0, gb = +m.score[b] || 0;
+    return { [a]: one(ga, gb), [b]: one(gb, ga) };
+  }
+  const out = {};
+  const add = (id, f, g) => { const o = out[id] = out[id] || { w: 0, d: 0, l: 0, gf: 0, ga: 0 }; const x = one(f, g); Object.keys(x).forEach((k) => { o[k] += x[k]; }); };
+  arr(m.results).forEach((r) => { if (r && r.a && r.b) { add(r.a, +r.ga || 0, +r.gb || 0); add(r.b, +r.gb || 0, +r.ga || 0); } });
+  return out;
 }
 
 exports.onVsWritten = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (event) => {
@@ -4190,6 +4198,37 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     c.avatar = await photoOf(uid, c);
     return { uid, card: c, profile: { firstName: p.firstName || "", lastName: p.lastName || "", nickname: p.nickname || "", dob: p.dob || "", email: p.email || "", position: p.position || "" },
       auth: await authInfo(uid), verification: v.data() || null, activity: await activityOf(uid) };
+  }
+  // ⚽ Goal check: every game this player is in, or that has a goal with their name, and whether each goal counts for them.
+  if (action === "goalCheck") {
+    const uid = String(d.uid || "");
+    const card = (await col("directory").doc(uid).get()).data() || {};
+    const prof = (await col("users").doc(uid).collection("profile").doc("data").get()).data() || {};
+    const norm = (x) => String(x || "").toLowerCase().trim().split(/\s+/).filter(Boolean).join(" ");
+    const names = new Set([card.name, `${prof.firstName || ""} ${prof.lastName || ""}`, prof.nickname, prof.name].map(norm).filter(Boolean));
+    const firsts = new Set([...names].map((n) => n.split(" ")[0]).filter((x) => x.length > 2));
+    const snap = await col("eventsList").get();
+    const comms = {};
+    const rows = [];
+    for (const doc of snap.docs) {
+      const g = { id: doc.id, ...doc.data() };
+      const n = teamCount(g);
+      const inGame = arr(g.attendees).some((a) => uidOf(a) === uid) || Array.from({ length: n }, (_, i) => teamPlayers(g, i)).flat().some((p) => uidOf(p) === uid);
+      const gname = (x) => norm(typeof x === "object" && x ? (x.name || x.scorer || x.playerName || "") : x);
+      const guid = (x) => (typeof x === "object" && x ? String(x.uid || x.userId || "") : "");
+      const entries = [];
+      arr(g.matches).forEach((m, mi) => [...arr(m && m.team1Goals), ...arr(m && m.team2Goals)].forEach((x) => {
+        const nm = gname(x);
+        if (guid(x) === uid || names.has(nm) || [...firsts].some((f) => nm.split(" ")[0] === f)) entries.push({ match: mi + 1, saved: typeof x === "object" ? JSON.stringify(x).slice(0, 80) : String(x), finished: m.isFinished !== false });
+      }));
+      if (!inGame && !entries.length) continue;
+      const counted = inGame ? ((playerGame(g, uid) || {}).goals || 0) : 0;
+      if (g.communityId && !comms[g.communityId]) comms[g.communityId] = ((await col("communities").doc(g.communityId).get()).data() || {}).name || g.communityId;
+      rows.push({ id: g.id, title: g.title || "Game", date: String(g.date || "").slice(0, 10), community: g.communityId ? comms[g.communityId] : "", ended: !!g.isSessionEnded,
+        inGame, counted, entries, cancelled: !!g.isCancelled });
+    }
+    rows.sort((a, b) => (a.date < b.date ? 1 : -1));
+    return { names: [...names], rows: rows.slice(0, 80) };
   }
   if (action === "verify") {
     const uid = String(d.uid || ""), level = d.level, on = !!d.on;

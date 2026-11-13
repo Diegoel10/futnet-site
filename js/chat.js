@@ -705,3 +705,48 @@ setInterval(() => {
     if (uid) window.initChatListener();
     else { if (chatUnsubscribe) chatUnsubscribe(); chatUnsubscribe = null; window.chatsThreads = []; updateChatsBadge(); }
 }, 700);
+
+/**
+ * Send a private message (text + optional photo) to one player without opening the chat
+ * (used by "Teams set" to send each player their own team card). Same saving as typing it in the chat.
+ * Returns true when it saved. The server sends the push notification (onChatMessage).
+ */
+window.sendDirectMessage = async function (toUid, text, file) {
+    const me = window.currentUser; if (!me || !toUid || toUid === me.uid) return false;
+    const target = [...(window.cachedDirectoryList || []), ...(window.directoryList || [])].find(d => String(d.uid || d.id) === String(toUid)) || {};
+    const partnerName = target.name || `${target.firstName || ''} ${target.lastName || ''}`.trim() || 'Player';
+    const pa = String(target.avatar || '');
+    const partnerAvatar = /^https?:\/\//i.test(pa) && pa.length < 400 ? pa : '';
+    const senderName = window.userProfile?.name || window.userProfile?.firstName || me.displayName || 'Player';
+    const rawAvatar = window.userProfile?.avatar || me.photoURL || '';
+    const senderAvatar = /^https?:\/\//i.test(rawAvatar) && rawAvatar.length < 400 ? rawAvatar : '';
+    let media = null;
+    if (file) media = await uploadMedia(file, `chat/${[me.uid, toUid].sort().join('_')}`, () => {});
+    const msg = {
+        id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+        createdAt: Date.now(), senderUid: me.uid, sender: senderName, text: text || (media ? MEDIA_LABEL.image : ''),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), avatar: senderAvatar, isRead: false,
+    };
+    if (media) msg.media = media;
+    const addTo = (threads, threadId, name, avatar) => {
+        let t = threads.find(x => x.id === threadId);
+        if (!t) { t = { id: threadId, name, avatar, messages: [] }; threads.push(t); }
+        t.messages = Array.isArray(t.messages) ? t.messages : [];
+        if (!t.messages.some(m => m.id === msg.id)) t.messages.push(msg);
+        t.messages = t.messages.slice(-100);
+    };
+    try {
+        const myRef = doc(db, 'artifacts', appId, 'directory', me.uid);
+        const theirRef = doc(db, 'artifacts', appId, 'directory', String(toUid));
+        await runTransaction(db, async (tx) => {
+            const mine = await tx.get(myRef), theirs = await tx.get(theirRef);
+            const myThreads = mine.exists() ? (mine.data().chats || []) : [];
+            const theirThreads = theirs.exists() ? (theirs.data().chats || []) : [];
+            addTo(myThreads, String(toUid), partnerName, partnerAvatar);
+            addTo(theirThreads, me.uid, senderName, senderAvatar);
+            tx.set(myRef, { chats: myThreads }, { merge: true });
+            tx.set(theirRef, { chats: theirThreads }, { merge: true });
+        });
+        return true;
+    } catch (e) { console.error('sendDirectMessage', e); return false; }
+};

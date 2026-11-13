@@ -2471,9 +2471,15 @@ window.vsTeamHtml = teamVsHtml;
 //   With no filter the leaderboard uses each team's saved record. With a filter (teams in the match, format,
 //   day of the week, park) it's worked out from the finished VS matches that fit.
 const FIN = { list: null, loading: null };
+// Matches that count for the standings: finished ones, and 3+ team matches that have games played
+// (those don't always get a "final" status). Reloaded every 2 minutes.
 function loadFinished() {
-    if (FIN.list) return Promise.resolve(FIN.list);
-    if (!FIN.loading) FIN.loading = getDocs(query(C('vsMatches'), where('status', '==', 'final'))).then(s => { FIN.list = s.docs.map(d => ({ ...d.data(), id: d.id })); return FIN.list; }).catch(() => { FIN.list = []; return FIN.list; });
+    if (FIN.list && Date.now() - (FIN.at || 0) < 120000) return Promise.resolve(FIN.list);
+    if (!FIN.loading) FIN.loading = getDocs(C('vsMatches')).then(s => {
+        FIN.list = s.docs.map(d => ({ ...d.data(), id: d.id }))
+            .filter(m => m.status !== 'cancelled' && m.status !== 'declined' && (m.status === 'final' || (m.results || []).length));
+        FIN.at = Date.now(); FIN.loading = null; return FIN.list;
+    }).catch(() => { FIN.list = []; FIN.loading = null; return FIN.list; });
     return FIN.loading;
 }
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
