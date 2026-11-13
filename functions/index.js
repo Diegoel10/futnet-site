@@ -5,7 +5,7 @@
 // Because the triggers below watch the database itself, notifications work no matter
 // whether the action happened on the website or in the iOS app.
 
-const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten, onDocumentWrittenWithAuthContext, onDocumentUpdatedWithAuthContext, onDocumentDeletedWithAuthContext } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { logger } = require("firebase-functions");
@@ -239,6 +239,7 @@ exports.sendChatNotification = onDocumentCreated(`${BASE}/notifications/{notific
     tab: n.tab || (type === "game_comment" ? "comments" : type === "vs_comment" ? "chat" : ""),
     commentId: n.commentId || "",
     link: n.eventId && type === "game_comment" ? `https://futnet.site/#event=${encodeURIComponent(n.eventId)}&tab=comments`
+      : n.eventId && n.tab === "roster" ? `https://futnet.site/#event=${encodeURIComponent(n.eventId)}&tab=roster`
       : n.tourneyId ? `https://futnet.site/#tourney=${encodeURIComponent(n.tourneyId)}${n.tab ? "&tab=" + encodeURIComponent(n.tab) : ""}` : "",
     sound: n.sound || "",
   };
@@ -625,18 +626,40 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
     }, { exclude: [author] });
   }
 
-  // e) Teams: tell each player when they are put on (or moved to) a team
+  // e) Teams: tell each player which team they're on.
+  //    Captains draft (Caps mode, live): right away ("You've been picked!").
+  //    "Teams set" (the admin taps it when the teams are final): everyone on a team gets ONE ping with their team.
+  //    Before the teams are set, moving players around pings nobody.
+  //    After they're set, a moved player gets one ping once nobody has touched the teams for 3 minutes.
   const oldTeams = teamMap(before);
   const newTeams = teamMap(after);
-  for (const [uid, idx] of Object.entries(newTeams)) {
-    if (oldTeams[uid] === idx) continue;
-    await notify([uid], {
-      type: "team_assigned",
-      senderUid: organizer,
-      eventId,
-      title: after.capsDraft && after.capsDraft.status === "live" ? "You've been picked! 🧢" : "You've been assigned to a team 👕",
-      body: `You're on ${teamName(after, idx)} for ${title}.`,
-    }, { key: `team_${eventId}_${uid}_${idx}` });
+  const moved = Object.entries(newTeams).filter(([uid, idx]) => oldTeams[uid] !== idx);
+  const setAt = after.teamsSet && after.teamsSet.at, wasSetAt = before && before.teamsSet && before.teamsSet.at;
+  if (setAt && setAt !== wasSetAt) {
+    await col("teamPings").doc(eventId).delete().catch(() => {});
+    for (const [uid, idx] of Object.entries(newTeams)) {
+      const wear = shirtColorName(after, idx);
+      await notify([uid], {
+        type: "team_assigned", senderUid: organizer, eventId, tab: "roster",
+        title: `Teams are set ✅ You're on ${teamName(after, idx)}`,
+        body: `${wear ? `Please wear ${wear}. ` : ""}Tap here to see your team. (${title})`,
+      }, { exclude: [after.teamsSet.by], key: `teamsset_${eventId}_${uid}_${setAt}` });
+    }
+  } else if (moved.length && after.capsDraft && after.capsDraft.status === "live") {
+    for (const [uid, idx] of moved) {
+      await notify([uid], {
+        type: "team_assigned", senderUid: organizer, eventId,
+        title: "You've been picked! 🧢",
+        body: `You're on ${teamName(after, idx)} for ${title}.`,
+      }, { key: `team_${eventId}_${uid}_${idx}` });
+    }
+  } else if (setAt && JSON.stringify(oldTeams) !== JSON.stringify(newTeams)) {
+    const q = col("teamPings").doc(eventId);
+    await db.runTransaction(async (tx) => {
+      const cur = await tx.get(q);
+      // "sent" = what each player was last told (starts as the teams before this round of changes)
+      tx.set(q, { eventId, due: Date.now() + 3 * 60 * 1000, ...(cur.exists ? {} : { sent: oldTeams }) }, { merge: true });
+    }).catch((e) => logger.warn("team pings queue", eventId, e.message));
   }
 
   // e1) Admin asked "who wants to be captain?": tell everyone going.
@@ -1876,6 +1899,47 @@ exports.unpaidReports = onSchedule({ schedule: "every 30 minutes", timeZone: DEF
 });
 
 // Every minute: offers whose timer ran out move on to the next player (or to "last call").
+// Shirt colors: the same list and order as the Team Builder (js/game-profile/team-tool.js TEAM_COLOR_OPTIONS),
+// so "Please wear Red" matches what players see in the app.
+const SHIRTS = [
+  { name: "Blue", hex: "#3b82f6" }, { name: "Red", hex: "#ef4444" }, { name: "Yellow", hex: "#eab308" },
+  { name: "Green", hex: "#22c55e" }, { name: "Purple", hex: "#a855f7" }, { name: "Pink", hex: "#ec4899" },
+  { name: "Orange", hex: "#f97316" }, { name: "White", hex: "#ffffff" }, { name: "Black", hex: "#000000" },
+];
+function shirtColorName(g, idx) {
+  const n = teamCount(g);
+  const saved = g.teamColors || {};
+  const out = new Array(n).fill(null), used = new Set();
+  for (let i = 0; i < n; i++) { const c = saved[i] || saved[String(i)]; if (c && !used.has(String(c).toLowerCase())) { out[i] = String(c); used.add(String(c).toLowerCase()); } }
+  for (let i = 0; i < n; i++) { if (out[i]) continue; const next = SHIRTS.find((s) => !used.has(s.hex.toLowerCase())); if (next) { out[i] = next.hex; used.add(next.hex.toLowerCase()); } }
+  const hex = String(out[idx] || "").toLowerCase();
+  const hit = SHIRTS.find((s) => s.hex.toLowerCase() === hex);
+  return hit ? hit.name.toLowerCase() : "";
+}
+// Team pings (see onGameWritten e): once a game's teams have been quiet for 3 minutes, tell each moved player once.
+exports.sendTeamPings = onSchedule({ schedule: "every 1 minutes", timeZone: DEFAULT_TZ, timeoutSeconds: 120 }, async () => {
+  const due = await col("teamPings").where("due", "<=", Date.now()).limit(100).get();
+  for (const d of due.docs) {
+    const qd = d.data() || {};
+    try {
+      const g = (await col("eventsList").doc(d.id).get()).data();
+      await d.ref.delete();
+      if (!g || g.isCancelled || g.isSessionEnded || !(g.teamsSet && g.teamsSet.at)) continue;
+      const sent = qd.sent || {}, now = teamMap(g);
+      const title = g.title || g.location || "your game";
+      for (const [uid, idx] of Object.entries(now)) {
+        if (sent[uid] === idx) continue;   // same team as they were last told: stay quiet
+        const wear = shirtColorName(g, idx);
+        await notify([uid], {
+          type: "team_assigned", senderUid: g.organizerId || "", eventId: d.id, tab: "roster",
+          title: `Team change 👕 You're on ${teamName(g, idx)}`,
+          body: `${wear ? `Please wear ${wear}. ` : ""}Tap here to see your team. (${title})`,
+        }, { key: `team_${d.id}_${uid}_${idx}_${Math.floor(Date.now() / 60000)}` });
+      }
+    } catch (e) { logger.warn("team pings", d.id, e.message); }
+  }
+});
+
 exports.advanceSpotOffers = onSchedule({ schedule: "every 1 minutes", timeZone: DEFAULT_TZ }, async () => {
   const now = Date.now();
   const due = await col("eventsList").where("spotOffer.expiresAt", "<=", now).limit(200).get();
@@ -3159,11 +3223,15 @@ exports.onTeamInvite = onDocumentCreated(`${BASE}/teamInvites/{inviteId}`, async
   }, { key: `teaminv_${event.params.inviteId}_${Math.floor(Date.now() / 3600000)}` });
 });
 
-exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async (event) => {
+// (kept so deploying doesn't ask to delete it; the work moved to onTeamChanged, which knows who made the change)
+exports.onTeamWritten = onDocumentWritten(`${BASE}/teams/{teamId}`, async () => null);
+exports.onTeamChanged = onDocumentWrittenWithAuthContext(`${BASE}/teams/{teamId}`, async (event) => {
   const before = event.data.before.exists ? event.data.before.data() : null;
   const after = event.data.after.exists ? event.data.after.data() : null;
   if (!after) return;
   const teamId = event.params.teamId;
+  // Quiet: a change the guard is about to undo, or the guard putting it back. Nobody gets pinged.
+  if (await guardSkips(event, before, after, "team")) return;
   // The team changed its logo, colors or name: update its copy in every VS match it signed up for (so the game cards show the new one).
   if (before && !after.chatOnly) {
     const look = (t) => JSON.stringify([t.name || "", t.short || "", t.logo || null, t.colors || {}]);
@@ -3859,8 +3927,10 @@ const ttWhen = (m) => {
   const [h, mi] = m.time.split(":").map(Number);
   return `${day} ${((h + 11) % 12) + 1}:${String(mi || 0).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 };
-exports.onTourneyWritten = onDocumentUpdated(`${BASE}/tournaments/{id}`, async (event) => {
+exports.onTourneyWritten = onDocumentUpdated(`${BASE}/tournaments/{id}`, async () => null);   // moved to onTourneyChanged
+exports.onTourneyChanged = onDocumentUpdatedWithAuthContext(`${BASE}/tournaments/{id}`, async (event) => {
   const before = event.data.before.data() || {}, t = event.data.after.data() || {};
+  if (await guardSkips(event, before, t, "tournament")) return;
   const id = event.params.id, name = t.name || "the tournament";
   const by = t.updatedBy || "";
   const base = { tourneyId: id, senderUid: by };
@@ -3942,6 +4012,137 @@ exports.tourneyReminders = onSchedule({ schedule: "every day 18:00", timeZone: D
     // the organizer: one line for the whole day
     if (games.length) await notify([t.organizerId], { tourneyId: d.id, type: "tourney_reminder", title: `⏰ ${t.name || "Tournament"} tomorrow`, body: `${games.length} game${games.length === 1 ? "" : "s"} on the schedule.`, tab: "admin" }, { key: `ttremo_${d.id}_${tomorrow}` });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Team + tournament guard: the app hides the buttons, and this makes it real.
+// Firestore tells us WHO made each change (event.authId). If someone changes a team or tournament
+// they don't run, the server puts it back the way it was, logs it (managerLog, "blocked"),
+// and tells the team's owner. The server's own writes (service account) are never touched.
+//   Teams:  the owner and captains/co-captains can change anything (only the owner can hand over or delete).
+//           Anyone else can only add themselves (open team, or invited) or take themselves off.
+//           Temporary free-agent squads are not guarded (their players manage them together).
+//   Tournaments: the organizer can change anything. A captain can only register / take out their own team
+//           (during registration) and change their own team's players.
+// ---------------------------------------------------------------------------
+const byUser = (e) => e.authId && !["service_account", "system"].includes(e.authType) ? e.authId : "";
+const isOwnerUid = async (uid) => { try { const u = await admin.auth().getUser(uid); return isOwner({ token: { email: u.email || "" } }); } catch (e) { return false; } };
+const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+const teamBoss = (t, uid) => !!t && !!uid && (t.ownerId === uid || arr(t.members).some((m) => m && m.uid === uid && (m.role === "captain" || m.role === "co")));
+async function logBlocked(kind, id, name, uid, why) {
+  let who = "";
+  try { who = cardName((await col("directory").doc(uid).get()).data() || {}); } catch (e) { /* none */ }
+  await col("managerLog").add({ action: "blocked", kind, id, name: name || "", uid, who, why, at: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+  logger.warn(`guard: undid a ${kind} change`, { id, uid, why });
+  return who;
+}
+// Regular games: we don't undo team changes there (joining, leaving and captains all touch the teams),
+// but anyone who changes a game's teams without being its organizer, a community admin or a team captain
+// shows up in the manager's list, so you can see who is doing it.
+exports.gameTeamsWatch = onDocumentUpdatedWithAuthContext(`${BASE}/eventsList/{eventId}`, async (event) => {
+  const uid = byUser(event); if (!uid) return;
+  const b = event.data.before.data() || {}, a = event.data.after.data() || {};
+  const keys = ["teamAssignments", "teamNames", "teamColors", "teamCaptains", "teamSlots", "teamFormations", "teamsSet"];
+  const changed = keys.filter((k) => !same(b[k], a[k]));
+  if (!changed.length) return;
+  if (b.organizerId === uid || Object.values(b.teamCaptains || {}).map(String).includes(uid)) return;
+  // a player leaving the game is taken off their team by the app: that's fine
+  const inBefore = arr(b.attendees).some((x) => uidOf(x) === uid), inAfter = arr(a.attendees).some((x) => uidOf(x) === uid);
+  if (inBefore && !inAfter && changed.every((k) => k === "teamAssignments" || k === "teamSlots")) return;
+  if (b.communityId) { try { const { admins } = await communityMembers(b.communityId); if (admins.includes(uid)) return; } catch (e) { /* check failed: log it */ } }
+  if (await isOwnerUid(uid)) return;
+  let who = "";
+  try { who = cardName((await col("directory").doc(uid).get()).data() || {}); } catch (e) { /* none */ }
+  await col("managerLog").add({ action: "blocked", kind: "game teams", id: event.params.eventId, name: b.title || b.location || "game", uid, who,
+    why: `changed ${changed.join(", ")} without being an admin or captain (not undone)`, at: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+});
+// Invites live in teamInvites until the player answers (then the app deletes it), so keep our own copy to check joins.
+exports.onTeamInvite = onDocumentCreated(`${BASE}/teamInvites/{id}`, (e) =>
+  db.collection("futnetPrivate").doc("teamInvites").collection("by").doc(e.params.id).set({ ...(e.data.data() || {}), at: Date.now() }).catch(() => {}));
+async function wasInvited(teamId, uid) {
+  try {
+    if ((await col("teamInvites").doc(`${teamId}_${uid}`).get()).exists) return true;
+    return (await db.collection("futnetPrivate").doc("teamInvites").collection("by").doc(`${teamId}_${uid}`).get()).exists;
+  } catch (e) { return false; }
+}
+/** True when notifications should stay quiet: the guard putting something back, or a change it's about to undo. */
+async function guardSkips(event, before, after, kind) {
+  if (!before || !after) return false;
+  if (after.guardFix && after.guardFix !== before.guardFix) return true;
+  const uid = byUser(event); if (!uid) return false;
+  if (kind === "team" && (before.temp || before.chatOnly)) return false;
+  const why = kind === "team" ? await teamChangeProblem(before, after, uid, event.params.teamId) : await tourneyChangeProblem(before, after, uid);
+  return !!why && !(await isOwnerUid(uid));
+}
+/** Why this person can't make this team change ("" = fine). */
+async function teamChangeProblem(before, after, uid, teamId) {
+  if (teamBoss(before, uid)) {
+    if (before.ownerId !== uid && after.ownerId !== before.ownerId) return "only the owner can hand the team over";
+    if (before.ownerId !== uid && arr(before.members).some((m) => m.uid === before.ownerId) && !arr(after.members).some((m) => m.uid === before.ownerId)) return "removed the owner";
+    return "";
+  }
+  // not a captain: only themselves in or out of the members list
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const k of keys) if (!["members", "memberUids", "updatedBy", "updatedAt"].includes(k) && !same(before[k], after[k])) return `changed "${k}"`;
+  const others = (list) => arr(list).filter((m) => m && m.uid !== uid);
+  if (!same(others(before.members), others(after.members))) return "changed other players";
+  const was = arr(before.members).some((m) => m && m.uid === uid), now = arr(after.members).filter((m) => m && m.uid === uid);
+  if (now.length > 1) return "added themselves twice";
+  if (now.length && now[0].role && now[0].role !== "player") return "made themselves captain";
+  if (now.length && !was && before.joinMode !== "open" && !(await wasInvited(teamId, uid))) return "joined without an invite";
+  if (now.length && was) { const old = arr(before.members).find((m) => m && m.uid === uid); if (!same({ ...old, name: "", number: "", position: "" }, { ...now[0], name: "", number: "", position: "" })) return "changed their own role"; }
+  return "";
+}
+exports.teamGuard = onDocumentUpdatedWithAuthContext(`${BASE}/teams/{teamId}`, async (event) => {
+  const uid = byUser(event); if (!uid) return;
+  const before = event.data.before.data() || {}, after = event.data.after.data() || {};
+  if (before.temp || before.chatOnly) return;
+  const why = await teamChangeProblem(before, after, uid, event.params.teamId);
+  if (!why || await isOwnerUid(uid)) return;
+  await event.data.after.ref.set({ ...before, guardFix: Date.now() });
+  await logBlocked("team", event.params.teamId, before.name, uid, why);
+});
+exports.teamDeleteGuard = onDocumentDeletedWithAuthContext(`${BASE}/teams/{teamId}`, async (event) => {
+  const uid = byUser(event); if (!uid) return;
+  const before = event.data.data() || {};
+  if (before.temp || before.chatOnly || before.ownerId === uid || await isOwnerUid(uid)) return;
+  await event.data.ref.set({ ...before, guardFix: Date.now() });
+  if (before.nameKey) await col("teamNames").doc(before.nameKey).set({ teamId: event.params.teamId, name: before.name || "" }).catch(() => {});
+  await logBlocked("team", event.params.teamId, before.name, uid, "deleted the team");
+});
+/** Tournaments: why this person can't make this change ("" = fine). */
+async function tourneyChangeProblem(before, after, uid) {
+  if (before.organizerId === uid) return after.organizerId === uid ? "" : "changed the organizer";
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const k of keys) if (!["teams", "teamIds", "participantUids", "updatedBy", "updatedAt"].includes(k) && !same(before[k], after[k])) return `changed "${k}"`;
+  const b = new Map(arr(before.teams).map((x) => [x.teamId, x])), a = new Map(arr(after.teams).map((x) => [x.teamId, x]));
+  const runs = async (x, id) => { if (x && x.joinedBy === uid) return true; try { return teamBoss((await col("teams").doc(id).get()).data(), uid); } catch (e) { return false; } };
+  for (const id of new Set([...b.keys(), ...a.keys()])) {
+    const x = b.get(id), y = a.get(id);
+    if (same(x, y)) continue;
+    if (!(await runs(x || y, id))) return "changed a team they don't run";
+    if (!x || !y) { if (before.status !== "signup") return "joined/left after registration closed"; }
+    if (!x && y && (y.paid && Number(before.priceCents) > 0)) return "marked their own team as paid";
+    if (x && y && !same({ ...x, roster: null }, { ...y, roster: null })) return "changed more than their players";
+  }
+  if (arr(after.teams).length > Math.min(8, Number(before.maxTeams) || 8)) return "went over the team limit";
+  if (!same(arr(before.teams).map((x) => x.teamId).filter((id) => a.has(id)), arr(after.teams).map((x) => x.teamId).filter((id) => b.has(id)))) return "reordered the teams";
+  return "";
+}
+exports.tourneyGuard = onDocumentUpdatedWithAuthContext(`${BASE}/tournaments/{id}`, async (event) => {
+  const uid = byUser(event); if (!uid) return;
+  const before = event.data.before.data() || {}, after = event.data.after.data() || {};
+  const why = await tourneyChangeProblem(before, after, uid);
+  if (!why || await isOwnerUid(uid)) return;
+  await event.data.after.ref.set({ ...before, guardFix: Date.now() });
+  await logBlocked("tournament", event.params.id, before.name, uid, why);
+});
+exports.tourneyDeleteGuard = onDocumentDeletedWithAuthContext(`${BASE}/tournaments/{id}`, async (event) => {
+  const uid = byUser(event); if (!uid) return;
+  const before = event.data.data() || {};
+  if (before.organizerId === uid || await isOwnerUid(uid)) return;
+  await event.data.ref.set({ ...before, guardFix: Date.now() });
+  await logBlocked("tournament", event.params.id, before.name, uid, "deleted the tournament");
 });
 
 exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (request) => {
@@ -4139,6 +4340,11 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     await col("directory").doc(uid).delete();
     await col("managerLog").add({ action: "purge", uid, name: c.name || "", by: me, at: now });
     return { ok: true };
+  }
+  if (action === "blocked") {
+    const snap = await col("managerLog").where("action", "==", "blocked").get();
+    const list = snap.docs.map((x) => { const v = x.data() || {}; return { ...v, at: v.at && v.at.toMillis ? v.at.toMillis() : 0 }; }).sort((a, b) => b.at - a.at).slice(0, 50);
+    return { list };
   }
   if (action === "deleted") {
     const snap = await col("directory").where("hidden", "==", true).get();

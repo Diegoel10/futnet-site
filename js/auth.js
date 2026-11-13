@@ -726,3 +726,34 @@ onAuthStateChanged(auth, async (user) => {
         window.userProfile = null;
     }
 });
+// Staying signed in. Two things sign people out on iPhones without them doing anything:
+//   1) Opening futnet.site from Instagram / Facebook / Messenger / TikTok / Snapchat opens it inside that app's
+//      own browser, which forgets the sign-in. We show a bar: "Open in Safari to stay signed in".
+//   2) Safari wipes a site's saved sign-in after about 7 days without a visit (once-a-week players get hit).
+//      Signed-in iPhone users in Safari get a one-time tip to get the FutNet app or add FutNet to the Home Screen.
+(function staySignedInHelp() {
+    const ua = navigator.userAgent || '';
+    const inApp = /FBAN|FBAV|FB_IAB|Instagram|Messenger|TikTok|musical_ly|Snapchat|Line\//i.test(ua);
+    const iPhone = /iPhone|iPad|iPod/i.test(ua);
+    const standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    const seen = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
+    const mark = (k) => { try { localStorage.setItem(k, '1'); } catch (e) { /* ignore */ } };
+    const bar = (id, html) => {
+        if (document.getElementById(id)) return;
+        const b = document.createElement('div');
+        b.id = id;
+        b.className = 'fixed left-3 right-3 bottom-4 z-[300] max-w-md mx-auto rounded-2xl border border-[#00F296]/60 bg-[#040E13]/95 text-white p-3 shadow-2xl flex items-start gap-3 text-xs';
+        b.innerHTML = html + `<button onclick="this.parentElement.remove()" class="shrink-0 w-7 h-7 rounded-full bg-white/10"><i class="fa-solid fa-xmark"></i></button>`;
+        document.body.appendChild(b);
+    };
+    window.addEventListener('load', () => setTimeout(() => {
+        if (inApp) {
+            bar('stay-signed-in', `<span class="text-xl">🔐</span><div class="flex-1"><b>Open in ${iPhone ? 'Safari' : 'Chrome'} to stay signed in.</b><div class="text-white/70 mt-0.5">This app's browser forgets your sign-in. Tap ••• (top right) → "Open in ${iPhone ? 'Safari' : 'browser'}".</div></div>`);
+            return;
+        }
+        if (iPhone && !standalone && window.currentUser && !seen('futnet_stay_tip')) {
+            mark('futnet_stay_tip');
+            bar('stay-signed-in', `<span class="text-xl">📲</span><div class="flex-1"><b>Tired of signing in again?</b><div class="text-white/70 mt-0.5">Safari forgets you after about a week away. Get the <b>FutNet app</b> from the App Store, or tap Share → <b>Add to Home Screen</b>.</div></div>`);
+        }
+    }, 4000));
+})();

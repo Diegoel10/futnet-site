@@ -245,7 +245,7 @@ function flyerHtml(t, big) {
             </div>
             ${prize ? `<div class="text-sm font-black text-amber-200">🥇 ${esc(prize.prize)}${(t.prizes || [])[1] ? ` <span class="text-white/60 font-bold text-xs">· 🥈 ${esc(t.prizes[1].prize)}</span>` : ''}</div>` : ''}
             <div class="flex flex-wrap justify-center gap-1.5">${slots}</div>
-            ${t.status === 'signup' ? `<div class="text-[10px] text-white/55">${max - n > 0 ? `${max - n} spot${max - n === 1 ? '' : 's'} left` : 'Full'} · ${+t.minPlayers || 1}–${+t.maxPlayers || 30} players per team · times subject to change</div>` : ''}
+            ${t.status === 'signup' ? `<div class="text-[10px] text-white/55">${max - n > 0 ? `${max - n} spot${max - n === 1 ? '' : 's'} left` : 'Full'} · ${+t.minPlayers || 1}–${+t.maxPlayers || 30} players per team${t.requirePay ? ' · must pay to be confirmed' : ''} · times subject to change</div>` : ''}
             ${cta}
         </div>
     </div>`;
@@ -337,59 +337,121 @@ window.ttSeg = (id, btn) => { document.querySelectorAll(`#${id} button`).forEach
 const segVal = (id) => { const on = document.querySelector(`#${id} button.bg-\\[\\#00F296\\]`); return on ? on.dataset.v : ''; };
 const numSel = (id, from, to, cur) => `<select id="${id}" class="${INPUT}">${Array.from({ length: to - from + 1 }, (_, i) => from + i).map(n => `<option value="${n}" ${+cur === n ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
 
-// ---------------------------------------------------------------- create / edit
+// ---------------------------------------------------------------- create / edit (2 pages)
+// Page 1: the basics (name, start date + time, park, format, teams, players, fee, "must pay to be confirmed").
+// Page 2: the proposed schedule, subject to change: Day 1, then a big "+ Add Day 2" button, and so on (up to 6 days).
+const F = { pre: {}, step: 1, basics: {}, days: [] };
 window.openCreateTourney = function (pre = {}) {
     if (!myUid()) return;
-    const roles = window.myCommunityRoles || {}, cache = window.communitiesCache || {};
-    const comms = Object.keys(roles).filter(id => roles[id] === 'admin' && cache[id]);
-    const editing = !!pre.id;
-    const days = (pre.days || []).length ? daysOf(pre) : (pre.date ? [{ date: pre.date, time: pre.time }] : []);
-    const per = String(pre.format || '7v7').split('v')[0];
-    sheet('tt-create', editing ? '✏️ Edit tournament' : `${TROPHY(22)} Create Tournament`, `
-        <p class="text-[11px] text-white/60">Steps: 1) teams register, 2) the draw, 3) waiting, 4) game times are set, 5) games, 6) champions. The format comes from how many teams register: 4 = knockout, 6 = 2 groups of 3, 8 = quarter-finals.</p>
-        <div>${LBL('Name *')}<input id="tt-name" class="${INPUT}" maxlength="50" value="${esc(pre.name || '')}" placeholder="e.g. Sabal Pines Winter Cup"></div>
-        <div class="space-y-2">
-            ${LBL('Timeline * (rough plan, subject to change)')}
-            <p class="text-[10px] text-white/50 -mt-1">One line per day. Say what happens, e.g. "Group games" then "Semis & Final (if you advance)". The real game times are set after the draw.</p>
-            ${[0, 1, 2, 3].map(i => { const d = days[i] || {}; const show = i < 2 || d.date; return `<div id="tt-day-${i}" class="space-y-2 bg-black/30 border border-white/10 rounded-xl p-2" style="${show ? '' : 'display:none'}">
-                <input id="tt-d${i}-date" type="date" class="${INPUT} !py-2" value="${esc(d.date || '')}">
-                <div class="grid grid-cols-2 gap-2"><div>${LBL('From')}<input id="tt-d${i}-time" type="time" class="${INPUT} !py-2 !px-2" value="${esc(d.time || '')}"></div><div>${LBL('Until')}<input id="tt-d${i}-until" type="time" class="${INPUT} !py-2 !px-2" value="${esc(d.until || '')}"></div></div>
-                <input id="tt-d${i}-label" class="${INPUT} !py-2" maxlength="40" value="${esc(d.label || '')}" placeholder="${['e.g. Group games', 'e.g. Semis & Final (if you advance)', 'e.g. Final', 'What happens this day'][i]}">
-            </div>`; }).join('')}
-            <button type="button" onclick="const h=[2,3].find(i=>document.getElementById('tt-day-'+i).style.display==='none'); if(h!==undefined) document.getElementById('tt-day-'+h).style.display=''" class="text-[11px] font-bold text-[#00F296]">+ Add another day</button>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-            <div class="min-w-0">${LBL('Park *')}<input id="tt-park" class="${INPUT}" value="${esc(pre.park || '')}" placeholder="Sabal Pines Park"></div>
-            <div class="min-w-0">${LBL('City *')}<input id="tt-city" class="${INPUT}" value="${esc(pre.city || '')}" placeholder="Coral Springs, FL"></div>
-        </div>
-        <div>${LBL('Format')}${seg('tt-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'].map(s => [s, s]), pre.format || '8v8')}</div>
-        <div class="grid grid-cols-2 gap-3">
-            <div>${LBL('Min teams')}${numSel('tt-minteams', 2, 8, pre.minTeams || 4)}</div>
-            <div>${LBL('Max teams')}${numSel('tt-maxteams', 2, 8, pre.maxTeams || 8)}</div>
-        </div>
-        <p class="text-[10px] text-white/50 -mt-2">Want exactly 4? Put 4 and 4.</p>
-        <div class="grid grid-cols-2 gap-3">
-            <div>${LBL('Min players per team')}${numSel('tt-minpl', 1, 30, pre.minPlayers || +per || 7)}</div>
-            <div>${LBL('Max players per team')}${numSel('tt-maxpl', 1, 30, pre.maxPlayers || (+per || 7) + 5)}</div>
-        </div>
-        <div>${LBL('Entry fee per team ($, 0 = free)')}<input id="tt-price" inputmode="decimal" class="${INPUT}" value="${esc(pre.priceCents ? pre.priceCents / 100 : '')}" placeholder="0"></div>
-        ${comms.length ? `<div>${LBL('🏘️ Post in a community (optional)')}<select id="tt-comm" class="${INPUT}"><option value="">No community</option>${comms.map(id => `<option value="${esc(id)}" ${pre.communityId === id ? 'selected' : ''}>${esc(cache[id].name || 'Community')}</option>`).join('')}</select></div>` : ''}
-        <div>${LBL('Description / rules')}<textarea id="tt-desc" rows="3" maxlength="800" class="${INPUT}" placeholder="e.g. 25-minute games. Bring light and dark shirts.">${esc(pre.description || '')}</textarea></div>
-        <p class="text-[10px] text-white/50">Prizes are added from the tournament's Admin tab.</p>
-        <button onclick="saveTourney('${jsq(pre.id || '')}')" class="${BTN} w-full py-3 text-sm">${editing ? 'Save changes' : 'Create tournament'}</button>`);
+    F.pre = pre || {};
+    F.step = 1;
+    F.basics = {};
+    F.days = (pre.days || []).length ? daysOf(pre).map(d => ({ ...d })) : [];
+    drawCreate();
 };
+function drawCreate() {
+    const pre = F.pre, b = F.basics, editing = !!pre.id;
+    const v = (k, d = '') => b[k] !== undefined ? b[k] : (pre[k] !== undefined ? pre[k] : d);
+    const title = editing ? '✏️ Edit tournament' : `${TROPHY(22)} Create Tournament`;
+    const dots = `<div class="flex items-center justify-center gap-2 text-[10px] font-black">
+        <span class="px-2.5 py-1 rounded-full ${F.step === 1 ? 'bg-amber-400 text-slate-950' : 'bg-white/10 text-white/60'}">1 · Basics</span>
+        <span class="text-white/30">›</span>
+        <span class="px-2.5 py-1 rounded-full ${F.step === 2 ? 'bg-amber-400 text-slate-950' : 'bg-white/10 text-white/60'}">2 · Schedule</span></div>`;
+    if (F.step === 1) {
+        const roles = window.myCommunityRoles || {}, cache = window.communitiesCache || {};
+        const comms = Object.keys(roles).filter(id => roles[id] === 'admin' && cache[id]);
+        const per = String(v('format', '8v8')).split('v')[0];
+        const payOn = v('requirePay', false) === true;
+        sheet('tt-create', title, `${dots}
+            <div>${LBL('Name *')}<input id="tt-name" class="${INPUT}" maxlength="50" value="${esc(v('name'))}" placeholder="e.g. Sabal Pines Winter Cup"></div>
+            <div class="grid grid-cols-[1fr_120px] gap-3">
+                <div class="min-w-0">${LBL('Starting date *')}<input id="tt-start-date" type="date" class="${INPUT}" value="${esc(v('date'))}"></div>
+                <div class="min-w-0">${LBL('Starting time *')}<input id="tt-start-time" type="time" class="${INPUT} !px-2" value="${esc(v('time'))}"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div class="min-w-0">${LBL('Park *')}<input id="tt-park" class="${INPUT}" value="${esc(v('park'))}" placeholder="Sabal Pines Park"></div>
+                <div class="min-w-0">${LBL('City *')}<input id="tt-city" class="${INPUT}" value="${esc(v('city'))}" placeholder="Coral Springs, FL"></div>
+            </div>
+            <div>${LBL('Format')}${seg('tt-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'].map(x => [x, x]), v('format', '8v8'))}</div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>${LBL('Min teams')}${numSel('tt-minteams', 2, 8, v('minTeams', 4))}</div>
+                <div>${LBL('Max teams')}${numSel('tt-maxteams', 2, 8, v('maxTeams', 8))}</div>
+            </div>
+            <p class="text-[10px] text-white/50 -mt-2">Want exactly 4? Put 4 and 4. The format comes from how many teams register: 4 = knockout, 6 = 2 groups of 3, 8 = quarter-finals.</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div>${LBL('Min players per team')}${numSel('tt-minpl', 1, 30, v('minPlayers', +per || 7))}</div>
+                <div>${LBL('Max players per team')}${numSel('tt-maxpl', 1, 30, v('maxPlayers', (+per || 7) + 5))}</div>
+            </div>
+            <div>${LBL('Entry fee per team ($, 0 = free)')}<input id="tt-price" inputmode="decimal" class="${INPUT}" value="${esc(b.price !== undefined ? b.price : (pre.priceCents ? pre.priceCents / 100 : ''))}" placeholder="0"></div>
+            <label class="flex items-center gap-3 bg-black/40 border ${payOn ? 'border-amber-400/70' : 'border-white/10'} rounded-2xl p-3 cursor-pointer">
+                <div class="flex-1"><div class="text-sm font-black">💵 Must pay to be confirmed</div><div class="text-[11px] text-white/55">Teams show as "Pending payment" until you mark them paid. Only paid teams go into the draw.</div></div>
+                <input id="tt-reqpay" type="checkbox" class="w-6 h-6 accent-amber-400" ${payOn ? 'checked' : ''}>
+            </label>
+            ${comms.length ? `<div>${LBL('🏘️ Post in a community (optional)')}<select id="tt-comm" class="${INPUT}"><option value="">No community</option>${comms.map(id => `<option value="${esc(id)}" ${v('communityId') === id ? 'selected' : ''}>${esc(cache[id].name || 'Community')}</option>`).join('')}</select></div>` : ''}
+            <div>${LBL('Description / rules')}<textarea id="tt-desc" rows="3" maxlength="800" class="${INPUT}" placeholder="e.g. 25-minute games. Bring light and dark shirts.">${esc(v('description'))}</textarea></div>
+            <button onclick="ttCreateNext()" class="${GOLDBTN} w-full py-3.5 text-sm">Next: proposed schedule ›</button>`);
+        return;
+    }
+    // page 2: the proposed schedule
+    if (!F.days.length) F.days = [{ date: b.date, time: b.time, until: '', label: '' }];
+    const dayCard = (d, i) => `<div class="relative bg-black/45 border-2 ${i === 0 ? 'border-amber-400/70' : 'border-white/15'} rounded-3xl p-4 space-y-3">
+        <div class="flex items-center justify-between"><div class="text-base font-black text-amber-200">Day ${i + 1}</div>
+            ${i > 0 ? `<button onclick="ttDayRemove(${i})" class="text-[11px] font-bold text-red-400">Remove</button>` : ''}</div>
+        <div>${LBL('Date')}<input type="date" class="${INPUT}" value="${esc(d.date || '')}" oninput="ttDaySet(${i},'date',this.value)"></div>
+        <div class="grid grid-cols-2 gap-3">
+            <div class="min-w-0">${LBL('Starts')}<input type="time" class="${INPUT} !px-2" value="${esc(d.time || '')}" oninput="ttDaySet(${i},'time',this.value)"></div>
+            <div class="min-w-0">${LBL('Ends')}<input type="time" class="${INPUT} !px-2" value="${esc(d.until || '')}" oninput="ttDaySet(${i},'until',this.value)"></div>
+        </div>
+        <div>${LBL('What happens (optional)')}<input class="${INPUT}" maxlength="40" value="${esc(d.label || '')}" oninput="ttDaySet(${i},'label',this.value)" placeholder="${['e.g. Group games / Semi-finals', 'e.g. Final (if you advance)', 'e.g. Final', 'What happens this day'][Math.min(i, 3)]}"></div>
+    </div>`;
+    sheet('tt-create', title, `${dots}
+        <div class="text-center"><div class="text-lg font-black">📅 Proposed schedule</div><div class="text-[11px] text-white/55">Subject to change. The exact game times are set after the draw.</div></div>
+        ${F.days.map(dayCard).join('')}
+        ${F.days.length < 6 ? `<button onclick="ttDayAdd()" class="w-full py-5 rounded-3xl border-2 border-dashed border-amber-400 bg-amber-400/10 hover:bg-amber-400/20 text-amber-200 text-lg font-black">＋ Add Day ${F.days.length + 1}</button>` : ''}
+        <div class="grid grid-cols-[96px_1fr] gap-2 pt-1">
+            <button onclick="ttCreateBack()" class="${DARK} py-3">‹ Back</button>
+            <button onclick="saveTourney('${jsq(pre.id || '')}')" class="${GOLDBTN} py-3 text-sm">${editing ? 'Save changes' : 'Create tournament'}</button>
+        </div>`);
+}
+window.ttCreateNext = function () {
+    const b = {
+        name: val('tt-name'), date: val('tt-start-date'), time: val('tt-start-time'), park: val('tt-park'), city: val('tt-city'),
+        format: segVal('tt-format') || '8v8', minTeams: num('tt-minteams', 4), maxTeams: num('tt-maxteams', 8), minPlayers: num('tt-minpl', 7), maxPlayers: num('tt-maxpl', 12),
+        price: val('tt-price'), requirePay: !!document.getElementById('tt-reqpay')?.checked, communityId: val('tt-comm'), description: val('tt-desc'),
+    };
+    if (!b.name || !b.date || !b.time || !b.park || !b.city) { toast('Fill in the name, starting date and time, park and city.', 'error'); return; }
+    if (b.minTeams > b.maxTeams) { toast("Min teams can't be more than max teams.", 'error'); return; }
+    if (b.minPlayers > b.maxPlayers) { toast("Min players can't be more than max players.", 'error'); return; }
+    // Day 1 follows the starting date / time (until they change it on page 2)
+    const prev = F.basics;
+    F.basics = b;
+    if (F.days.length && (!F.days[0].date || F.days[0].date === (prev.date || F.pre.date))) F.days[0].date = b.date;
+    if (F.days.length && (!F.days[0].time || F.days[0].time === (prev.time || F.pre.time))) F.days[0].time = b.time;
+    F.step = 2;
+    drawCreate();
+};
+window.ttCreateBack = () => { F.step = 1; drawCreate(); };
+window.ttDaySet = (i, k, x) => { if (F.days[i]) F.days[i][k] = x; };
+window.ttDayAdd = () => {
+    const last = F.days[F.days.length - 1] || {};
+    let date = '';
+    if (last.date) { const [y, m, d] = last.date.split('-').map(Number); const n = new Date(y, m - 1, d + 7); date = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; }
+    F.days.push({ date, time: last.time || '', until: last.until || '', label: '' });
+    drawCreate();
+    const box = document.querySelector('#tt-create > div'); if (box) box.scrollTop = box.scrollHeight;
+};
+window.ttDayRemove = (i) => { F.days.splice(i, 1); drawCreate(); };
 window.saveTourney = async function (editId) {
-    const days = [0, 1, 2, 3].map(i => ({ date: val(`tt-d${i}-date`), time: val(`tt-d${i}-time`), until: val(`tt-d${i}-until`), label: val(`tt-d${i}-label`) })).filter(d => d.date)
-        .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-    const name = val('tt-name'), park = val('tt-park'), city = val('tt-city');
-    if (!name || !days.length || !days[0].time || !park || !city) { toast('Fill in the name, at least one day with its start time, the park and the city.', 'error'); return; }
-    const minTeams = num('tt-minteams', 4), maxTeams = num('tt-maxteams', 8), minPlayers = num('tt-minpl', 7), maxPlayers = num('tt-maxpl', 12);
-    if (minTeams > maxTeams) { toast('Min teams can\'t be more than max teams.', 'error'); return; }
-    if (minPlayers > maxPlayers) { toast('Min players can\'t be more than max players.', 'error'); return; }
-    const cid = val('tt-comm');
-    const fields = { name, date: days[0].date, time: days[0].time, days, park, city, location: `${park}, ${city}`, format: segVal('tt-format') || '8v8',
-        minTeams, maxTeams, minPlayers, maxPlayers, priceCents: Math.round((parseFloat(val('tt-price').replace(',', '.')) || 0) * 100), description: val('tt-desc'),
+    const b = F.basics;
+    const days = F.days.filter(d => d.date).map(d => ({ date: d.date, time: d.time || '', until: d.until || '', label: String(d.label || '').trim() }))
+        .sort((x, y) => `${x.date} ${x.time}`.localeCompare(`${y.date} ${y.time}`));
+    if (!days.length || !days[0].time) { toast('Day 1 needs a date and a start time.', 'error'); return; }
+    const cid = b.communityId || '';
+    const fields = { name: b.name, date: days[0].date, time: days[0].time, days, park: b.park, city: b.city, location: `${b.park}, ${b.city}`, format: b.format,
+        minTeams: b.minTeams, maxTeams: b.maxTeams, minPlayers: b.minPlayers, maxPlayers: b.maxPlayers,
+        priceCents: Math.round((parseFloat(String(b.price || '').replace(',', '.')) || 0) * 100), requirePay: !!b.requirePay, description: b.description,
         communityId: cid, communityName: cid ? (((window.communitiesCache || {})[cid] || {}).name || '') : '', updatedAt: serverTimestamp() };
+    if (fields.requirePay && !fields.priceCents) fields.requirePay = false;
     try {
         if (editId) {
             await change(editId, (t) => { if ((t.teams || []).length > fields.maxTeams) throw new Error('TOO_MANY'); Object.assign(t, fields); });
@@ -428,7 +490,7 @@ window.openJoinTourney = function () {
     const mine = myCaptainTeams().filter(x => !(t.teamIds || []).includes(x.id));
     if (!mine.length) { toast(myCaptainTeams().length ? 'Your teams are already in.' : 'You need to be the captain of a team. Make one in the Teams tab.', 'error'); return; }
     sheet('tt-join', `Register for ${esc(t.name)}`, `
-        ${+t.priceCents ? `<p class="text-xs text-white/70">Entry fee: <b>${money(t.priceCents)}</b> per team. Pay the organizer; they mark you as paid.</p>` : ''}
+        ${+t.priceCents ? `<p class="text-xs text-white/70">Entry fee: <b>${money(t.priceCents)}</b> per team. Pay the organizer; they mark you as paid.${t.requirePay ? ' <b class="text-amber-300">Your team is only confirmed once you\'ve paid.</b>' : ''}</p>` : ''}
         <p class="text-xs text-white/70">Pick your team, then your players (${+t.minPlayers || 1}–${+t.maxPlayers || 30} per team).</p>
         <div class="space-y-2">${mine.map(x => `<button onclick="openTourneyPlayers('${jsq(x.id)}', true)" class="w-full flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl border border-white/10 text-left">${teamLogoHtml(x, 36)}<span class="flex-1 text-sm font-black">${esc(x.name)}</span><span class="text-[11px] text-white/50">${(x.members || []).length} players ›</span></button>`).join('')}</div>`);
 };
@@ -543,16 +605,19 @@ window.toggleTourneyPaid = async function (teamId) {
 // ---------------------------------------------------------------- the steps (organizer)
 window.tourneyDraw = async function (redo) {
     const t0 = TT.open; if (!t0) return;
-    const n = (t0.teams || []).length;
-    if (n < 2) { toast('At least 2 teams need to be registered.', 'error'); return; }
+    // "Must pay to be confirmed": only paid teams go into the draw; the others are taken out.
+    const pool = (t0.teams || []).filter(x => !t0.requirePay || x.paid);
+    const n = pool.length, unpaid = (t0.teams || []).filter(x => !x.paid);
+    if (n < 2) { toast(t0.requirePay ? 'At least 2 teams need to be paid (confirmed).' : 'At least 2 teams need to be registered.', 'error'); return; }
     if (!redo) {
         const short = n < minTeamsOf(t0) ? `\n\nOnly ${n} teams (you wanted at least ${minTeamsOf(t0)}).` : '';
-        const unpaid = (t0.teams || []).filter(x => !x.paid).length;
-        if (!confirm(`Close registration and do the draw with ${n} teams?\n\n${PLAN_TEXT[planFor(n)]}${short}${unpaid ? `\n\n${unpaid} team${unpaid === 1 ? " hasn't" : "s haven't"} paid yet.` : ''}`)) return;
+        const money = !unpaid.length ? '' : t0.requirePay ? `\n\nNot paid, so they're taken OUT: ${unpaid.map(x => x.name).join(', ')}.` : `\n\n${unpaid.length} team${unpaid.length === 1 ? " hasn't" : "s haven't"} paid yet.`;
+        if (!confirm(`Close registration and do the draw with ${n} teams?\n\n${PLAN_TEXT[planFor(n)]}${short}${money}`)) return;
     }
     try {
         await change(t0.id, (t) => {
             if (!['signup', 'draw'].includes(t.status)) return false;
+            if (t.requirePay) t.teams = t.teams.filter(x => x.paid);
             const b = buildMatches(t.teams.map(x => x.teamId));
             t.plan = b.plan; t.matches = b.matches; t.status = 'draw';
         });
@@ -859,7 +924,7 @@ function drawPage() {
             <div class="flex items-center gap-2"><i class="fa-solid fa-location-dot text-[#00F296] w-4"></i>${esc(t.location || '')}</div>
             <div class="flex items-center gap-2"><i class="fa-solid fa-users text-[#00F296] w-4"></i>${esc(t.format || '')} · ${min === max ? max : `${min} to ${max}`} teams · ${n} registered</div>
             <div class="flex items-center gap-2"><i class="fa-solid fa-user-group text-[#00F296] w-4"></i>${+t.minPlayers || 1}–${+t.maxPlayers || 30} players per team</div>
-            <div class="flex items-center gap-2"><i class="fa-solid fa-circle-dollar-to-slot text-[#00F296] w-4"></i>${+t.priceCents ? `${money(t.priceCents)} per team` : 'Free'}</div>
+            <div class="flex items-center gap-2"><i class="fa-solid fa-circle-dollar-to-slot text-[#00F296] w-4"></i>${+t.priceCents ? `${money(t.priceCents)} per team${t.requirePay ? ' · <b class="text-amber-300">must pay to be confirmed</b>' : ''}` : 'Free'}</div>
             ${t.communityId ? `<div class="flex items-center gap-2"><i class="fa-solid fa-people-roof text-[#00F296] w-4"></i>${esc(t.communityName || 'Community')}</div>` : ''}
             <div class="flex items-start gap-2"><i class="fa-solid fa-sitemap text-[#00F296] w-4 mt-0.5"></i><span>${t.status === 'signup' ? `${n >= 2 ? `With ${n} teams: ${esc(PLAN_TEXT[planFor(n)])}` : 'The format comes from how many teams register (4 = knockout, 6 = 2 groups of 3, 8 = quarter-finals).'}` : esc(PLAN_TEXT[plan])}</span></div>
         </div>
@@ -873,7 +938,7 @@ function drawPage() {
             <div class="flex items-center gap-3">
                 <button onclick="window.openTeam && openTeam('${jsq(x.teamId)}')" class="shrink-0">${teamLogoHtml(x, 40)}</button>
                 <div class="flex-1 min-w-0"><div class="text-sm font-black truncate">${esc(x.name)}${t.championId === x.teamId ? ' 🏆' : ''}</div>
-                    <div class="text-[11px] text-white/55">${r.length} players${x.joinedByName ? ' · captain ' + esc(x.joinedByName) : ''}${+t.priceCents ? ` · <span class="${x.paid ? 'text-[#00F296]' : 'text-amber-300'}">${x.paid ? 'Paid' : 'Not paid yet'}</span>` : ''}</div></div>
+                    <div class="text-[11px] text-white/55">${r.length} players${x.joinedByName ? ' · captain ' + esc(x.joinedByName) : ''}${+t.priceCents ? ` · <span class="${x.paid ? 'text-[#00F296]' : 'text-amber-300'}">${x.paid ? (t.requirePay ? '✅ Confirmed (paid)' : 'Paid') : (t.requirePay ? '⏳ Pending payment' : 'Not paid yet')}</span>` : ''}</div></div>
                 ${boss && +t.priceCents ? `<button onclick="toggleTourneyPaid('${jsq(x.teamId)}')" class="${x.paid ? DARK : BTN} shrink-0">${x.paid ? 'Undo paid' : '💵 Paid'}</button>` : ''}
             </div>
             ${r.length ? `<div class="flex flex-wrap gap-1">${r.map(p => `<span class="text-[10px] font-bold rounded-full px-2 py-1 bg-white/10">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name || 'Player')}${p.uid && window.badgeHtml ? window.badgeHtml(p.uid) : ''}</span>`).join('')}</div>` : ''}

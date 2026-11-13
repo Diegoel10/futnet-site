@@ -350,9 +350,14 @@ window.mgrDelBook = async (id) => { if (!confirm('Delete this line?')) return; c
 async function settings() {
     loading();
     const [c, del, g] = await Promise.all([call('config').catch(() => ({ realOrganizers: [], names: {} })), call('deleted').catch(() => ({ list: [] })), call('gate').catch(() => ({ creatorsOnly: false, creators: [], names: {} }))]);
+    const blk = await call('blocked').catch(() => ({ list: [] }));
     S.orgs = c.realOrganizers;
     S.gate = g;
-    body(`<div class="card space-y-3 ${g.creatorsOnly ? 'border-amber-400/60' : ''}">
+    body(`<div class="card space-y-2 ${blk.list.length ? 'border-red-500/50' : ''}">
+            <div class="lbl">🛡️ Blocked changes (someone tried to change a team or tournament that isn't theirs, and it was put back)</div>
+            ${blk.list.map(x => `<div class="text-sm flex items-start gap-2 py-1 border-b border-white/5"><button onclick="mgrPlayer('${jsq(x.uid)}')" class="font-bold text-[#00F296] shrink-0">${esc(x.who || x.uid)}</button><span class="flex-1 text-white/80">${esc(x.kind)} <b>${esc(x.name)}</b>: ${esc(x.why)}</span><span class="text-[11px] text-white/45 shrink-0">${x.at ? new Date(x.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span></div>`).join('') || '<p class="text-sm text-white/50">Nothing blocked yet.</p>'}
+        </div>
+        <div class="card space-y-3 ${g.creatorsOnly ? 'border-amber-400/60' : ''}">
             <div class="flex items-center justify-between gap-3">
                 <div><div class="font-black">🧪 Beta mode: only approved people create</div>
                     <div class="text-[11px] text-white/55">When ON, other players can't create games, VS matches, tournaments or communities. They see "FutNet is in beta, message the admin".</div></div>

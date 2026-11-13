@@ -1412,15 +1412,16 @@ window.openVsLivestream = function () {
     const m = V.open; if (!m) return;
     sheet('vs-ls', '🔴 Livestream this match', `
         <ol class="text-[11px] text-white/70 space-y-1 list-decimal pl-4">
-            <li>Start the live on <b>YouTube</b> or <b>Facebook</b> (camera like XbotGo, or the app). On Facebook, set it to <b>Public</b>.</li>
-            <li>Open the live video and tap <b>Share → Copy link</b>.</li>
+            <li><b>XbotGo:</b> start the live in the XbotGo app and copy its watch link (cloud.xbotgo.net/live?userId=…). We remember it for next time.</li>
+            <li><b>YouTube / Facebook:</b> open the live video, tap <b>Share → Copy link</b>. On Facebook, set it to <b>Public</b>.</li>
             <li>Paste it here.</li></ol>
-        <input id="vls-url" type="url" inputmode="url" class="${INPUT}" placeholder="YouTube or Facebook live link">
+        <input id="vls-url" type="url" inputmode="url" class="${INPUT}" placeholder="XbotGo, YouTube or Facebook live link" value="${esc(window.liveLastLink ? window.liveLastLink() : '')}">
         <button onclick="startVsLivestream()" class="w-full bg-red-600 text-white font-black py-3 rounded-xl text-sm">Go live</button>`);
 };
 window.startVsLivestream = async function () {
     const url = val('vls-url'); const src = lsSource(url);
     if (!src) { toast(liveLinkProblem(url), 'error'); return; }
+    window.liveRememberLink && window.liveRememberLink(url, src);
     try {
         await changeMatch(V.open.id, (x) => { x._edit = { livestream: { url, ...src, status: 'live', startedAt: Date.now(), startedBy: myUid(), startedByName: myName() } }; });
         document.getElementById('vs-ls')?.remove(); V.tab = 'live'; toast("You're live! 🔴 Everyone in the match was notified."); drawPage();
@@ -1442,7 +1443,7 @@ function liveTabHtml(m, boss) {
     return `<div class="space-y-3">
         <div class="flex items-center gap-2">${on ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">● LIVE</span>' : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
             <span class="flex-1 text-xs text-white/60 truncate">${on ? `Streaming now · ${esc(ls.startedByName || '')}` : 'The livestream has ended. Watch the replay.'}</span>
-            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : 'YouTube'}</a></div>
+            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : ls.provider === 'xbotgo' ? 'XbotGo' : 'YouTube'}</a></div>
         ${liveSlotHtml(ls)}
         ${liveScoreHtml(m)}
         ${boss ? `<div class="flex gap-2">${on ? `<button onclick="endVsLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>`

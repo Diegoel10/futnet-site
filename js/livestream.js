@@ -44,12 +44,24 @@ export function facebookVideoUrl(url) {
     const v = u.searchParams.get('v');
     return `https://www.facebook.com${p}${v ? '?v=' + encodeURIComponent(v) : ''}`;
 }
-/** What to play from a pasted link: YouTube or Facebook (or null). */
+/** An XbotGo watch link (cloud.xbotgo.net/live?userId=…), cleaned up, or ''. The camera's own page plays the stream. */
+export function xbotgoUrl(url) {
+    const s = String(url || '').trim();
+    let u;
+    try { u = new URL(s.startsWith('http') ? s : 'https://' + s); } catch (e) { return ''; }
+    if (!/(^|\.)xbotgo\.(net|com)$/i.test(u.hostname)) return '';
+    if (!/\/live/i.test(u.pathname) || !u.searchParams.get('userId')) return '';
+    u.protocol = 'https:';
+    return u.toString();
+}
+/** What to play from a pasted link: YouTube, Facebook or XbotGo (or null). */
 export function liveSource(url) {
     const yt = youTubeId(url);
     if (yt) return { provider: 'youtube', videoId: yt, embedUrl: '' };
     const fb = facebookVideoUrl(url);
     if (fb) return { provider: 'facebook', videoId: '', embedUrl: `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(fb)}&show_text=false&autoplay=true&width=1280` };
+    const xb = xbotgoUrl(url);
+    if (xb) return { provider: 'xbotgo', videoId: '', embedUrl: xb };
     return null;
 }
 window.liveSource = liveSource;
@@ -57,7 +69,8 @@ window.liveSource = liveSource;
 export function liveLinkProblem(url) {
     if (/youtube\.com\/(@|c\/|channel\/)/i.test(url)) return "That's a YouTube channel link. Open the live video itself and copy its link (Share → Copy link).";
     if (/facebook\.com|fb\.watch/i.test(url)) return "That's not a Facebook video link. Open the live video on Facebook, tap Share → Copy link, and paste that. (Set the live video to Public so everyone can watch.)";
-    return 'Paste a YouTube or Facebook video link (like youtube.com/live/…, youtu.be/…, or facebook.com/…/videos/…).';
+    if (/xbotgo/i.test(url)) return "That's not an XbotGo watch link. In the XbotGo app, start the live and copy the watch link (it looks like cloud.xbotgo.net/live?userId=…).";
+    return 'Paste an XbotGo, YouTube or Facebook live link (like cloud.xbotgo.net/live?userId=…, youtube.com/live/…, or facebook.com/…/videos/…).';
 }
 window.liveLinkProblem = liveLinkProblem;
 const liveKey = (ls) => (ls && (ls.videoId || ls.embedUrl)) || '';
@@ -74,11 +87,11 @@ window.openStartLivestream = function (eventId) {
         <div class="flex items-center justify-between"><h4 class="text-sm font-black">🔴 Start livestream</h4>
             <button onclick="document.getElementById('livestream-modal').remove()" class="text-white/50 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
         <ol class="text-[11px] text-white/70 space-y-1 list-decimal pl-4">
-            <li>Start the live on <b>YouTube</b> or <b>Facebook</b> (camera like XbotGo, or the app). On Facebook, set it to <b>Public</b>.</li>
-            <li>Open the live video and tap <b>Share → Copy link</b>.</li>
+            <li><b>XbotGo:</b> start the live in the XbotGo app and copy its watch link (cloud.xbotgo.net/live?userId=…). It's the same link every time, so we remember it for you.</li>
+            <li><b>YouTube / Facebook:</b> open the live video, tap <b>Share → Copy link</b>. On Facebook, set it to <b>Public</b>.</li>
             <li>Paste it here.</li>
         </ol>
-        <input id="ls-url" type="url" inputmode="url" placeholder="YouTube or Facebook live link" autocomplete="off"
+        <input id="ls-url" type="url" inputmode="url" placeholder="XbotGo, YouTube or Facebook live link" autocomplete="off" value="${esc(lastLink())}"
             class="w-full bg-black/60 border border-red-500/50 rounded-xl px-3 py-2.5 text-white text-base sm:text-sm focus:outline-none focus:border-red-400">
         <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
             <input id="ls-notify" type="checkbox" checked class="w-5 h-5 accent-red-500 shrink-0">
@@ -90,10 +103,15 @@ window.openStartLivestream = function (eventId) {
     setTimeout(() => f.querySelector('#ls-url')?.focus(), 50);
 };
 
+// The XbotGo watch link doesn't change, so it's filled in next time (this device only).
+const lastLink = () => { try { return localStorage.getItem('futnet_xbotgo_link') || ''; } catch (e) { return ''; } };
+window.liveLastLink = lastLink;
+window.liveRememberLink = (url, src) => { try { if (src && src.provider === 'xbotgo') localStorage.setItem('futnet_xbotgo_link', url); } catch (e) { /* ignore */ } };
 window.startLivestream = async function (eventId) {
     const url = (document.getElementById('ls-url')?.value || '').trim();
     const src = liveSource(url);
     if (!src) { toast(liveLinkProblem(url), 'error'); return; }
+    window.liveRememberLink(url, src);
     const notify = document.getElementById('ls-notify') ? document.getElementById('ls-notify').checked : true;
     const b = document.getElementById('ls-go'); if (b) { b.disabled = true; b.textContent = 'Going live…'; }
     const me = window.currentUser;
@@ -185,9 +203,10 @@ export function renderLiveTab(ev, isAdmin) {
             ${live ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span> LIVE</span>'
                 : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
             <span class="flex-1 text-xs text-white/60 truncate">${live ? `Streaming now · started by ${esc(ls.startedByName || 'an admin')}` : 'The livestream has ended. Watch the replay.'}</span>
-            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : 'YouTube'}</a>
+            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : ls.provider === 'xbotgo' ? 'XbotGo' : 'YouTube'}</a>
         </div>
         ${liveSlotHtml(ls)}
+        ${ls.provider === 'xbotgo' ? `<a href="${esc(ls.url)}" target="_blank" rel="noopener" class="block text-center text-[11px] text-white/60">Video not showing? <b class="text-white underline">Tap here to watch on XbotGo</b></a>` : ''}
         ${scoreHtml(ev)}
         ${isAdmin ? `<div class="flex gap-2">${live ? `<button onclick="endLivestream('${jsArg(ev.id)}')" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>`
             : `<button onclick="openStartLivestream('${jsArg(ev.id)}')" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">Start a new livestream</button>

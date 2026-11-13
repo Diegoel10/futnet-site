@@ -117,8 +117,45 @@ async function updateTeamToolFirestore(event) {
         if (Array.isArray(arr)) arr.forEach(p => { if (p && !safeAvatar(p.avatar)) delete p.avatar; });
     });
 
-    const res = await mutateEvent(event.id, (draft) => { Object.assign(draft, teamFields); });
-    if (res.ok) window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
+    // Only what THIS person changed is written (team by team), on top of the freshest copy.
+    // Before, the whole teams list was written from this phone's copy, so two people editing at once
+    // (two captains, or a captain and the organizer) undid each other's changes and re-pinged players.
+    const base = (window.__teamBase || {})[event.id];
+    const res = await mutateEvent(event.id, (draft) => {
+        if (!base) { Object.assign(draft, teamFields); return; }
+        // (photos don't count: the builder adds fresh ones while drawing)
+        const norm = (v) => JSON.stringify(v === undefined ? null : v, (key, x) => key === 'avatar' ? undefined : x);
+        const sameJ = (a, b) => norm(a) === norm(b);
+        const mineTeams = new Set();
+        TEAM_FIELDS.forEach(k => {
+            const mine = teamFields[k] || {}, was = base[k] || {};
+            const out = { ...(draft[k] || {}) };
+            new Set([...Object.keys(mine), ...Object.keys(was)]).forEach(i => {
+                if (sameJ(mine[i], was[i])) return;   // I didn't touch this team: keep whatever is there now
+                if (mine[i] === undefined) delete out[i]; else out[i] = mine[i];
+                if (k === 'teamAssignments') mineTeams.add(String(i));
+            });
+            draft[k] = out;
+        });
+        // A player I put on my team comes off any other team (no one on two teams).
+        const ta = draft.teamAssignments || {};
+        const mineUids = new Set([...mineTeams].flatMap(i => (ta[i] || []).map(p => String(p && p.uid))));
+        Object.keys(ta).forEach(i => { if (!mineTeams.has(String(i)) && Array.isArray(ta[i])) ta[i] = ta[i].filter(p => !mineUids.has(String(p && p.uid))); });
+    });
+    if (res.ok) {
+        rememberTeamBase(res.event || event);
+        window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
+    }
+}
+const TEAM_FIELDS = ['teamAssignments', 'teamNames', 'teamColors', 'teamCaptains', 'teamFormations', 'teamSlots', 'teamSlotsSig'];
+/** What the teams looked like on the server when this person last saw them (to tell their changes apart). */
+function rememberTeamBase(ev) {
+    if (!ev || !ev.id) return;
+    window.__teamBase = window.__teamBase || {};
+    const b = {};
+    TEAM_FIELDS.forEach(k => { b[k] = JSON.parse(JSON.stringify(ev[k] || {})); });
+    Object.keys(b.teamAssignments).forEach(k => { const a = b.teamAssignments[k]; if (Array.isArray(a)) a.forEach(p => { if (p && !safeAvatar(p.avatar)) delete p.avatar; }); });
+    window.__teamBase[ev.id] = b;
 }
 
 // How many spots the pitch has for a team (players past that are on the bench).
@@ -301,6 +338,7 @@ window.openTeamMakingModal = function(eventId) {
     window._forceCapsTab = false;
     window.currentTeamBuildingEvent = event;
 
+    rememberTeamBase(event);
     window.teamAssignments[event.id] = event.teamAssignments || {};
     window.teamNames[event.id] = event.teamNames || {};
     window.teamColors[event.id] = event.teamColors || {};
@@ -899,7 +937,8 @@ export function renderTeamToolTab(event) {
                         <p class="text-[10px] text-white/60 font-medium leading-tight">Format: ${format}</p>
                     </div>
                 </div>
-                ${admin ? `<div>
+                ${admin ? `<div class="flex items-center gap-1.5">
+                    ${window.teamsSetButtonHtml ? window.teamsSetButtonHtml(event, event.teamsSet && event.teamsSet.at ? 'bg-black/60 border border-white/20 text-white/80 font-bold px-2.5 py-1.5 rounded-xl text-[11px]' : 'bg-[#00F296] text-slate-950 font-black px-2.5 py-1.5 rounded-xl text-[11px]') : ''}
                     <button data-action="build-teams" data-event-id="${event.id}" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-[11px] shadow-md transition flex items-center gap-1.5">
                         <i class="fa-solid fa-people-group text-xs pointer-events-none"></i> Build Teams
                     </button>

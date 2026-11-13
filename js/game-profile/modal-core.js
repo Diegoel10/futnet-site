@@ -13,6 +13,7 @@ import { renderTeamToolTab } from './team-tool.js';
 import './team-tool.js';
 import { resultsBannerHtml } from './results.js';
 import { renderLiveTab, adminLiveCardHtml, gameLiveBannerHtml, liveOf, isLive } from '../livestream.js';
+import { myTeamLineHtml } from './teams-set.js';
 
 
 // Roster entries saved without a real name show up as "Player". Look the name up from the player's
@@ -185,6 +186,7 @@ window.renderInfoTab = function(event) {
                 ${when ? `<div class="text-[12px] font-semibold text-white/65">See you ${escapeHtml(when)}</div>` : ''}
                 ${guests.length ? `<div class="text-[12px] font-bold text-[#00F296]">+ ${guests.map(g => escapeHtml(g.name || 'Guest')).join(', ')}</div>` : ''}
             </div>
+            ${myTeamLineHtml(event)}
             ${guestWaitHtml(event, userId)}
             <div class="grid ${allowPlusOnes ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5">
                 <button onclick="handleRSVPAction('${event.id}', 'cancel')" class="bg-red-500/20 text-red-400 font-black py-3 rounded-2xl text-xs border-2 border-red-500/70 uppercase tracking-wider">Cancel</button>

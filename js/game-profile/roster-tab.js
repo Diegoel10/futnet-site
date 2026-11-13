@@ -2,6 +2,7 @@
 import { escapeHtml, jsArg } from './event-store.js';
 import { creditGame, costCents, dollars, hydrateWaitBalances } from '../credits.js';
 import { waitingUids, offerEligible, startMsOf } from '../money-rules.js';
+import { teamsAreSet, teamsSetRosterHtml } from './teams-set.js';
 export function renderRosterTab(event) {
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
     
@@ -163,7 +164,9 @@ export function renderRosterTab(event) {
     const emptyMessage = window.activeRosterSubTab === 0 ? 'No confirmed players on the roster yet.' : (window.activeRosterSubTab === 1 ? 'Waitlist is empty.' : 'No declined responses.');
     const listContentHtml = currentList.length === 0 
         ? `<div class="text-center text-xs text-white/40 py-8">${emptyMessage}</div>`
-        : currentList.map(att => renderAttendeeCard(att)).join('');
+        : (window.activeRosterSubTab === 0 && teamsAreSet(event)
+            ? teamsSetRosterHtml(event, currentList, renderAttendeeCard)   // teams set: Confirmed is grouped by team
+            : currentList.map(att => renderAttendeeCard(att)).join(''));
 
     if (window.activeRosterSubTab === 1 && isAdminViewer && creditGame(event)) setTimeout(() => { try { hydrateWaitBalances(); } catch (e) {} }, 0);
     return `

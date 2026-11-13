@@ -14,6 +14,19 @@ export function findScorer(gName, people) {
 window.findScorer = findScorer;
 // js/leaderboard.js
 import { escapeHtml, jsArg, isOwnGoal } from './game-profile/event-store.js';
+// Goals and teams are saved a little differently by the website, the iPhone app and the Android app:
+//   a goal can be "John Z" or { name/scorer, uid/userId }; a match's teams can be by index (teamAIndex) or by name (teamA).
+// These read all of them, so stats come out the same whichever phone ran the game.
+const goalName = (g) => String((g && typeof g === 'object') ? (g.name || g.scorer || g.playerName || '') : (g || '')).trim();
+const goalUid = (g) => (g && typeof g === 'object') ? String(g.uid || g.userId || g.playerId || '') : '';
+const teamIdx = (idx, name, names, fb) => {
+    const n = Number(idx);
+    if (idx !== null && idx !== undefined && idx !== '' && Number.isInteger(n) && n >= 0 && n < names.length) return n;
+    const k = names.indexOf(name); if (k !== -1) return k;
+    const lower = names.map(x => String(x).toLowerCase().trim()).indexOf(String(name || '').toLowerCase().trim());
+    return lower !== -1 ? lower : fb;
+};
+const teamList = (ta, i) => { const l = ta ? (ta[i] !== undefined ? ta[i] : ta[String(i)]) : null; return Array.isArray(l) ? l.filter(Boolean) : []; };
 export function computePlayerStats(events) {
     const playerStats = {};
 
@@ -39,7 +52,8 @@ export function computePlayerStats(events) {
 
     events.forEach(ev => {
         const attendees = ev.attendees || [];
-        const teamsCount = ev.teamsCount || 3;
+        const teamsCount = parseInt((String(ev.teamsCount || '').match(/(\d+)/) || [])[1], 10) || 3;
+        const tNames = Array.from({ length: teamsCount }, (_, i) => (ev.teamNames && (ev.teamNames[i] || ev.teamNames[String(i)])) || `Team ${i + 1}`);
 
         attendees.forEach(att => {
             getPlayerRecord(att.name, att.avatar, att.uid, att.position);
@@ -47,6 +61,11 @@ export function computePlayerStats(events) {
 
         const matches = ev.matches || [];
         const everyone = [...attendees, ...Object.values(ev.teamAssignments || {}).flat().filter(Boolean)];
+        const scorerOf = (g) => {
+            const u = goalUid(g);
+            if (u) { const p = everyone.find(x => String(x.uid || x.userId || '') === u); return p ? { ...p, uid: u } : { uid: u, name: goalName(g) }; }
+            return findScorer(goalName(g), everyone);
+        };
         matches.forEach(m => {
             if (m.isFinished === false) return;
 
@@ -55,32 +74,20 @@ export function computePlayerStats(events) {
             const t1Score = t1Goals.length;
             const t2Score = t2Goals.length;
 
-            t1Goals.forEach(gName => {
-                if (isOwnGoal(gName)) return;   // own goals count for the team, not for anyone's stats
-                const matchedAtt = findScorer(gName, everyone);
-                const stats = getPlayerRecord(gName, matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
-                stats.goals += 1;
-            });
-
-            t2Goals.forEach(gName => {
-                if (isOwnGoal(gName)) return;
-                const matchedAtt = findScorer(gName, everyone);
-                const stats = getPlayerRecord(gName, matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
+            [...t1Goals, ...t2Goals].forEach(g => {
+                if (!g || isOwnGoal(g) || !goalName(g) && !goalUid(g)) return;   // own goals count for the team, not for anyone's stats
+                const matchedAtt = scorerOf(g);
+                const stats = getPlayerRecord(matchedAtt?.name || goalName(g), matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
                 stats.goals += 1;
             });
 
             const teamAssignments = ev.teamAssignments || {};
             const teamNames = ev.teamNames || {};
             
-            let t1Index = 0, t2Index = 1;
-            for (let i = 0; i < teamsCount; i++) {
-                const defName = teamNames[i] || `Team ${i + 1}`;
-                if (m.teamA === defName) t1Index = i;
-                if (m.teamB === defName) t2Index = i;
-            }
-
-            const t1Players = teamAssignments[t1Index] || [];
-            const t2Players = teamAssignments[t2Index] || [];
+            const t1Index = teamIdx(m.teamAIndex, m.teamA, tNames, 0), t2Index = teamIdx(m.teamBIndex, m.teamB, tNames, 1);
+            void teamNames;
+            const t1Players = teamList(teamAssignments, t1Index);
+            const t2Players = teamList(teamAssignments, t2Index);
 
             t1Players.forEach(p => {
                 if (p && p.name) {
@@ -103,7 +110,7 @@ export function computePlayerStats(events) {
             // Sessions played: everyone on a team of a finished session, once per session.
             const seen = new Set();
             for (let i = 0; i < teamsCount; i++) {
-                ((ev.teamAssignments && ev.teamAssignments[i]) || []).forEach(p => {
+                teamList(ev.teamAssignments, i).forEach(p => {
                     if (!p || !p.name) return;
                     const rec = getPlayerRecord(p.name, p.avatar, p.uid, p.position);
                     if (seen.has(rec)) return;
@@ -120,12 +127,7 @@ export function computePlayerStats(events) {
                 if (m.isFinished === false) return;
                 const t1Score = (m.team1Goals || []).length;
                 const t2Score = (m.team2Goals || []).length;
-                let t1Idx = 0, t2Idx = 1;
-                for (let i = 0; i < teamsCount; i++) {
-                    const cName = (ev.teamNames && ev.teamNames[i]) || `Team ${i + 1}`;
-                    if (m.teamA === cName) t1Idx = i;
-                    if (m.teamB === cName) t2Idx = i;
-                }
+                const t1Idx = teamIdx(m.teamAIndex, m.teamA, tNames, 0), t2Idx = teamIdx(m.teamBIndex, m.teamB, tNames, 1);
                 if (stats[t1Idx] && stats[t2Idx]) {
                     stats[t1Idx].gf += t1Score; stats[t1Idx].ga += t2Score;
                     stats[t2Idx].gf += t2Score; stats[t2Idx].ga += t1Score;
@@ -142,7 +144,7 @@ export function computePlayerStats(events) {
 
             const winningTeam = sortedTeams[0];
             if (winningTeam) {
-                const winningPlayers = (ev.teamAssignments && ev.teamAssignments[winningTeam.index]) || [];
+                const winningPlayers = teamList(ev.teamAssignments, winningTeam.index);
                 winningPlayers.forEach(p => {
                     if (p && p.name) {
                         const rec = getPlayerRecord(p.name, p.avatar, p.uid, p.position);
@@ -151,6 +153,20 @@ export function computePlayerStats(events) {
                 });
             }
         }
+    });
+
+    // A goal saved under a name that didn't match anyone in THAT game (spelled differently, nickname, the player
+    // wasn't on a team list that day…) became a separate name-only row, so the real player's total came out short.
+    // Put those goals back on the player with that name (only when exactly one player matches).
+    const withUid = Object.values(playerStats).filter(r => r.uid);
+    Object.keys(playerStats).forEach(k => {
+        const r = playerStats[k];
+        if (r.uid) return;
+        const owner = findScorer(r.name, withUid);
+        if (!owner || !owner.uid) return;
+        owner.goals += r.goals; owner.played += r.played; owner.matchesWon += r.matchesWon;
+        owner.sessionsWon += r.sessionsWon; owner.sessionsPlayed += r.sessionsPlayed;
+        delete playerStats[k];
     });
 
     return Object.values(playerStats);

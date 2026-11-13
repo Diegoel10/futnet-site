@@ -803,7 +803,7 @@
                 // Captains link (#event=ID&caps=1): open the team builder on Caps mode
                 const capsFlag = /[#&?]caps=1\b/.test(window.location.hash + window.location.search);
                 // Comment link (#event=ID&tab=comments): open the game on its Comments tab
-                const tabM = (window.location.hash + '&' + window.location.search).match(/[#&?]tab=(comments)\b/);
+                const tabM = (window.location.hash + '&' + window.location.search).match(/[#&?]tab=(comments|roster)\b/);
                 if (id) { sessionStorage.setItem('futnet_pending_event', id); sessionStorage.setItem('futnet_pending_caps', capsFlag ? '1' : ''); sessionStorage.setItem('futnet_pending_tab', tabM ? tabM[1] : ''); }
                 else id = sessionStorage.getItem('futnet_pending_event');
                 window.deepLinkCaps = sessionStorage.getItem('futnet_pending_caps') === '1';
