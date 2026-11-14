@@ -2622,6 +2622,77 @@ function goalOwner(g, goal) {
   const fit = uniq(people.filter((p) => namesFit(p.name, gname)).map((p) => p.uid));
   return fit.length === 1 ? fit[0] : "";
 }
+// ---- Goals linked to the player's PROFILE (not just their name)
+// Goals are still saved as names (the apps read them that way), but right after a match is saved the server links
+// each goal to the player it belongs to: g.goalOwners = { "m{match}_t{1|2}_{goal}": { n: saved name, u: user id } }.
+// Names that change later, or two players with the same name, don't matter any more.
+// u = "" means nobody could be told apart (fix it in the manager's Goal check).
+const goalKey = (mi, t, j) => `m${mi}_t${t}_${j}`;
+const goalText = (x) => (typeof x === "object" && x ? JSON.stringify(x) : String(x || ""));
+/** The linked owner of a goal: a user id, "" (not linked / unknown), or null when this goal has no link yet. */
+function linkedOwner(g, mi, t, j, x) {
+  const o = (g.goalOwners || {})[goalKey(mi, t, j)];
+  if (!o || o.n !== goalText(x)) return null;
+  return o.u ? String(o.u) : null;
+}
+/** The goalOwners a game should have (keeps links whose goal didn't change, adds the new ones). */
+function stampsFor(g) {
+  const old = g.goalOwners || {}, out = {};
+  arr(g.matches).forEach((m, mi) => [["team1Goals", 1], ["team2Goals", 2]].forEach(([k, t]) => arr(m && m[k]).forEach((x, j) => {
+    if (!x || ownGoal(x)) return;
+    const key = goalKey(mi, t, j), n = goalText(x), o = old[key];
+    // the website's goal picker saves who it was (team1GoalsBy, lined up with the names)
+    const by = arr(m[`${k}By`])[j];
+    const picked = by && by.u && String(by.n) === n ? String(by.u) : "";
+    out[key] = o && o.n === n ? o : { n, u: picked || goalOwner(g, x) };
+  })));
+  return out;
+}
+async function stampGame(ref, g) {
+  const want = stampsFor(g);
+  if (JSON.stringify(want) === JSON.stringify(g.goalOwners || {})) return false;
+  await ref.update({ goalOwners: want });
+  return true;
+}
+// Link the goals as soon as a match is saved or edited (names are right at that moment).
+exports.linkGoals = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (event) => {
+  if (!event.data.after.exists) return;
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const g = event.data.after.data() || {};
+  if (JSON.stringify(before.matches || null) === JSON.stringify(g.matches || null) && g.goalOwners) return;
+  try { await stampGame(event.data.after.ref, g); } catch (e) { logger.warn("linkGoals", event.params.eventId, e.message); }
+});
+// Older games (before this existed): linked once, a few at a time.
+// Team records (wins / draws / losses / goals) recounted from every VS match, so the apps' team leaderboards
+// include 3-team matches too (those weren't counted before). Runs once a day; cheap (few teams and matches).
+exports.recountTeamRecords = onSchedule({ schedule: "every day 05:20", timeZone: DEFAULT_TZ, timeoutSeconds: 300 }, async () => {
+  const [ms, ts] = await Promise.all([col("vsMatches").get(), col("teams").get()]);
+  const tot = {};
+  ms.docs.forEach((d) => {
+    const r = vsResult(d.data() || {});
+    Object.entries(r).forEach(([id, x]) => { const o = tot[id] = tot[id] || { w: 0, d: 0, l: 0, gf: 0, ga: 0 }; ["w", "d", "l", "gf", "ga"].forEach((k) => { o[k] += x[k] || 0; }); });
+  });
+  let n = 0;
+  for (const t of ts.docs) {
+    const want = tot[t.id] || { w: 0, d: 0, l: 0, gf: 0, ga: 0 };
+    const cur = (t.data() || {}).record || {};
+    if (["w", "d", "l", "gf", "ga"].every((k) => (+cur[k] || 0) === want[k])) continue;
+    await t.ref.set({ record: { ...cur, ...want } }, { merge: true }); n++;
+  }
+  logger.info("recountTeamRecords", n);
+});
+
+exports.linkOldGoals = onSchedule({ schedule: "every 6 hours", timeZone: DEFAULT_TZ, timeoutSeconds: 300 }, async () => {
+  const snap = await col("eventsList").get();
+  let n = 0;
+  for (const d of snap.docs) {
+    const g = d.data() || {};
+    if (g.goalOwners || !arr(g.matches).length) continue;
+    try { if (await stampGame(d.ref, g)) n++; } catch (e) { /* next time */ }
+    if (n >= 300) break;
+  }
+  logger.info("linkOldGoals", n);
+});
 function playerGame(g, uid) {
   const att = arr(g.attendees).find((a) => uidOf(a) === uid);
   const n = teamCount(g);
@@ -2648,7 +2719,7 @@ function playerGame(g, uid) {
     const mm = String(t).match(/^own goal \((.+)\)\s*$/i);
     return mm ? mm[1].trim().toLowerCase() : "";
   };
-  for (const m of arr(g.matches)) {
+  for (const [mi, m] of arr(g.matches).entries()) {
     if (!m || m.isFinished === false) continue;
     const a = pick(m.teamAIndex, m.teamA, 0), b = pick(m.teamBIndex, m.teamB, 1);
     if (!table[a] || !table[b] || a === b) continue;
@@ -2656,7 +2727,9 @@ function playerGame(g, uid) {
     const s1 = g1.length, s2 = g2.length;
     table[a].gf += s1; table[a].ga += s2; table[b].gf += s2; table[b].ga += s1;
     if (s1 > s2) table[a].pts += 3; else if (s2 > s1) table[b].pts += 3; else { table[a].pts++; table[b].pts++; }
-    goals += [...g1, ...g2].filter(isMine).length;
+    // the player each goal was linked to when it was saved (goalOwners), else by name
+    const mineAt = (t) => (x, j) => { const o = linkedOwner(g, mi, t, j, x); return o === null ? isMine(x) : o === uid; };
+    goals += g1.filter(mineAt(1)).length + g2.filter(mineAt(2)).length;
     ownGoals += [...g1, ...g2].filter((x) => { const o = ogBy(x); return o && myNames.has(o); }).length;
     if (myTeam === a || myTeam === b) {
       const mine = myTeam === a ? s1 : s2, theirs = myTeam === a ? s2 : s1;
@@ -4239,8 +4312,9 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
       arr(g.matches).forEach((m, mi) => [["team1Goals", 1], ["team2Goals", 2]].forEach(([key, team]) => arr(m && m[key]).forEach((x, gi) => {
         const nm = gname(x);
         const saved = typeof x === "object" ? JSON.stringify(x).slice(0, 80) : String(x);
-        const owner = goalOwner(g, x);
-        if (guid(x) === uid || names.has(nm) || owner === uid || [...firsts].some((f) => nm.split(" ")[0] === f)) entries.push({ match: mi + 1, team, idx: gi, saved, finished: m.isFinished !== false, mine: owner === uid || names.has(nm) });
+        const linked = linkedOwner(g, mi, team, gi, x);
+        const owner = linked !== null ? linked : goalOwner(g, x);
+        if (guid(x) === uid || names.has(nm) || owner === uid || [...firsts].some((f) => nm.split(" ")[0] === f)) entries.push({ match: mi + 1, team, idx: gi, saved, finished: m.isFinished !== false, mine: owner === uid || (linked === null && names.has(nm)), linked: linked !== null });
         // goals nobody in the game can be matched to (old names, nicknames, guests…): you can give them to this player
         else if (inGame && nm && !ownGoal(x) && !owner && typeof x !== "object") unmatched.push({ match: mi + 1, team, idx: gi, saved });
       })));
@@ -4262,11 +4336,10 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     await db.runTransaction(async (tx) => {
       const g = (await tx.get(ref)).data();
       const m = g && arr(g.matches)[match];
-      const list = m ? arr(m[key]).slice() : [];
-      if (String(list[idx]) !== String(d.saved)) throw new HttpsError("failed-precondition", "That goal changed. Check again.");
-      list[idx] = name;
-      const matches = arr(g.matches).slice(); matches[match] = { ...m, [key]: list };
-      tx.update(ref, { matches });
+      const list = m ? arr(m[key]) : [];
+      if (goalText(list[idx]) !== String(d.saved)) throw new HttpsError("failed-precondition", "That goal changed. Check again.");
+      // link it to this player's profile (the saved name stays as it is)
+      tx.update(ref, { [`goalOwners.${goalKey(match, Number(d.team) === 2 ? 2 : 1, idx)}`]: { n: goalText(list[idx]), u: uid, manual: true } });
     });
     ratingIndex.at = 0; endedCache.at = 0;
     await col("managerLog").add({ action: "giveGoal", eventId, uid, from: String(d.saved), to: name, by: me, at: FV.serverTimestamp() });
