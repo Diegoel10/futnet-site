@@ -78,6 +78,54 @@ const liveKey = (ls) => (ls && (ls.videoId || ls.embedUrl)) || '';
 export const liveOf = (ev) => (ev && ev.livestream && liveKey(ev.livestream)) ? ev.livestream : null;
 export const isLive = (ev) => !!(liveOf(ev) && ev.livestream.status === 'live');
 
+// ------------------------------------------------------------------ 👁️ who can watch (video visibility)
+// livestream.visibility: 'all' (default) · games: 'community' / 'players' · VS: 'players' · tournament matches: 'tournament' / 'teams'.
+// The server keeps livestream.allow (the uids that may watch). Organizers / admins can always watch.
+const VIS_LABEL = { all: 'Everyone', community: 'Community members only', players: 'Players in this game only', vsplayers: 'Players on the teams in this match only',
+    tournament: 'Everyone in the tournament only', teams: 'Players of these two teams only' };
+/** The choices for this kind of page. kind: 'game' | 'vs' | 'tt'. */
+export function liveVisChoices(kind, hasCommunity) {
+    if (kind === 'vs') return [['all', VIS_LABEL.all], ['players', VIS_LABEL.vsplayers]];
+    if (kind === 'tt') return [['all', VIS_LABEL.all], ['tournament', VIS_LABEL.tournament], ['teams', VIS_LABEL.teams]];
+    return hasCommunity ? [['all', VIS_LABEL.all], ['community', VIS_LABEL.community], ['players', VIS_LABEL.players]] : [['all', VIS_LABEL.all], ['players', VIS_LABEL.players]];
+}
+const visLabel = (kind, v) => (v === 'players' && kind === 'vs' ? VIS_LABEL.vsplayers : VIS_LABEL[v] || VIS_LABEL.all);
+/** "👁️ Video visibility: Everyone ›" — tap to open the choices (go-live sheet). Read it with liveVisValue(id). */
+export function liveVisPickerHtml(id, kind, hasCommunity, cur = 'all') {
+    const ch = liveVisChoices(kind, hasCommunity);
+    return `<details class="bg-black/40 border border-white/10 rounded-xl group">
+        <summary class="list-none cursor-pointer p-3 flex items-center gap-2 text-xs"><span>👁️</span><b class="flex-1">Video visibility</b>
+            <span id="${id}-now" class="text-white/60">${esc(visLabel(kind, cur))}</span><span class="text-white/40">›</span></summary>
+        <div class="px-3 pb-3 space-y-1.5">${ch.map(([v, l]) => `<label class="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" name="${id}" value="${v}" ${v === cur ? 'checked' : ''}
+            onchange="document.getElementById('${id}-now').textContent=this.parentElement.innerText.trim()" class="accent-red-500"> ${esc(l)}</label>`).join('')}
+            <p class="text-[10px] text-white/45">Organizers can always watch. The XbotGo / YouTube link itself isn't private: anyone who gets it can still open it there.</p></div></details>`;
+}
+export function liveVisValue(id) { const r = document.querySelector(`input[name="${id}"]:checked`); return r ? r.value : 'all'; }
+/** Can I watch this livestream? */
+export function liveCanWatch(ls, boss) {
+    const v = (ls && ls.visibility) || 'all';
+    if (v === 'all' || boss) return true;
+    const me = window.currentUser && window.currentUser.uid;
+    return !!me && (ls.allow || []).includes(me);
+}
+/** Shown instead of the video to people who can't watch it. */
+export function liveLockedHtml(ls, kind) {
+    return `<div class="w-full rounded-2xl bg-black/60 border border-white/10 p-6 text-center space-y-2">
+        <div class="text-3xl">🔒</div><div class="text-sm font-black text-white">This live is private</div>
+        <p class="text-[11px] text-white/60">Only ${esc(visLabel(kind, ls.visibility).replace(/ only$/, '').toLowerCase())} can watch it.</p></div>`;
+}
+/** Organizer: "👁️ Who can watch: … [change]" under the video. fn = the global function that saves it, called with the new value. */
+export function liveVisBossHtml(ls, kind, hasCommunity, fn) {
+    const cur = (ls && ls.visibility) || 'all';
+    return `<label class="flex items-center gap-2 text-[11px] text-white/70 justify-center">👁️ Who can watch:
+        <select onchange="${fn}(this.value)" class="bg-black/60 border border-white/15 rounded-lg px-2 py-1 text-white text-[11px]">
+            ${liveVisChoices(kind, hasCommunity).map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+}
+window.setGameLiveVis = async function (eventId, v) {
+    const res = await mutateEvent(eventId, (draft) => { if (!draft.livestream) return false; draft.livestream = { ...draft.livestream, visibility: v }; });
+    if (res.ok) toast('Saved: ' + visLabel('game', v));
+};
+
 // ------------------------------------------------------------------ admin: start / end
 window.openStartLivestream = function (eventId) {
     document.getElementById('livestream-modal')?.remove();
@@ -94,6 +142,7 @@ window.openStartLivestream = function (eventId) {
         </ol>
         <input id="ls-url" type="url" inputmode="url" placeholder="XbotGo, YouTube or Facebook live link" autocomplete="off" value="${esc(lastLink())}"
             class="w-full bg-black/60 border border-red-500/50 rounded-xl px-3 py-2.5 text-white text-base sm:text-sm focus:outline-none focus:border-red-400">
+        ${liveVisPickerHtml('ls-vis', 'game', !!((window.eventsList || []).find(e => String(e.id) === String(eventId)) || {}).communityId)}
         <label class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-3 cursor-pointer">
             <input id="ls-notify" type="checkbox" checked class="w-5 h-5 accent-red-500 shrink-0">
             <span class="text-xs"><b>Notify the community</b><span class="block text-[10px] text-white/50">Untick it to test: no push goes out. The red LIVE banner still shows on the game and the feed.</span></span></label>
@@ -114,10 +163,11 @@ window.startLivestream = async function (eventId) {
     if (!src) { toast(liveLinkProblem(url), 'error'); return; }
     window.liveRememberLink(url, src);
     const notify = document.getElementById('ls-notify') ? document.getElementById('ls-notify').checked : true;
+    const vis = liveVisValue('ls-vis');
     const b = document.getElementById('ls-go'); if (b) { b.disabled = true; b.textContent = 'Going live…'; }
     const me = window.currentUser;
     const res = await mutateEvent(eventId, (draft) => {
-        draft.livestream = { url, ...src, status: 'live', startedAt: Date.now(), startedBy: String(me?.uid || ''), startedByName: myName(), notify };
+        draft.livestream = { url, ...src, status: 'live', startedAt: Date.now(), startedBy: String(me?.uid || ''), startedByName: myName(), notify, visibility: vis };
     });
     document.getElementById('livestream-modal')?.remove();
     if (!res.ok) return;
@@ -136,7 +186,9 @@ window.endLivestream = async function (eventId) {
 };
 
 /** After an XbotGo live: the admin pastes the recording's YouTube / Facebook link, and the Live tab plays it as the replay. */
-window.openAddReplay = function (eventId) {
+let replaySave = null;
+window.openAddReplay = function (eventId, save) {
+    replaySave = save || null;
     document.getElementById('livestream-modal')?.remove();
     const f = document.createElement('div');
     f.id = 'livestream-modal';
@@ -160,9 +212,15 @@ window.saveReplay = async function (eventId) {
     const url = (document.getElementById('ls-replay-url')?.value || '').trim();
     const src = liveSource(url);
     if (!src || src.provider === 'xbotgo') { toast('Paste a YouTube or Facebook video link.', 'error'); return; }
+    if (replaySave) {
+        const ok = await replaySave(url);
+        document.getElementById('livestream-modal')?.remove();
+        if (ok !== false) toast('Replay added. 🎬');
+        return;
+    }
     const res = await mutateEvent(eventId, (draft) => {
         const old = draft.livestream || {};
-        draft.livestream = { ...old, url, ...src, status: 'ended', endedAt: old.endedAt || Date.now(), liveUrl: old.url || '', replayAddedAt: Date.now() };
+        draft.livestream = withReplay(old, url);
     });
     document.getElementById('livestream-modal')?.remove();
     if (res.ok) { toast('Replay added. 🎬'); window.renderEventDetailModalContent && window.renderEventDetailModalContent(); }
@@ -227,27 +285,80 @@ function scoreHtml(ev) {
         </div></div>`;
 }
 
+/** ⛶ Full screen + ↻ under the video (and the XbotGo tips). key = whose chat goes in full screen ('' = this game's). */
+export function liveButtonsHtml(ls, key = '') {
+    const live = ls && ls.status === 'live';
+    return `<div class="flex justify-center gap-1.5">
+        <button onclick="liveFullOpen('${esc(key)}')" class="bg-red-600 text-white font-black text-[11px] px-3 py-2 rounded-full">⛶ Full screen</button>
+        <button onclick="liveReload()" class="bg-black/60 border border-white/15 text-white font-black text-[11px] px-3 py-2 rounded-full">↻ Video stuck? Reload</button>
+    </div>${ls && ls.provider === 'xbotgo' && live ? `<p class="text-center text-[10px] text-white/45">It can take 10–20 seconds to start. The video is about 10 seconds behind real time. If it freezes, tap ↻ Reload.</p>
+        <a href="${esc(ls.url)}" target="_blank" rel="noopener" class="block text-center text-[11px] text-white/60">Video not showing? <b class="text-white underline">Tap here to watch on XbotGo</b></a>` : ''}`;
+}
+/** XbotGo live ended: nothing to play until the organizer adds the recording (addCall = the onclick for the button). */
+export function liveEndedHtml(boss, addCall) {
+    return `<div id="live-ended-box" class="w-full rounded-2xl bg-black/60 border border-white/10 p-5 text-center space-y-2">
+        <div class="text-3xl">🎬</div><div class="text-sm font-black text-white">The live has ended</div>
+        <p class="text-[11px] text-white/60">XbotGo doesn't keep the replay on its live link. ${boss ? 'The recording is saved on the phone that filmed it (Photos). Upload it to YouTube and add the link here, so everyone can watch the replay.' : 'The replay shows here when the organizer adds it.'}</p>
+        ${boss ? `<button onclick="${addCall}" class="bg-red-600 text-white font-black text-xs px-4 py-2.5 rounded-xl">🎬 Add the replay video</button>` : ''}</div>`;
+}
+/** The livestream after the replay link is pasted (same shape the games use). */
+export function withReplay(old, url) {
+    const src = liveSource(url);
+    if (!src || src.provider === 'xbotgo') return null;
+    old = old || {};
+    return { ...old, url, ...src, status: 'ended', endedAt: old.endedAt || Date.now(), liveUrl: old.url || '', replayAddedAt: Date.now() };
+}
+/** Pages other than games (VS, tournament matches) say which chat goes in the full screen:
+ *  { chat: () => html, inputId, redraw: () => {} }. The page shows its own chat only when liveIsFull() is false. */
+const liveChats = {};
+export function registerLiveChat(key, opts) { liveChats[key] = opts; }
+window.liveIsFull = () => liveFull;
+/** The page redrew (a new comment…): redraw the full-screen chat too, keeping what's being typed. */
+window.liveFullRefresh = function () {
+    const c = liveChats[fullKey]; const fc = document.getElementById('live-full-chat');
+    if (!liveFull || !c || !fc) return;
+    const old = c.inputId ? document.getElementById(c.inputId) : null;
+    const typed = old ? old.value : '', focused = old && document.activeElement === old;
+    fc.innerHTML = c.chat();
+    const n = c.inputId ? document.getElementById(c.inputId) : null;
+    if (n) { n.value = typed; if (focused) n.focus(); }
+    fc.scrollTop = fc.scrollHeight;
+};
+
 export function renderLiveTab(ev, isAdmin) {
     const ls = liveOf(ev);
     if (!ls) return '<p class="text-xs text-white/50 text-center py-8">No livestream on this game.</p>';
     const live = ls.status === 'live';
     // XbotGo's link is the live room: once the live ends there's nothing to play until a replay video is added.
     const xbEnded = ls.provider === 'xbotgo' && !live;
-    if (!xbEnded) setTimeout(mountPlayer, 0);
-    setTimeout(() => watchLive(ev), 0);   // 📊 count this viewer (every 30 s while the tab is on screen)
+    const canWatch = liveCanWatch(ls, isAdmin);
+    if (!xbEnded && canWatch) setTimeout(mountPlayer, 0);
+    setTimeout(() => watchLive(ev), 0);
+    lastLiveEv = ev;
+    // ⛶ full screen open: the chat lives there (one copy, so typing isn't lost)
+    let chatHtml;
+    if (liveFull) {
+        const fc = document.getElementById('live-full-chat');
+        if (fc) fc.innerHTML = renderCommentsTab(ev);
+        chatHtml = '<p class="text-center text-xs text-white/50 py-6">💬 The chat is open in full screen.</p>';
+    } else chatHtml = renderCommentsTab(ev);   // 📊 count this viewer (every 30 s while the tab is on screen)
     return `<div class="space-y-3">
         <div class="flex items-center gap-2">
             ${live ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span> LIVE</span>'
                 : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
             <span class="flex-1 text-xs text-white/60 truncate">${live ? `Streaming now · started by ${esc(ls.startedByName || 'an admin')}` : 'The livestream has ended. Watch the replay.'}</span>
-            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : ls.provider === 'xbotgo' ? 'XbotGo' : 'YouTube'}</a>
+            ${canWatch ? `<a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : ls.provider === 'xbotgo' ? 'XbotGo' : 'YouTube'}</a>` : ''}
         </div>
-        ${xbEnded ? `<div id="live-ended-box" class="w-full rounded-2xl bg-black/60 border border-white/10 p-5 text-center space-y-2">
+        ${isAdmin ? liveVisBossHtml(ls, 'game', !!ev.communityId, `setGameLiveVis.bind(null,'${jsArg(ev.id)}')`) : ''}
+        ${!canWatch ? liveLockedHtml(ls, 'game') : xbEnded ? `<div id="live-ended-box" class="w-full rounded-2xl bg-black/60 border border-white/10 p-5 text-center space-y-2">
                 <div class="text-3xl">🎬</div><div class="text-sm font-black text-white">The live has ended</div>
                 <p class="text-[11px] text-white/60">XbotGo doesn't keep the replay on its live link. ${isAdmin ? 'The recording is saved on the phone that filmed it (Photos). Upload it to YouTube and add the link here, so everyone can watch the replay.' : 'The replay shows here when the organizer adds it.'}</p>
                 ${isAdmin ? `<button onclick="openAddReplay('${jsArg(ev.id)}')" class="bg-red-600 text-white font-black text-xs px-4 py-2.5 rounded-xl">🎬 Add the replay video</button>` : ''}
-            </div>` : liveSlotHtml(ls)}
-        ${ls.provider === 'xbotgo' && live ? `<p class="text-center text-[10px] text-white/45">It can take 10–20 seconds to start. The video is about 10 seconds behind real time.</p>
+            </div>` : liveSlotHtml(ls) + `<div class="flex justify-center gap-1.5">
+                <button onclick="liveFullOpen('')" class="bg-red-600 text-white font-black text-[11px] px-3 py-2 rounded-full">⛶ Full screen</button>
+                <button onclick="liveReload()" class="bg-black/60 border border-white/15 text-white font-black text-[11px] px-3 py-2 rounded-full">↻ Video stuck? Reload</button>
+            </div>`}
+        ${ls.provider === 'xbotgo' && live && canWatch ? `<p class="text-center text-[10px] text-white/45">It can take 10–20 seconds to start. The video is about 10 seconds behind real time. If it freezes, tap ↻ Reload.</p>
             <a href="${esc(ls.url)}" target="_blank" rel="noopener" class="block text-center text-[11px] text-white/60">Video not showing? <b class="text-white underline">Tap here to watch on XbotGo</b></a>` : ''}
         ${scoreHtml(ev)}
         ${isAdmin ? `<div class="flex gap-2">${live ? `<button onclick="endLivestream('${jsArg(ev.id)}')" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>`
@@ -255,13 +366,110 @@ export function renderLiveTab(ev, isAdmin) {
                <button onclick="removeLivestream('${jsArg(ev.id)}')" class="bg-black/50 border border-white/15 text-white/70 font-bold text-xs px-3 py-2.5 rounded-xl">Remove video</button>`}</div>` : ''}
         ${isAdmin ? liveStatsHtml(ev) : ''}
         <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] pt-1">💬 Live chat</div>
-        ${renderCommentsTab(ev)}
+        <div id="live-chat-home">${chatHtml}</div>
     </div>`;
 }
 
 // The video lives in one iframe kept outside the page, laid over the empty box above. The game page
 // redraws on every comment or goal; the iframe isn't touched, so the video never restarts.
 let player = null, playerVideo = '', loop = 0;
+let liveFull = false, liveFullNative = false, lastLiveEv = null, fullKey = '';
+
+// ↻ Start the video again (XbotGo sometimes freezes; reloading fixes it).
+window.liveReload = () => { playerVideo = ''; mountPlayer(); };
+
+// ⛶ Full screen: the video fills the screen; sideways = chat on the right (💬 hides it), straight up = chat under it.
+// Phones that allow it turn sideways by themselves (Android); on iPhone, turn the phone.
+window.liveFullOpen = function (key = '') {
+    if (liveFull || !document.getElementById('live-video-slot')) return;
+    const c = key ? liveChats[key] : null;
+    fullKey = c ? key : '';
+    let draft = '';
+    if (c) {
+        const i = c.inputId ? document.getElementById(c.inputId) : null;
+        draft = i ? i.value : '';
+    } else {
+        const home = document.getElementById('live-chat-home');
+        const inp = document.getElementById('game-comment-input');
+        if (inp) window._commentDraft = inp.value;
+        if (home) home.innerHTML = '<p class="text-center text-xs text-white/50 py-6">💬 The chat is open in full screen.</p>';
+    }
+    liveFull = true;
+    if (!document.getElementById('live-full-css')) {
+        const st = document.createElement('style');
+        st.id = 'live-full-css';
+        st.textContent = `#live-full{position:fixed;inset:0;z-index:9000;background:#000;display:flex;flex-direction:column}
+#live-full .lf-main{flex:none;display:flex;flex-direction:column}
+#live-full-video{width:100%;aspect-ratio:16/9;background:#000}
+#live-full-bar{display:flex;gap:6px;justify-content:center;padding:8px}
+#live-full-bar button{color:#fff;font-weight:900;font-size:11px;padding:7px 11px;border-radius:999px;background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18)}
+#live-full-bar button.lf-x{background:rgba(220,38,38,.85)}
+#live-full-chat{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 6px 6px;background:#0B141A}
+#live-full-chat>div:last-of-type{flex:1;min-height:0}
+#live-full-chat #chat-messages-scroll{max-height:none!important;min-height:0!important;flex:1 1 auto}
+#live-full .lf-chatbtn{display:none}
+@media (orientation:landscape){#live-full{flex-direction:row}
+ #live-full .lf-main{flex:1}
+ #live-full-video{flex:1;min-height:0;aspect-ratio:auto}
+ #live-full-chat{flex:none;width:min(340px,40vw);padding-top:6px}
+ #live-full.lf-nochat #live-full-chat{display:none}
+ #live-full .lf-chatbtn{display:inline-block}}`;
+        document.head.appendChild(st);
+    }
+    const ov = document.createElement('div');
+    ov.id = 'live-full';
+    ov.innerHTML = `<div class="lf-main"><div id="live-full-video"></div>
+        <div id="live-full-bar"><button class="lf-x" onclick="liveFullClose()">✕ Close</button>
+        <button class="lf-chatbtn" onclick="document.getElementById('live-full').classList.toggle('lf-nochat')">💬 Chat</button>
+        <button onclick="liveReload()">↻ Reload</button></div></div>
+        <div id="live-full-chat"></div>`;
+    document.body.appendChild(ov);
+    if (c) {
+        c.redraw && c.redraw();   // the page hides its own copy of the chat
+        document.getElementById('live-full-chat').innerHTML = c.chat();
+        const n = c.inputId ? document.getElementById(c.inputId) : null;
+        if (n) n.value = draft;
+    } else if (lastLiveEv) document.getElementById('live-full-chat').innerHTML = renderCommentsTab(lastLiveEv);
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) {
+        try {
+            const p = req.call(el);
+            const turn = () => { liveFullNative = true; try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) { /* not supported */ } };
+            if (p && p.then) p.then(turn).catch(() => {}); else turn();
+        } catch (e) { /* not supported (iPhone): the page-sized full screen still works */ }
+    }
+    mountPlayer();
+};
+window.liveFullClose = function () {
+    if (!liveFull) return;
+    const c = fullKey ? liveChats[fullKey] : null;
+    const inp = document.getElementById(c ? (c.inputId || '-') : 'game-comment-input');
+    const draft = inp ? inp.value : '';
+    if (!c && inp) window._commentDraft = draft;
+    const ov = document.getElementById('live-full');
+    if (ov) ov.remove();
+    liveFull = false;
+    fullKey = '';
+    if (c) {
+        if (c.redraw) c.redraw();
+        const n = c.inputId ? document.getElementById(c.inputId) : null;
+        if (n && draft) n.value = draft;
+    } else {
+        const home = document.getElementById('live-chat-home');
+        if (home && lastLiveEv) home.innerHTML = renderCommentsTab(lastLiveEv);
+    }
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) { /* ignore */ }
+    if (liveFullNative && (document.fullscreenElement || document.webkitFullscreenElement)) {
+        liveFullNative = false;
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    }
+    liveFullNative = false;
+};
+// Esc / the phone's back button left the browser's full screen: close ours too.
+['fullscreenchange', 'webkitfullscreenchange'].forEach((n) => document.addEventListener(n, () => {
+    if (liveFull && liveFullNative && !(document.fullscreenElement || document.webkitFullscreenElement)) { liveFullNative = false; window.liveFullClose(); }
+}));
 function mountPlayer() { if (!loop) loop = requestAnimationFrame(tick); }
 /** The empty box the video is laid over (YouTube or Facebook). */
 export function liveSlotHtml(ls) {
@@ -274,7 +482,8 @@ window.youTubeId = youTubeId;
 function tick() {
     const slot = document.getElementById('live-video-slot');
     const visible = slot && slot.isConnected && slot.getClientRects().length > 0;
-    if (!visible) {
+    if (liveFull && !slot) window.liveFullClose();   // the game was closed
+    if (!visible && !liveFull) {
         if (player) { player.remove(); player = null; playerVideo = ''; }
         loop = 0;
         return;
@@ -292,7 +501,16 @@ function tick() {
         player.innerHTML = `<iframe src="${esc(src)}" title="Livestream"
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen style="width:100%;height:100%;border:0;display:block"></iframe>`;
     }
-    player.style.zIndex = slot.closest('#vs-page') ? '140' : '40';
+    player.style.zIndex = liveFull ? '9001' : slot.closest('#tt-match') ? '176' : slot.closest('#vs-page') ? '140' : '40';
+    const box = liveFull ? document.getElementById('live-full-video') : null;
+    if (box) {
+        const b = box.getBoundingClientRect();
+        Object.assign(player.style, { left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`,
+            clipPath: 'none', display: 'block', borderRadius: '0' });
+        loop = requestAnimationFrame(tick);
+        return;
+    }
+    player.style.borderRadius = '16px';
     const r = slot.getBoundingClientRect();
     // Hide whatever part of the video scrolled above the top of the screen (under the header).
     const cut = Math.max(0, -r.top);

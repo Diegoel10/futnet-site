@@ -73,7 +73,15 @@ export function computePlayerStats(events) {
             if (u) { const p = everyone.find(x => String(x.uid || x.userId || '') === u); return p ? { ...p, uid: u } : { uid: u, name: goalName(g) }; }
             return findScorer(goalName(g), everyone);
         };
-        matches.forEach(m => {
+        // Goals linked to a profile by the server (goalOwners): rename-proof and same-name-proof.
+        const linked = (mi, t, j, g) => {
+            const o = (ev.goalOwners || {})[`m${mi}_t${t}_${j}`];
+            const n = (g && typeof g === 'object') ? JSON.stringify(g) : String(g || '');
+            if (!o || o.n !== n || !o.u) return null;
+            const p = everyone.find(x => String(x.uid || x.userId || '') === String(o.u));
+            return p ? { ...p, uid: String(o.u) } : { uid: String(o.u), name: goalName(g) };
+        };
+        matches.forEach((m, mi) => {
             if (m.isFinished === false) return;
 
             const t1Goals = m.team1Goals || [];
@@ -81,9 +89,9 @@ export function computePlayerStats(events) {
             const t1Score = t1Goals.length;
             const t2Score = t2Goals.length;
 
-            [...t1Goals, ...t2Goals].forEach(g => {
+            [...t1Goals.map((g, j) => [g, 1, j]), ...t2Goals.map((g, j) => [g, 2, j])].forEach(([g, t, j]) => {
                 if (!g || isOwnGoal(g) || !goalName(g) && !goalUid(g)) return;   // own goals count for the team, not for anyone's stats
-                const matchedAtt = scorerOf(g);
+                const matchedAtt = linked(mi, t, j, g) || scorerOf(g);
                 const stats = getPlayerRecord(matchedAtt?.name || goalName(g), matchedAtt?.avatar, matchedAtt?.uid, matchedAtt?.position);
                 stats.goals += 1;
             });
@@ -226,7 +234,7 @@ export function renderLeaderboard(category = 'goals') {
                     </div>
                 </td>
                 <td class="p-4 text-center font-medium text-slate-700">${escapeHtml(p.position)}</td>
-                <td class="p-4 text-center font-bold text-slate-700">${p.played}</td>
+                <td class="p-4 text-center font-bold text-slate-700">${category === 'sessions' ? (p.sessionsPlayed || 0) : p.played}</td>
                 <td class="p-4 text-right font-black text-brand text-sm">${metricVal}</td>
             </tr>
         `;

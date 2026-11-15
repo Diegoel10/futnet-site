@@ -54,7 +54,7 @@ onAuthStateChanged(auth, async (u) => {
 });
 
 // ---------------------------------------------------------------- layout
-const TABS = [['home', '🏠 Home'], ['players', '🔎 Players'], ['verify', '✔️ Verified'], ['messages', '💬 Admin messages'], ['analytics', '📈 Analytics'], ['themes', '🎨 Themes'], ['money', '💰 Money'], ['settings', '⚙️ Settings']];
+const TABS = [['home', '🏠 Home'], ['players', '🔎 Players'], ['verify', '✔️ Verified'], ['messages', '💬 Admin messages'], ['analytics', '📈 Analytics'], ['fields', '🏟️ Fields'], ['themes', '🎨 Themes'], ['money', '💰 Money'], ['settings', '⚙️ Settings']];
 window.mgrTab = (k) => { S.tab = k; draw(); };
 function draw() {
     $('app').innerHTML = `
@@ -64,7 +64,7 @@ function draw() {
         </div>
         <div class="flex gap-1 overflow-x-auto bg-black/40 border border-white/10 rounded-2xl p-1">${TABS.map(([k, l]) => `<button onclick="mgrTab('${k}')" class="tab ${S.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <div id="body" class="space-y-4"></div>`;
-    ({ home, players, verify, messages, analytics, themes: themesTab, money: moneyTab, settings })[S.tab]();
+    ({ home, players, verify, messages, analytics, fields: fieldsTab, themes: themesTab, money: moneyTab, settings })[S.tab]();
 }
 const body = (html) => { $('body').innerHTML = html; };
 const loading = () => body('<div class="text-center text-white/60 text-sm py-10"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading…</div>');
@@ -303,6 +303,69 @@ async function analytics(days) {
             ${r.totals.length ? `<div class="space-y-1">${r.totals.map(([k, n]) => `<div class="flex items-center gap-2 text-[12px]"><span class="flex-1 truncate">${esc(nice(k))}</span><span class="font-black text-[#00F296]">${n}</span></div>`).join('')}</div>` : '<p class="text-sm text-white/50">No taps counted yet. Counting starts once this update is live.</p>'}</div>`);
 }
 window.mgrDays = (d) => analytics(d);
+
+// ---------------------------------------------------------------- 🏟️ fields: the shared park list (games, VS, tournaments pick from it)
+// ✔ = checked by you (it's a real place). Edit, add, delete. Ratings show here once people can rate fields.
+async function fieldsTab() {
+    loading();
+    const r = await call('fields').catch(() => ({ list: [] }));
+    S.fields = r.list || [];
+    S.fq = S.fq || '';
+    drawFields();
+}
+window.mgrFieldQ = (q) => { S.fq = q; drawFields(true); };
+function drawFields(keepFocus) {
+    const q = String(S.fq || '').toLowerCase().trim();
+    const all = S.fields || [];
+    const list = all.filter(f => !q || `${f.name} ${f.city} ${f.state} ${f.address}`.toLowerCase().includes(q));
+    const stars = (f) => f.ratingCount ? `⭐ ${(f.ratingSum / f.ratingCount).toFixed(1)} (${f.ratingCount})` : '<span class="text-white/35">no ratings yet</span>';
+    body(`<div class="grid grid-cols-3 gap-2">
+            <div class="card text-center"><div class="text-2xl font-black">${all.length}</div><div class="text-[11px] text-white/60">Fields</div></div>
+            <div class="card text-center"><div class="text-2xl font-black text-[#1D9BF0]">${all.filter(f => f.verified).length}</div><div class="text-[11px] text-white/60">✔ Checked</div></div>
+            <div class="card text-center"><div class="text-2xl font-black">${all.filter(f => !f.verified).length}</div><div class="text-[11px] text-white/60">To check</div></div>
+        </div>
+        <div class="flex gap-2"><input id="fq" class="inp flex-1" placeholder="Search a field or city" value="${esc(S.fq || '')}" oninput="mgrFieldQ(this.value)">
+            <button onclick="mgrFieldEdit('')" class="btn shrink-0">＋ Add</button></div>
+        <div class="space-y-2">${list.map(f => `<div class="card space-y-2">
+            <div class="flex items-start gap-2">
+                <div class="flex-1 min-w-0">
+                    <div class="font-black text-sm">${esc(f.name)} ${f.verified ? BLUE : ''}</div>
+                    <div class="text-[11px] text-white/60">${esc(f.address || `${f.city}, ${f.state}`)}</div>
+                    <div class="text-[11px] text-white/50">${f.uses} game${f.uses === 1 ? '' : 's'} · ${stars(f)}${f.createdAt ? ` · added ${dt(f.createdAt)}` : ''}</div>
+                </div>
+                <a class="btn-dark shrink-0 text-[11px]" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${f.name} ${f.address || ''} ${f.city} ${f.state}`)}">🗺️ Map</a>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button onclick="mgrFieldVerify('${jsq(f.id)}', ${!f.verified})" class="${f.verified ? 'btn-dark' : 'btn'} text-[12px]">${f.verified ? 'Remove ✔' : '✔ It\'s real'}</button>
+                <button onclick="mgrFieldEdit('${jsq(f.id)}')" class="btn-dark text-[12px]">✏️ Edit</button>
+                <button onclick="mgrFieldDelete('${jsq(f.id)}')" class="btn-dark text-[12px] text-red-300">🗑️ Delete</button>
+            </div></div>`).join('') || '<p class="text-sm text-white/50">No fields match.</p>'}</div>
+        <p class="text-[10px] text-white/40">Tap 🗺️ Map to see the place on Google Maps before you check it. The ✔ shows next to the field when people pick it for a game, VS match or tournament.</p>`);
+    if (keepFocus) { const i = $('fq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+}
+window.mgrFieldVerify = async (id, on) => {
+    await call('fieldVerify', { id, on }).then(() => { const f = (S.fields || []).find(x => x.id === id); if (f) f.verified = on; drawFields(); toast(on ? 'Checked ✔' : 'Check removed'); }).catch(() => {});
+};
+window.mgrFieldDelete = async (id) => {
+    const f = (S.fields || []).find(x => x.id === id); if (!f) return;
+    if (!confirm(`Delete "${f.name}" from the list?\n\nGames already made there keep their location. It just won't be suggested anymore.`)) return;
+    await call('fieldDelete', { id }).then(() => { S.fields = S.fields.filter(x => x.id !== id); drawFields(); toast('Deleted'); }).catch(() => {});
+};
+window.mgrFieldEdit = (id) => {
+    const f = (S.fields || []).find(x => x.id === id) || { id: '', name: '', city: '', state: 'FL', address: '' };
+    body(`<div class="card space-y-3"><div class="text-base font-black">${id ? '✏️ Edit field' : '＋ Add a field'}</div>
+        <div><div class="lbl">Name *</div><input id="fe-name" class="inp" maxlength="60" value="${esc(f.name)}" placeholder="e.g. Sabal Pines Park"></div>
+        <div><div class="lbl">Address</div><input id="fe-addr" class="inp" maxlength="120" value="${esc(f.address)}" placeholder="e.g. 4700 W Sample Rd, Coconut Creek, FL 33073"></div>
+        <div class="flex gap-2"><div class="flex-1"><div class="lbl">City *</div><input id="fe-city" class="inp" maxlength="40" value="${esc(f.city)}"></div>
+            <div class="w-24"><div class="lbl">State</div><input id="fe-state" class="inp" maxlength="20" value="${esc(f.state || 'FL')}"></div></div>
+        ${id ? '<p class="text-[11px] text-white/50">Changing the name doesn\'t change games already made there.</p>' : ''}
+        <div class="flex gap-2"><button onclick="mgrFieldSave('${jsq(f.id)}')" class="btn flex-1">Save</button><button onclick="drawFieldsBack()" class="btn-dark">Cancel</button></div></div>`);
+};
+window.drawFieldsBack = () => drawFields();
+window.mgrFieldSave = async (id) => {
+    const field = { id, name: val('fe-name'), address: val('fe-addr'), city: val('fe-city'), state: val('fe-state') || 'FL' };
+    await call('fieldSave', { field }).then(() => { toast('Saved'); fieldsTab(); }).catch(() => {});
+};
 
 // ---------------------------------------------------------------- 🎨 themes: who uses which one
 const THEME_INFO = {

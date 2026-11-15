@@ -28,6 +28,9 @@ import { db, appId } from './firebase-config.js';
 import { doc, getDoc, setDoc, collection, onSnapshot, runTransaction, serverTimestamp, addDoc, query, orderBy, limit, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { teamLogoHtml, canManage } from './teams.js';
 import { smartText } from './smart-text.js';
+import { attachParkPicker, saveParkIfNew } from './parks.js';
+import { watchLive, liveStatsHtml } from './live-stats.js';   // 📊 who watched (same as games)
+import { liveSource, liveLinkProblem, liveSlotHtml, liveButtonsHtml, liveEndedHtml, withReplay, registerLiveChat, liveVisPickerHtml, liveVisValue, liveCanWatch, liveLockedHtml, liveVisBossHtml } from './livestream.js';   // same player as games / VS
 
 const C = (name) => collection(db, 'artifacts', appId, name);
 const D = (id) => doc(db, 'artifacts', appId, 'tournaments', id);
@@ -73,7 +76,7 @@ function start() {
         TT.list = s.docs.map(d => ({ ...d.data(), id: d.id })).filter(t => t.status !== 'cancelled' && (lastDayOf(t) || t.date || '') >= cut);
         try { window.renderEvents && document.getElementById('events-grid') && window.renderEvents(); } catch (e) { /* ignore */ }
         if (TT.open) { const fresh = TT.list.find(t => t.id === TT.open.id); if (fresh) { TT.open = fresh; drawPage(); } }
-        if (MP.tid && document.getElementById('tt-match')) drawMatchPage();
+        if (MP.tid && document.getElementById('tt-match')) { drawMatchPage(true); window.liveFullRefresh && window.liveFullRefresh(); }
     }, () => {});
 }
 let started = '';
@@ -195,6 +198,7 @@ export function tourneyMatchCardHtml(t, m) {
     return `<div onclick="openTourneyMatch('${jsq(t.id)}', '${jsq(m.id)}')" class="relative rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-amber-400 cursor-pointer p-4 space-y-3" style="background:linear-gradient(160deg,rgba(250,204,21,.18),rgba(1,10,15,.95) 55%)">
         <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-amber-400/70 text-amber-200 text-[10px] font-black">${TROPHY(13)}<span>${esc(matchLabel(m).toUpperCase())}</span></div>
+            ${m.livestream && m.livestream.status === 'live' ? '<span class="shrink-0 bg-red-600 text-white text-[10px] font-black px-2 py-1 rounded-lg">● LIVE</span>' : ''}
             <span class="text-[10px] font-bold text-white/60 truncate">${esc(t.name)}</span>
         </div>
         <div class="flex items-center justify-center gap-3">
@@ -210,13 +214,19 @@ export function tourneyMatchCardHtml(t, m) {
 }
 /** The tournament flyer (Games list). big = a full poster (empty days, planned days); else a slim gold banner on busy days.
  *  Tapping it opens the tournament; "Register your team" goes straight into registering (or making a team first). */
-const canRegister = (t) => t.status === 'signup' && (t.teams || []).length < maxTeamsOf(t);
+// Registration closes by itself: at t.regClose ("YYYY-MM-DD HH:MM", the organizer picks it), or else the day the
+// tournament starts (also checked on the server: tourneyGuard).
+export const regCloseOf = (t) => t.regClose || ((daysOf(t)[0] || {}).date ? `${daysOf(t)[0].date} 00:00` : '');
+const nowKey = () => { const d = new Date(); return `${ymdToday()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const regOver = (t) => { const c = regCloseOf(t); return !!c && nowKey() >= c; };
+const regCloseText = (t) => { const c = t.regClose; if (!c) return 'the day it starts'; const [d, hm] = c.split(' '); return `${new Date(d + 'T12:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}${hm ? ', ' + prettyTime(hm) : ''}`; };
+const canRegister = (t) => t.status === 'signup' && (t.teams || []).length < maxTeamsOf(t) && !regOver(t);
 function flyerHtml(t, big) {
     const n = (t.teams || []).length, max = maxTeamsOf(t);
     const step = STEPS[stepIndex(t.status)];
     const cta = canRegister(t)
         ? `<button onclick="event.stopPropagation(); ttRegisterTeam('${jsq(t.id)}')" class="shrink-0 font-black rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 ${big ? 'text-sm px-4 py-3 w-full' : 'text-[11px] px-3 py-2'} shadow-[0_0_14px_rgba(250,204,21,.45)]">📝 Register your team</button>`
-        : `<span class="shrink-0 font-black rounded-xl bg-black/60 border border-amber-400/70 text-amber-200 ${big ? 'text-sm px-4 py-3 w-full text-center' : 'text-[11px] px-3 py-2'}">${t.status === 'signup' ? 'Full · View' : `${step[2]} ${step[1]} · View`}</span>`;
+        : `<span class="shrink-0 font-black rounded-xl bg-black/60 border border-amber-400/70 text-amber-200 ${big ? 'text-sm px-4 py-3 w-full text-center' : 'text-[11px] px-3 py-2'}">${t.status === 'signup' ? (regOver(t) ? 'Registration closed · View' : 'Full · View') : `${step[2]} ${step[1]} · View`}</span>`;
     const slots = Array.from({ length: max }, (_, i) => { const x = (t.teams || [])[i]; return x ? `<div title="${esc(x.name)}">${teamLogoHtml(x, big ? 34 : 22)}</div>` : `<div class="${big ? 'w-[34px] h-[34px]' : 'w-[22px] h-[22px]'} rounded-xl border-2 border-dashed border-amber-300/50 flex items-center justify-center text-amber-200/70 ${big ? 'text-sm' : 'text-[10px]'}">?</div>`; }).join('');
     const prize = (t.prizes || [])[0];
     if (!big) return `<div onclick="openTourney('${jsq(t.id)}')" class="col-span-full relative overflow-hidden rounded-2xl border-[1.6px] border-amber-400 cursor-pointer p-3 text-white" style="background:linear-gradient(110deg,rgba(250,204,21,.30),rgba(120,53,15,.35) 45%,rgba(0,0,0,.75))">
@@ -251,7 +261,7 @@ function flyerHtml(t, big) {
             </div>
             ${prize ? `<div class="text-sm font-black text-amber-200">🥇 ${esc(prize.prize)}${(t.prizes || [])[1] ? ` <span class="text-white/60 font-bold text-xs">· 🥈 ${esc(t.prizes[1].prize)}</span>` : ''}</div>` : ''}
             <div class="flex flex-wrap justify-center gap-1.5">${slots}</div>
-            ${t.status === 'signup' ? `<div class="text-[10px] text-white/55">${max - n > 0 ? `${max - n} spot${max - n === 1 ? '' : 's'} left` : 'Full'} · ${+t.minPlayers || 1}–${+t.maxPlayers || 30} players per team${t.requirePay ? ' · must pay to be confirmed' : ''} · times subject to change</div>` : ''}
+            ${t.status === 'signup' && !regOver(t) ? `<div class="text-[10px] text-white/55">${max - n > 0 ? `${max - n} spot${max - n === 1 ? '' : 's'} left` : 'Full'} · ${+t.minPlayers || 1}–${+t.maxPlayers || 30} players per team${t.requirePay ? ' · must pay to be confirmed' : ''}${t.regClose ? ` · registration closes ${esc(regCloseText(t))}` : ''} · times subject to change</div>` : ''}
             ${cta}
         </div>
     </div>`;
@@ -361,6 +371,7 @@ window.openTourneyMatch = function (tid, mid) {
     MP.unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'tournaments', tid, 'chat'), where('matchId', '==', mid)), s => {
         MP.msgs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (+a.at || 0) - (+b.at || 0));
         drawMatchPage(true);
+        window.liveFullRefresh && window.liveFullRefresh();
     }, () => {});
     const m = document.createElement('div');
     m.id = 'tt-match';
@@ -369,7 +380,7 @@ window.openTourneyMatch = function (tid, mid) {
     document.body.appendChild(m);
     drawMatchPage();
 };
-window.closeTourneyMatch = () => { if (MP.unsub) MP.unsub(); MP.unsub = null; MP.tid = ''; document.getElementById('tt-match')?.remove(); };
+window.closeTourneyMatch = () => { if (window.liveIsFull && window.liveIsFull()) window.liveFullClose(); if (MP.unsub) MP.unsub(); MP.unsub = null; MP.tid = ''; document.getElementById('tt-match')?.remove(); };
 function drawMatchPage(keepInput) {
     const el = document.getElementById('tt-match'); if (!el) return;
     const t = TT.list.find(x => x.id === MP.tid) || TT.open; if (!t) return;
@@ -383,6 +394,7 @@ function drawMatchPage(keepInput) {
         ? (X.roster || []).map(p => `<div class="flex items-center gap-2 py-1"><span class="w-6 text-right text-[11px] font-black text-amber-300 font-mono">${esc(p.number ?? '')}</span><span class="text-xs font-bold truncate">${esc(p.name || 'Player')}</span>${p.position ? `<span class="text-[9px] text-white/45 font-bold">${esc(p.position)}</span>` : ''}</div>`).join('')
         : '<p class="text-[11px] text-white/45">No players listed yet.</p>');
     const when = [m.date ? new Date(m.date + 'T12:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '', prettyTime(m.time)].filter(Boolean).join(' · ');
+    const live = matchLiveHtml(t, m, boss);
     el.innerHTML = `<div class="max-w-xl mx-auto p-4 pb-28 space-y-4">
         <div class="flex items-center gap-3">
             <button onclick="closeTourneyMatch()" class="w-10 h-10 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-arrow-left"></i></button>
@@ -398,18 +410,99 @@ function drawMatchPage(keepInput) {
             <div class="text-[11px] font-bold text-white/65 text-center"><i class="fa-solid fa-location-dot text-amber-300 mr-1"></i>${esc(placeOf(t, m))}${when ? ` · ${esc(when)}` : ''}</div>
             ${boss && m.a && m.b ? `<button onclick="closeTourneyMatch(); openTourney('${jsq(t.id)}', null, 'bracket'); setTimeout(() => openTourneyScore('${jsq(m.id)}'), 350)" class="${GOLDBTN} w-full py-2.5 text-sm">⚽ ${m.done ? 'Change the score' : 'Enter the score'}</button>` : ''}
         </div>
+        ${live}
         <div class="grid grid-cols-2 gap-3">
             ${[A, B].map((X, i) => `<div class="bg-black/45 border border-white/10 rounded-2xl p-3"><div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1 truncate">${esc(X ? X.name : (i ? fromLabel(m.bFrom) : fromLabel(m.aFrom)))}</div>${roster(X)}</div>`).join('')}
         </div>
         <div class="bg-black/45 border border-white/10 rounded-2xl p-3 space-y-3">
             <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">💬 Comments</div>
-            <div class="space-y-2" id="tm-list">${MP.msgs.map(c => `<div class="flex gap-2 ${c.uid === myUid() ? 'flex-row-reverse text-right' : ''}">
-                <img src="${esc(c.avatar || DEFAULT_AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10 shrink-0" alt="" onerror="this.src='${DEFAULT_AV}'">
-                <div class="max-w-[80%] rounded-2xl px-3 py-2 ${c.uid === myUid() ? 'bg-amber-400/20' : 'bg-white/10'}"><div class="text-[10px] font-black text-white/60">${esc(c.name || 'Player')}</div><div class="text-xs whitespace-pre-wrap break-words">${esc(c.text || '')}</div></div></div>`).join('') || '<p class="text-[11px] text-white/45 text-center py-2">No comments yet. Say something! ⚽</p>'}</div>
-            ${myUid() ? `<div class="flex gap-2"><input id="tm-in" class="${INPUT}" maxlength="1000" placeholder="Comment on this match…" onkeydown="if(event.key==='Enter')sendMatchComment()"><button onclick="sendMatchComment()" class="${BTN} shrink-0"><i class="fa-solid fa-paper-plane"></i></button></div>` : ''}
+            ${window.liveIsFull && window.liveIsFull() ? '<p class="text-center text-xs text-white/50 py-4">💬 The chat is open in full screen.</p>' : matchCommentsHtml()}
         </div></div>`;
     const inp = document.getElementById('tm-in'); if (inp && typed) inp.value = typed;
 }
+function matchCommentsHtml() {
+    return `<div class="space-y-2" id="tm-list">${MP.msgs.map(c => `<div class="flex gap-2 ${c.uid === myUid() ? 'flex-row-reverse text-right' : ''}">
+                <img src="${esc(c.avatar || DEFAULT_AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10 shrink-0" alt="" onerror="this.src='${DEFAULT_AV}'">
+                <div class="max-w-[80%] rounded-2xl px-3 py-2 ${c.uid === myUid() ? 'bg-amber-400/20' : 'bg-white/10'}"><div class="text-[10px] font-black text-white/60">${esc(c.name || 'Player')}</div><div class="text-xs whitespace-pre-wrap break-words">${esc(c.text || '')}</div></div></div>`).join('') || '<p class="text-[11px] text-white/45 text-center py-2">No comments yet. Say something! ⚽</p>'}</div>
+            ${myUid() ? `<div class="flex gap-2"><input id="tm-in" class="${INPUT}" maxlength="1000" placeholder="Comment on this match…" onkeydown="if(event.key==='Enter')sendMatchComment()"><button onclick="sendMatchComment()" class="${BTN} shrink-0"><i class="fa-solid fa-paper-plane"></i></button></div>` : ''}`;
+}
+registerLiveChat('tt', { chat: () => `<div class="p-2 space-y-3">${matchCommentsHtml()}</div>`, inputId: 'tm-in', redraw: () => drawMatchPage(true) });
+
+// ---------------------------------------------------------------- 🔴 livestream a match (same as games and VS)
+//   m.livestream = { url, provider: 'xbotgo'|'youtube'|'facebook', videoId, embedUrl, status: 'live'|'ended', startedAt, startedBy, startedByName }
+//   Only the organizer starts / ends it. Everyone in the tournament gets "🔴 LIVE now" (server).
+const lsKeyOf = (ls) => (ls && (ls.videoId || ls.embedUrl)) || '';
+function matchLiveHtml(t, m, boss) {
+    const ls = m.livestream;
+    if (!ls || !lsKeyOf(ls)) {
+        return boss && m.a && m.b && !m.done && t.status !== 'cancelled'
+            ? `<button onclick="openMatchLivestream()" class="w-full bg-red-600 text-white font-black text-sm py-3 rounded-2xl">🔴 Go live (stream this match)</button>` : '';
+    }
+    const on = ls.status === 'live';
+    const xbEnded = ls.provider === 'xbotgo' && !on;
+    const canWatch = liveCanWatch(ls, boss);
+    if (!xbEnded && canWatch) setTimeout(() => { if (window.mountLivePlayer) window.mountLivePlayer(); }, 0);
+    // 📊 viewers: counted like a game's (stored under eventsList/tt_<tournament>_<match>/liveViews)
+    const statsEv = { id: `tt_${t.id}_${m.id}`, livestream: ls, comments: MP.msgs.map(c => ({ uid: c.uid, createdAt: +c.at || 0 })) };
+    if (canWatch) setTimeout(() => watchLive(statsEv), 0);
+    return `<div class="space-y-3">
+        <div class="flex items-center gap-2">${on ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">● LIVE</span>' : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
+            <span class="flex-1 text-xs text-white/60 truncate">${on ? `Streaming now · ${esc(ls.startedByName || '')}` : 'The livestream has ended. Watch the replay.'}</span>
+            <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : ls.provider === 'xbotgo' ? 'XbotGo' : 'YouTube'}</a></div>
+        ${boss ? liveVisBossHtml(ls, 'tt', false, 'setMatchLiveVis') : ''}
+        ${!canWatch ? liveLockedHtml(ls, 'tt') : xbEnded ? liveEndedHtml(boss, 'addMatchReplay()') : liveSlotHtml(ls) + liveButtonsHtml(ls, 'tt')}
+        ${boss ? `<div class="flex gap-2">${on ? '<button onclick="endMatchLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>'
+            : '<button onclick="openMatchLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">Start a new livestream</button><button onclick="removeMatchLivestream()" class="flex-1 bg-black/60 border border-white/15 text-white font-black text-xs py-2.5 rounded-xl">Remove video</button>'}</div>` : ''}
+        ${boss ? liveStatsHtml(statsEv) : ''}
+    </div>`;
+}
+/** Change this match's livestream (organizer). fn(old) returns the new one (null = remove). */
+async function setMatchLive(fn) {
+    const tid = MP.tid, mid = MP.mid;
+    await change(tid, (t) => {
+        const m = t.matches.find(x => x.id === mid); if (!m) return false;
+        const next = fn(m.livestream || null);
+        if (next === undefined) return false;
+        if (next) m.livestream = next; else delete m.livestream;
+    });
+}
+window.openMatchLivestream = function () {
+    sheet('tt-ls', '🔴 Livestream this match', `
+        <ol class="text-[11px] text-white/70 space-y-1 list-decimal pl-4">
+            <li><b>XbotGo:</b> start the live in the XbotGo app and copy its watch link (cloud.xbotgo.net/live?userId=…). We remember it for next time.</li>
+            <li><b>YouTube / Facebook:</b> open the live video, tap <b>Share → Copy link</b>. On Facebook, set it to <b>Public</b>.</li>
+            <li>Paste it here.</li></ol>
+        <input id="tls-url" type="url" inputmode="url" class="${INPUT}" placeholder="XbotGo, YouTube or Facebook live link" value="${esc(window.liveLastLink ? window.liveLastLink() : '')}">
+        ${liveVisPickerHtml('tls-vis', 'tt', false)}
+        <button onclick="startMatchLivestream()" class="w-full bg-red-600 text-white font-black py-3 rounded-xl text-sm">Go live</button>`);
+};
+window.startMatchLivestream = async function () {
+    const url = String(document.getElementById('tls-url')?.value || '').trim(); const src = liveSource(url);
+    if (!src) { toast(liveLinkProblem(url), 'error'); return; }
+    window.liveRememberLink && window.liveRememberLink(url, src);
+    try {
+        const vis = liveVisValue('tls-vis');
+        await setMatchLive(() => ({ url, ...src, status: 'live', startedAt: Date.now(), startedBy: myUid(), startedByName: myName(), visibility: vis }));
+        document.getElementById('tt-ls')?.remove(); toast("You're live! 🔴 Everyone in the tournament was notified.");
+    } catch (e) { toast("Couldn't start the livestream.", 'error'); }
+};
+window.endMatchLivestream = async function () {
+    if (!confirm("End the livestream?\n\nYouTube / Facebook: the video stays on the match as a replay.\nXbotGo: add the recording's YouTube link afterwards (🎬 Add the replay video).")) return;
+    try { await setMatchLive((old) => (old ? { ...old, status: 'ended', endedAt: Date.now() } : undefined)); } catch (e) { toast("Couldn't end it.", 'error'); }
+};
+window.removeMatchLivestream = async function () {
+    if (!confirm('Remove the video from this match?')) return;
+    try { await setMatchLive(() => null); } catch (e) { toast("Couldn't remove it.", 'error'); }
+};
+window.setMatchLiveVis = async function (v) {
+    try { await setMatchLive((old) => (old ? { ...old, visibility: v } : undefined)); toast('Saved.'); } catch (e) { toast("Couldn't save it.", 'error'); }
+};
+window.addMatchReplay = function () {
+    window.openAddReplay('', async (url) => {
+        try { await setMatchLive((old) => withReplay(old, url) || undefined); return true; }
+        catch (e) { toast("Couldn't save it.", 'error'); return false; }
+    });
+};
 window.sendMatchComment = async function () {
     const box = document.getElementById('tm-in'); const text = String(box && box.value || '').trim(); if (!text || !MP.tid) return;
     box.value = '';
@@ -470,9 +563,10 @@ function drawCreate() {
                 <div class="min-w-0">${LBL('Starting date *')}<input id="tt-start-date" type="date" class="${INPUT}" value="${esc(v('date'))}"></div>
                 <div class="min-w-0">${LBL('Starting time *')}<input id="tt-start-time" type="time" class="${INPUT} !px-2" value="${esc(v('time'))}"></div>
             </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div class="min-w-0">${LBL('Park *')}<input id="tt-park" class="${INPUT}" value="${esc(v('park'))}" placeholder="Sabal Pines Park"></div>
-                <div class="min-w-0">${LBL('City *')}<input id="tt-city" class="${INPUT}" value="${esc(v('city'))}" placeholder="Coral Springs, FL"></div>
+            <div>${LBL('Park / field *')}<div><input id="tt-park" class="${INPUT}" maxlength="60" value="${esc(v('park'))}" placeholder="Start typing a park name"></div></div>
+            <div class="grid grid-cols-[1fr_96px] gap-3">
+                <div class="min-w-0">${LBL('City *')}<input id="tt-city" class="${INPUT}" maxlength="40" value="${esc(v('city'))}" placeholder="Coral Springs"></div>
+                <div class="min-w-0">${LBL('State')}<input id="tt-state" class="${INPUT}" maxlength="20" value="${esc(v('state', 'FL'))}" placeholder="FL"></div>
             </div>
             <div>${LBL('Format')}${seg('tt-format', ['5v5', '6v6', '7v7', '8v8', '9v9', '11v11'].map(x => [x, x]), v('format', '8v8'))}</div>
             <div class="grid grid-cols-2 gap-3">
@@ -490,9 +584,12 @@ function drawCreate() {
                 <input id="tt-reqpay" type="checkbox" class="w-6 h-6 accent-amber-400" ${payOn ? 'checked' : ''}>
             </label>
             ${prizeFormHtml(v)}
+            ${regCloseFormHtml(v)}
             ${comms.length ? `<div>${LBL('🏘️ Post in a community (optional)')}<select id="tt-comm" class="${INPUT}"><option value="">No community</option>${comms.map(id => `<option value="${esc(id)}" ${v('communityId') === id ? 'selected' : ''}>${esc(cache[id].name || 'Community')}</option>`).join('')}</select></div>` : ''}
             <div>${LBL('Description / rules')}<textarea id="tt-desc" rows="3" maxlength="800" class="${INPUT}" placeholder="e.g. 25-minute games. Bring light and dark shirts.">${esc(v('description'))}</textarea></div>
             <button onclick="ttCreateNext()" class="${GOLDBTN} w-full py-3.5 text-sm">Next: proposed schedule ›</button>`);
+        // same park list as games and VS: suggestions while typing, fills the city / state (parks.js)
+        setTimeout(() => attachParkPicker({ input: 'tt-park', city: 'tt-city', state: 'tt-state' }), 0);
         return;
     }
     // page 2: the proposed schedule
@@ -505,7 +602,9 @@ function drawCreate() {
             <div class="min-w-0">${LBL('Starts')}<input type="time" class="${INPUT} !px-2" value="${esc(d.time || '')}" oninput="ttDaySet(${i},'time',this.value)"></div>
             <div class="min-w-0">${LBL('Ends')}<input type="time" class="${INPUT} !px-2" value="${esc(d.until || '')}" oninput="ttDaySet(${i},'until',this.value)"></div>
         </div>
-        <div>${LBL('What happens (optional)')}<input class="${INPUT}" maxlength="40" value="${esc(d.label || '')}" oninput="ttDaySet(${i},'label',this.value)" placeholder="${['e.g. Group games / Semi-finals', 'e.g. Final (if you advance)', 'e.g. Final', 'What happens this day'][Math.min(i, 3)]}"></div>
+        <div>${LBL('What happens (pick all that apply)')}
+            <div class="flex flex-wrap gap-1.5">${DAY_TYPES.map(([k, l]) => { const on = dayTypesOf(d).includes(k); return `<button type="button" onclick="ttDayType(${i},'${k}')" class="px-2.5 py-1.5 rounded-xl text-[11px] font-black border ${on ? 'bg-amber-400 text-slate-950 border-amber-400' : 'bg-black/50 text-white/80 border-white/15'}">${l}</button>`; }).join('')}</div>
+            ${dayTypesOf(d).includes('other') ? `<input class="${INPUT} mt-2" maxlength="40" value="${esc(d.other || '')}" oninput="ttDaySet(${i},'other',this.value)" placeholder="Type what happens">` : ''}</div>
     </div>`;
     sheet('tt-create', title, `${dots}
         <div class="text-center"><div class="text-lg font-black">📅 Proposed schedule</div><div class="text-[11px] text-white/55">Subject to change. The exact game times are set after the draw.</div></div>
@@ -536,14 +635,45 @@ function prizeFormHtml(v) {
                 <input type="file" accept="image/*" class="hidden" onchange="ttTrophyPick(this)"></label>
         </div></div>`;
 }
+/** What happens on a day (pick any; "Other" lets you type). label = the readable line shown everywhere. */
+export const DAY_TYPES = [['opening', '🎉 Opening ceremony'], ['group', 'Group stage'], ['league', 'League games'], ['knockout', 'Knockout stage'],
+    ['r16', 'Round of 16'], ['qf', 'Quarter-finals'], ['sf', 'Semi-finals'], ['third', '3rd place game'], ['final', '🏆 Final'],
+    ['awards', '🥇 Awards / trophy'], ['closing', 'Closing ceremony'], ['photos', '📸 Team photos'], ['skills', 'Skills challenge'],
+    ['shootout', 'Penalty shootout contest'], ['kids', 'Kids games'], ['food', '🍔 Food / BBQ'], ['music', '🎵 Music / DJ'], ['rain', '☔ Rain date'], ['other', '✏️ Other']];
+const DAY_NAME = Object.fromEntries(DAY_TYPES.map(([k, l]) => [k, l.replace(/^[^A-Za-z0-9]+\s*/, '')]));
+/** The day's types (older days only have a typed label: shown as "Other"). */
+function dayTypesOf(d) {
+    if (Array.isArray(d.types)) return d.types;
+    if (d.label && !d.other) { d.other = d.label; d.types = ['other']; return d.types; }
+    return [];
+}
+export function dayLabelOf(types, other) {
+    return types.filter(k => k !== 'other').map(k => DAY_NAME[k] || k).concat(other ? [other] : []).join(' · ').slice(0, 120);
+}
+/** 📝 When does registration close? Default: when the tournament starts. Or an earlier day + time. */
+function regCloseFormHtml(v) {
+    const cur = String(v('regClose', '') || ''), early = !!cur;
+    const [d, hm] = cur.split(' ');
+    return `<div class="bg-black/40 border ${early ? 'border-amber-400/70' : 'border-white/10'} rounded-2xl p-3 space-y-3">
+        <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">📝 When does registration close?</div>
+        <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tt-regwhen" value="start" class="w-5 h-5 accent-amber-400" ${early ? '' : 'checked'} onchange="document.getElementById('tt-reg-row').style.display='none'">
+            <span class="text-sm font-bold">When the tournament starts</span></label>
+        <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="tt-regwhen" value="early" id="tt-reg-early" class="w-5 h-5 accent-amber-400" ${early ? 'checked' : ''} onchange="document.getElementById('tt-reg-row').style.display=''">
+            <span class="text-sm font-bold">Earlier, on a day and time I pick</span></label>
+        <div id="tt-reg-row" class="grid grid-cols-[1fr_120px] gap-3" style="display:${early ? '' : 'none'}">
+            <div class="min-w-0">${LBL('Closes on')}<input id="tt-reg-date" type="date" class="${INPUT}" value="${esc(d || '')}"></div>
+            <div class="min-w-0">${LBL('At')}<input id="tt-reg-time" type="time" class="${INPUT} !px-2" value="${esc(hm || '23:59')}"></div>
+        </div></div>`;
+}
 /** Keeps what's typed on page 1 when the trophy picture redraws the form. */
 function readBasics() {
     return {
-        name: val('tt-name'), date: val('tt-start-date'), time: val('tt-start-time'), park: val('tt-park'), city: val('tt-city'),
+        name: val('tt-name'), date: val('tt-start-date'), time: val('tt-start-time'), park: val('tt-park'), city: val('tt-city'), state: val('tt-state') || 'FL',
         format: segVal('tt-format') || '8v8', minTeams: num('tt-minteams', 4), maxTeams: num('tt-maxteams', 8), minPlayers: num('tt-minpl', 7), maxPlayers: num('tt-maxpl', 12),
         price: val('tt-price'), requirePay: !!document.getElementById('tt-reqpay')?.checked, communityId: val('tt-comm'), description: val('tt-desc'),
         prizeCash: !!document.getElementById('tt-cash')?.checked, prizeAmt: val('tt-cash-amt'), trophy: !!document.getElementById('tt-trophy')?.checked,
         trophyPhoto: F.trophyCleared ? '' : (F.basics.trophyPhoto !== undefined ? F.basics.trophyPhoto : (F.pre.trophyPhoto || '')),
+        regClose: document.getElementById('tt-reg-early')?.checked && val('tt-reg-date') ? `${val('tt-reg-date')} ${val('tt-reg-time') || '23:59'}` : '',
     };
 }
 window.ttTrophyPick = function (input) {
@@ -563,6 +693,8 @@ window.ttTrophyClear = function () {
 window.ttCreateNext = function () {
     const b = readBasics();
     if (b.prizeCash && !(parseFloat(String(b.prizeAmt || '').replace(',', '.')) > 0)) { toast('Put the cash prize amount (or untick it).', 'error'); return; }
+    if (document.getElementById('tt-reg-early')?.checked && !b.regClose) { toast('Pick the day registration closes (or choose "When the tournament starts").', 'error'); return; }
+    if (b.regClose && b.date && b.regClose > `${b.date} ${b.time || '23:59'}`) { toast('Registration has to close before the tournament starts.', 'error'); return; }
     if (!b.name || !b.date || !b.time || !b.park || !b.city) { toast('Fill in the name, starting date and time, park and city.', 'error'); return; }
     if (b.minTeams > b.maxTeams) { toast("Min teams can't be more than max teams.", 'error'); return; }
     if (b.minPlayers > b.maxPlayers) { toast("Min players can't be more than max players.", 'error'); return; }
@@ -576,6 +708,14 @@ window.ttCreateNext = function () {
 };
 window.ttCreateBack = () => { F.step = 1; drawCreate(); };
 window.ttDaySet = (i, k, x) => { if (F.days[i]) F.days[i][k] = x; };
+window.ttDayType = (i, k) => {
+    const d = F.days[i]; if (!d) return;
+    const cur = dayTypesOf(d);
+    d.types = cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k];
+    const box = document.querySelector('#tt-create > div'), top = box ? box.scrollTop : 0;
+    drawCreate();
+    const b2 = document.querySelector('#tt-create > div'); if (b2) b2.scrollTop = top;
+};
 window.ttDayAdd = () => {
     const last = F.days[F.days.length - 1] || {};
     let date = '';
@@ -587,11 +727,13 @@ window.ttDayAdd = () => {
 window.ttDayRemove = (i) => { F.days.splice(i, 1); drawCreate(); };
 window.saveTourney = async function (editId) {
     const b = F.basics;
-    const days = F.days.filter(d => d.date).map(d => ({ date: d.date, time: d.time || '', until: d.until || '', label: String(d.label || '').trim() }))
+    const days = F.days.filter(d => d.date).map(d => { const types = dayTypesOf(d), other = types.includes('other') ? String(d.other || '').trim() : '';
+        return { date: d.date, time: d.time || '', until: d.until || '', types, other, label: dayLabelOf(types, other) }; })
         .sort((x, y) => `${x.date} ${x.time}`.localeCompare(`${y.date} ${y.time}`));
     if (!days.length || !days[0].time) { toast('Day 1 needs a date and a start time.', 'error'); return; }
     const cid = b.communityId || '';
-    const fields = { name: b.name, date: days[0].date, time: days[0].time, days, park: b.park, city: b.city, location: `${b.park}, ${b.city}`, format: b.format,
+    saveParkIfNew(b.park, b.city, b.state || 'FL');   // a new field: suggested next time (same list as games / VS)
+    const fields = { name: b.name, date: days[0].date, time: days[0].time, days, park: b.park, city: b.city, state: b.state || 'FL', location: `${b.park}, ${b.city}`, format: b.format,
         minTeams: b.minTeams, maxTeams: b.maxTeams, minPlayers: b.minPlayers, maxPlayers: b.maxPlayers,
         priceCents: Math.round((parseFloat(String(b.price || '').replace(',', '.')) || 0) * 100), requirePay: !!b.requirePay, description: b.description,
         communityId: cid, communityName: cid ? (((window.communitiesCache || {})[cid] || {}).name || '') : '', updatedAt: serverTimestamp() };
@@ -601,6 +743,7 @@ window.saveTourney = async function (editId) {
     fields.prizeCents = b.prizeCash ? Math.round((parseFloat(String(b.prizeAmt || '').replace(',', '.')) || 0) * 100) : 0;
     fields.trophy = !!b.trophy;
     fields.trophyPhoto = b.trophy ? (b.trophyPhoto || '') : '';
+    fields.regClose = b.regClose || '';
     const btn = document.querySelector('#tt-create button[onclick^="saveTourney"]'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
         if (b.trophy && F.trophyFile) {
@@ -615,13 +758,36 @@ window.saveTourney = async function (editId) {
             return;
         }
         const ref = doc(C('tournaments'));
-        const t = { ...fields, organizerId: myUid(), organizerName: myName(), status: 'signup', plan: '', teams: [], teamIds: [], participantUids: [myUid()], matches: [], prizes: withAutoPrize([], fields), championId: '', announcements: [], createdAt: serverTimestamp() };
+        const t = { ...fields, organizerId: myUid(), organizerName: myName(), status: 'signup', plan: '', teams: [], teamIds: [], participantUids: [myUid()], matches: [], prizes: withAutoPrize(F.pre.prizes || [], fields), championId: '', announcements: [], createdAt: serverTimestamp() };
         await setDoc(ref, t);
         document.getElementById('tt-create')?.remove();
         window.closeCreateActionSheet && window.closeCreateActionSheet();
         toast('Tournament created! 🏆 Share it so teams can register.');
         window.openTourney(ref.id, { ...t, id: ref.id });
     } catch (e) { toast(String(e && e.message) === 'TOO_MANY' ? 'More teams already registered than that.' : "Couldn't save the tournament.", 'error'); if (btn) { btn.disabled = false; btn.textContent = editId ? 'Save changes' : 'Create tournament'; } }
+};
+/** 📋 Copy tournament: a new one with the same settings (fee, prize, trophy picture, format, rules, community, the day plan).
+ *  The dates move to the same weekday, at least a week from today (keeping the days apart the same); change anything. */
+export function copyOfTourney(t) {
+    const ds = daysOf(t), first = ds[0].date;
+    const at = (ymd) => { const [y, m, d] = String(ymd).split('-').map(Number); return new Date(y, (m || 1) - 1, d || 1); };
+    const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    let shift = 0;
+    if (first) { const min = at(ymdToday()); min.setDate(min.getDate() + 7); while (at(first).getTime() + shift * 86400000 < min.getTime()) shift += 7; }
+    const move = (ymd) => { if (!ymd) return ''; const d = at(ymd); d.setDate(d.getDate() + shift); return fmt(d); };
+    const keep = ['name', 'park', 'city', 'state', 'location', 'format', 'minTeams', 'maxTeams', 'minPlayers', 'maxPlayers', 'priceCents', 'requirePay', 'description',
+        'communityId', 'communityName', 'prizeCash', 'prizeCents', 'trophy', 'trophyPhoto', 'prizes', 'prizeNote'];
+    const out = {};
+    keep.forEach(k => { if (t[k] !== undefined) out[k] = JSON.parse(JSON.stringify(t[k])); });
+    out.days = ds.map(d => ({ date: move(d.date), time: d.time || '', until: d.until || '', label: d.label || '', ...(Array.isArray(d.types) ? { types: [...d.types], other: d.other || '' } : {}) }));
+    out.date = out.days[0].date; out.time = out.days[0].time;
+    if (t.regClose) { const [d, hm] = String(t.regClose).split(' '); out.regClose = `${move(d)} ${hm || '23:59'}`; }
+    return out;
+}
+window.copyTourney = function () {
+    const t = TT.open; if (!t) return;
+    window.openCreateTourney(copyOfTourney(t));
+    toast('Copied. Check the dates and the name, then create it. 📋');
 };
 /** The 🥇 1st prize line from the cash / trophy ticks ("$400 + 🏆 Trophy"). Only replaces a line it made itself. */
 export function prizeText(f) {
@@ -670,7 +836,7 @@ window.ttRegisterTeam = async function (id) {
     if (!myUid()) { toast('Sign in first to register your team.', 'error'); window.switchTab && window.switchTab('profile'); return; }
     if (!TT.open || TT.open.id !== id) window.openTourney(id, null, 'info');
     const t = TT.open || TT.list.find(x => x.id === id); if (!t) return;
-    if (!canRegister(t)) { toast(t.status === 'signup' ? 'Registration is full.' : 'Registration is closed.', 'error'); return; }
+    if (!canRegister(t)) { toast(t.status === 'signup' && !regOver(t) ? 'Registration is full.' : 'Registration is closed.', 'error'); return; }
     const free = myCaptainTeams().filter(x => !(t.teamIds || []).includes(x.id));
     if (free.length === 1) return window.openTourneyPlayers(free[0].id, true);
     if (free.length) return window.openJoinTourney();
@@ -750,7 +916,7 @@ window.saveTourneyPlayers = async function (teamId, joining) {
         await change(t0.id, (t) => {
             const cur = t.teams.find(y => y.teamId === teamId);
             if (joining) {
-                if (t.status !== 'signup') throw new Error('STARTED');
+                if (t.status !== 'signup' || regOver(t)) throw new Error('STARTED');
                 if (t.teams.length >= maxTeamsOf(t)) throw new Error('FULL');
                 if (cur) { cur.roster = roster; return; }
                 t.teams.push({ teamId, name: x.name, short: x.short || '', logo: x.logo || null, colors: x.colors || {}, paid: !(+t.priceCents), joinedBy: myUid(), joinedByName: myName(), joinedAt: Date.now(), roster });
@@ -1005,7 +1171,7 @@ window.closeTourney = () => { TT.open = null; if (TT.chatUnsub) { TT.chatUnsub()
 window.ttTab = (k) => { TT.tab = k; drawPage(); };
 window.shareTourney = async function () {
     const t = TT.open; if (!t) return;
-    const text = `🏆 ${t.name} · ${daysText(t)} at ${t.location || ''}. ${t.status === 'signup' ? 'Register your team on FutNet!' : ''}`;
+    const text = `🏆 ${t.name} · ${daysText(t)} at ${t.location || ''}. ${canRegister(t) ? 'Register your team on FutNet!' : ''}`;
     const url = `https://futnet.site/#tourney=${encodeURIComponent(t.id)}`;
     try { if (navigator.share) { await navigator.share({ title: t.name, text, url }); return; } } catch (e) { return; }
     try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Copied! Paste it in WhatsApp.'); } catch (e) { /* ignore */ }
@@ -1032,7 +1198,7 @@ function matchRow(t, m, boss) {
     const can = boss && canScore(t) && m.a && m.b;
     const timesOut = ['set', 'running', 'final'].includes(t.status);
     return `<div ${can ? `onclick="openTourneyScore('${jsq(m.id)}')"` : ''} class="bg-black/40 border ${m.stage === 'final' ? 'border-amber-400/60' : 'border-white/10'} rounded-2xl p-3 space-y-1.5 ${can ? 'cursor-pointer hover:bg-black/60' : ''}">
-        <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider"><span class="${m.stage === 'final' ? 'text-amber-300' : 'text-[#00F296]'}">${m.stage === 'final' ? '🏆 ' : ''}${esc(matchLabel(m))}</span>${can ? `<span class="text-white/45 normal-case tracking-normal font-bold">${m.done ? 'Edit' : 'Enter score'} ›</span>` : ''}</div>
+        <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider"><span class="${m.stage === 'final' ? 'text-amber-300' : 'text-[#00F296]'}">${m.stage === 'final' ? '🏆 ' : ''}${esc(matchLabel(m))}${m.livestream && m.livestream.status === 'live' ? ' <span onclick="event.stopPropagation(); openTourneyMatch(\'' + jsq(t.id) + '\', \'' + jsq(m.id) + '\')" class="ml-1 bg-red-600 text-white px-1.5 py-0.5 rounded normal-case tracking-normal cursor-pointer">● LIVE</span>' : ''}</span>${can ? `<span class="text-white/45 normal-case tracking-normal font-bold">${m.done ? 'Edit' : 'Enter score'} ›</span>` : ''}</div>
         <div class="flex items-center gap-2">${side(A, m.aFrom)}${mid}${side(B, m.bFrom, true)}</div>
         ${timesOut && (m.date || m.time) ? `<div class="flex items-center justify-center gap-2 text-[10px] text-white/60"><span>📅 ${esc(shortDate(m.date))}${m.time ? ' · ' + esc(prettyTime(m.time)) : ''}${m.place ? ' · ' + esc(m.place) : ''}</span>${boss && t.status !== 'final' ? `<button onclick="event.stopPropagation(); openTourneyWhen('${jsq(m.id)}')" class="text-amber-300 font-bold underline">change</button>` : ''}</div>`
         : !timesOut ? '<div class="text-center text-[10px] text-white/40">Time to be announced</div>' : ''}
@@ -1102,7 +1268,8 @@ function drawPage() {
         ${(t.prizes || []).length ? `<button onclick="ttTab('prizes')" class="w-full bg-amber-400/10 border border-amber-400/40 rounded-2xl p-3 text-left text-xs"><b class="text-amber-200">🎁 Prizes:</b> ${t.prizes.map(p => esc(p.place) + ' ' + esc(p.prize)).join(' · ')}</button>` : ''}
         ${t.description ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1">Details & rules</div><p class="text-xs text-white/85 whitespace-pre-line">${esc(t.description)}</p></div>` : ''}
         ${canRegister(t) && !(myCaptainTeams().length && myCaptainTeams().every(y => (t.teamIds || []).includes(y.id))) ? `<button onclick="ttRegisterTeam('${jsq(t.id)}')" class="${GOLDBTN} w-full py-3 text-sm">📝 Register your team</button>` : ''}
-        ${t.status === 'signup' && n >= max ? '<p class="text-xs text-center text-amber-300 font-bold">Registration is full.</p>' : ''}
+        ${t.status === 'signup' && !regOver(t) ? `<p class="text-[11px] text-center text-white/60">📝 Registration closes ${esc(regCloseText(t))}</p>` : ''}
+        ${t.status === 'signup' && regOver(t) ? `<p class="text-xs text-center text-amber-300 font-bold">Registration is closed${t.regClose ? '' : ': the tournament has started'}.</p>` : t.status === 'signup' && n >= max ? '<p class="text-xs text-center text-amber-300 font-bold">Registration is full.</p>' : ''}
         <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-3"><div class="text-[9px] font-bold text-white/55 uppercase">Organized by</div><div class="text-sm font-black">${esc(t.organizerName || 'Organizer')}</div></div>
     </div>`;
     const teams = `<div class="space-y-2">${(t.teams || []).map(x => { const r = rosterOf(x); const mine = myIn.some(y => y.teamId === x.teamId); return `<div class="bg-black/40 border ${mine ? 'border-[#00F296]/50' : 'border-white/10'} rounded-2xl p-3 space-y-2">
@@ -1157,6 +1324,7 @@ function drawPage() {
             <button onclick="openTourneyPrizes()" class="${DARK} py-3">🎁 Prizes</button>
             ${['signup', 'draw', 'waiting'].includes(t.status) ? `<button onclick="openCreateTourney(window.__tourneyState.open)" class="${DARK} py-3">✏️ Edit details</button>` : ''}
             <button onclick="shareTourney()" class="${DARK} py-3">📤 Share</button>
+            <button onclick="copyTourney()" class="${DARK} py-3">📋 Copy tournament</button>
             ${t.status !== 'final' ? `<button onclick="cancelTourney()" class="${DARK} py-3 text-red-400">❌ Cancel</button>` : ''}
         </div>
         ${+t.priceCents ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs"><b>Payments:</b> ${(t.teams || []).filter(x => x.paid).length} of ${n} paid · ${money((t.teams || []).filter(x => x.paid).length * t.priceCents)} collected. Mark payments in the Teams tab.</div>` : ''}

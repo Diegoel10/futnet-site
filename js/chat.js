@@ -523,15 +523,14 @@ window.renderActiveChatMessages = function() {
 
     const myUid = window.currentUser?.uid;
     const myName = window.userProfile?.name || window.userProfile?.firstName || window.currentUser?.displayName || '';
-    // Messages stay in the order they were saved (the true order: each one is added to the end of the chat).
-    // Their time comes from the sender's device, and a phone with its clock a few minutes off used to put
-    // a reply ABOVE the message it answers. Now a time is never shown earlier than the message before it.
+    // Shown in time order (the time each message was sent), so the order always matches the times shown.
+    // Two messages sent at the same moment (or one with no time) keep the order they were saved in.
     let prevMs = 0;
-    const list = th.messages.map((m, i) => {
+    const timed = th.messages.map((m, i) => { const r = msOf(m) || prevMs; if (r) prevMs = r; return { m, i, r }; })
+        .sort((a, b) => (a.r - b.r) || (a.i - b.i));
+    const list = timed.map(({ m, i, r }) => {
         const mine = (m.senderUid && m.senderUid === myUid) || (!m.senderUid && myName && m.sender && m.sender.toLowerCase() === myName.toLowerCase());
-        const real = msOf(m) || 0;
-        const ms = Math.max(real || prevMs, prevMs);
-        if (ms) prevMs = ms;
+        const ms = r;
         return { id: m.id, uid: mine ? myUid : th.id, name: mine ? 'You' : th.name, text: m.text, ms, time: m.time, timeText: ms ? '' : (m.time || ''), isRead: m.isRead === true, media: m.media,
             deleted: m.deleted === true, edited: m.edited === true, reactions: m.reactions, replyTo: m.replyTo, _i: i };
     });

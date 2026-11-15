@@ -681,7 +681,8 @@ exports.onGameWritten = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async 
   const ls = after.livestream, lsBefore = before.livestream;
   if (ls && ls.status === "live" && ls.notify !== false && ls.startedAt && (!lsBefore || lsBefore.startedAt !== ls.startedAt)) {
     try {
-      const people = after.communityId ? (await communityMembers(after.communityId)).all : participants(after);
+      // only the people who can watch it (👁️ "players only" = the players in the game)
+      const people = after.communityId && ls.visibility !== "players" ? (await communityMembers(after.communityId)).all : uniq([...participants(after), ...(await gameBosses(after))]);
       const who = ls.startedByName || (await nameOf(ls.startedBy || organizer));
       await notify(people, {
         type: "game_live",
@@ -4096,6 +4097,15 @@ exports.onTourneyChanged = onDocumentUpdatedWithAuthContext(`${BASE}/tournaments
         jobs.push(notify([...ttTeamPeople(t, m.a), ...ttTeamPeople(t, m.b)], { ...base, type: "tourney_time", title: `📅 Time change: ${ttLabel(m)}`, body: `${ttName(t, m.a)} vs ${ttName(t, m.b)} is now ${ttWhen(m)}${m.place ? " at " + m.place : ""}.`, tab: "bracket" }, { exclude: [by], key: `tttime_${id}_${m.id}_${m.date}_${m.time}` }));
       });
     }
+    // 🔴 a match went live: everyone in the tournament (tapping opens that match)
+    const oldLive = new Map(arr(before.matches).map((m) => [m.id, m.livestream || null]));
+    arr(t.matches).forEach((m) => {
+      const ls = m.livestream, was = oldLive.get(m.id);
+      const k = (x) => (x && (x.videoId || x.embedUrl)) || "";
+      if (!ls || ls.status !== "live" || (was && was.status === "live" && k(was) === k(ls))) return;
+      const watchers = ls.visibility === "teams" ? uniq([t.organizerId, ...ttTeamPeople(t, m.a), ...ttTeamPeople(t, m.b)]) : ttPeople(t);   // 👁️ only who can watch
+      jobs.push(notify(watchers, { ...base, type: "tourney_live", title: `🔴 LIVE now: ${ttName(t, m.a)} vs ${ttName(t, m.b)}`, body: `${name} · ${ttLabel(m)}. Tap to watch.`, tab: `match:${m.id}` }, { exclude: [by], key: `ttlive_${id}_${m.id}_${ls.startedAt || k(ls).slice(-40)}` }));
+    });
     // a game finished
     const wasDone = new Set(arr(before.matches).filter((m) => m.done).map((m) => m.id));
     arr(t.matches).filter((m) => m.done && !wasDone.has(m.id) && m.stage !== "final").forEach((m) => {
@@ -4282,6 +4292,14 @@ async function tourneyChangeProblem(before, after, uid) {
     if (same(x, y)) continue;
     if (!(await runs(x || y, id))) return "changed a team they don't run";
     if (!x || !y) { if (before.status !== "signup") return "joined/left after registration closed"; }
+    if (!x && y) {
+      // registration closes by itself: at regClose ("YYYY-MM-DD HH:MM", the organizer picks it), else the day the tournament starts
+      const first = arr(before.days).map((d) => d && d.date).filter(Boolean).sort()[0] || before.date || "";
+      const close = String(before.regClose || "") || (first ? `${first} 00:00` : "");
+      const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+      const now = `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+      if (close && now >= close) return "registered after registration closed";
+    }
     if (!x && y && (y.paid && Number(before.priceCents) > 0)) return "marked their own team as paid";
     if (x && y && !same({ ...x, roster: null }, { ...y, roster: null })) return "changed more than their players";
   }
@@ -4303,6 +4321,27 @@ exports.tourneyDeleteGuard = onDocumentDeletedWithAuthContext(`${BASE}/tournamen
   if (before.organizerId === uid || await isOwnerUid(uid)) return;
   await event.data.ref.set({ ...before, guardFix: Date.now() });
   await logBlocked("tournament", event.params.id, before.name, uid, "deleted the tournament");
+});
+
+// 🏟️ The shared park / field list (games, VS, tournaments pick from it). verified = the owner's checkmark (manager).
+//   Ratings (ready for later, when field pages open from a game): global/parks/list/{id}/ratings/{uid} = { stars 1-5, at },
+//   and on the field: ratingSum + ratingCount (average = sum / count). One rating per person; they can change it.
+const parksCol = () => col("global").doc("parks").collection("list");
+const parkSlug = (name, city) => `${String(name).toLowerCase().trim()}|${String(city || "").toLowerCase().trim()}`.replace(/[^a-z0-9|]+/g, "-").replace(/\|/g, "__").replace(/^-+|-+$/g, "").slice(0, 120);
+exports.rateField = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  const id = String((request.data || {}).id || ""), stars = Math.round(Number((request.data || {}).stars));
+  if (!id || !(stars >= 1 && stars <= 5)) throw new HttpsError("invalid-argument", "Pick 1 to 5 stars.");
+  const ref = parksCol().doc(id), mine = ref.collection("ratings").doc(uid);
+  await db.runTransaction(async (tx) => {
+    const [f, r] = await Promise.all([tx.get(ref), tx.get(mine)]);
+    if (!f.exists) throw new HttpsError("not-found", "That field isn't in the list.");
+    const old = r.exists ? Number(r.data().stars) || 0 : 0;
+    tx.set(mine, { stars, at: Date.now() });
+    tx.set(ref, { ratingSum: admin.firestore.FieldValue.increment(stars - old), ratingCount: admin.firestore.FieldValue.increment(r.exists ? 0 : 1) }, { merge: true });
+  });
+  return { ok: true };
 });
 
 exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (request) => {
@@ -4490,6 +4529,38 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     }
     return { totals: Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 80), perDay: perDay.reverse() };
   }
+  if (action === "fields") {
+    // 🏟️ every park / field (global/parks/list) + how many games, VS matches and tournaments use it
+    const [list, ev, vs, tt] = await Promise.all([parksCol().get(), col("eventsList").select("location", "park").get(), col("vsMatches").select("park", "location").get(), col("tournaments").select("park", "location").get()]);
+    const used = {};
+    const bump = (txt) => { const t = String(txt || "").toLowerCase(); if (t) used[t] = (used[t] || 0) + 1; };
+    [ev, vs, tt].forEach((sn) => sn.docs.forEach((x) => { const d = x.data() || {}; bump(d.park || String(d.location || "").split(/[(,]/)[0].trim()); }));
+    const ms = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : Number(v) || 0);
+    const out = list.docs.map((x) => {
+      const p = x.data() || {};
+      return { id: x.id, name: p.name || "", city: p.city || "", state: p.state || "", address: p.address || "", verified: !!p.verified, verifiedAt: ms(p.verifiedAt),
+        ratingSum: Number(p.ratingSum) || 0, ratingCount: Number(p.ratingCount) || 0, addedBy: p.addedBy || "", createdAt: ms(p.createdAt), uses: used[String(p.name || "").toLowerCase()] || 0 };
+    }).sort((a, b) => (b.uses - a.uses) || a.name.localeCompare(b.name));
+    return { list: out };
+  }
+  if (action === "fieldSave") {
+    const f = d.field || {};
+    const name = String(f.name || "").trim().slice(0, 60), city = String(f.city || "").trim().slice(0, 40), state = String(f.state || "FL").trim().slice(0, 20) || "FL";
+    if (!name || !city) throw new HttpsError("invalid-argument", "Add the name and the city.");
+    const id = String(f.id || "") || parkSlug(name, city);
+    await parksCol().doc(id).set({ name, city, state, address: String(f.address || "").trim().slice(0, 120) || `${city}, ${state}`, updatedAt: admin.firestore.FieldValue.serverTimestamp(), ...(f.id ? {} : { addedBy: me, createdAt: admin.firestore.FieldValue.serverTimestamp() }) }, { merge: true });
+    return { ok: true, id };
+  }
+  if (action === "fieldVerify") {
+    const id = String(d.id || ""); if (!id) throw new HttpsError("invalid-argument", "Which field?");
+    await parksCol().doc(id).set(d.on ? { verified: true, verifiedAt: admin.firestore.FieldValue.serverTimestamp(), verifiedBy: me } : { verified: false, verifiedAt: admin.firestore.FieldValue.delete(), verifiedBy: admin.firestore.FieldValue.delete() }, { merge: true });
+    return { ok: true };
+  }
+  if (action === "fieldDelete") {
+    const id = String(d.id || ""); if (!id) throw new HttpsError("invalid-argument", "Which field?");
+    await parksCol().doc(id).delete();
+    return { ok: true };
+  }
   if (action === "themes") {
     // 🎨 who uses which theme (users/{uid}/profile/data.theme). No theme saved = they see Tokyo Rooftop (the default).
     const [people, profs] = await Promise.all([col("people").get(), db.collectionGroup("profile").get()]);
@@ -4588,4 +4659,66 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     return { ok: true, name: dir[uid].name || "" };
   }
   throw new HttpsError("invalid-argument", "Unknown action.");
+});
+
+// ---------------------------------------------------------------- 👁️ who can watch a livestream
+// livestream.visibility (picked by the organizer when going live, or changed later):
+//   "all" (default) · games: "community" (the community's members) · "players" (players in the game / the VS match's teams)
+//   · tournament matches: "tournament" (everyone in it) · "teams" (the players of those two teams).
+// The server keeps livestream.allow = the uids that may watch (organizers / admins always can), so the apps
+// only check one list. It's updated whenever the game / match changes (new players, new members on the next change).
+const sameList = (a, b) => { const x = uniq(arr(a)).sort(), y = uniq(arr(b)).sort(); return x.length === y.length && x.every((v, i) => v === y[i]); };
+async function gameLiveAllow(g, vis) {
+  const bosses = await gameBosses(g);
+  if (vis === "community" && g.communityId) return uniq([...(await communityMembers(g.communityId)).all, ...bosses]);
+  return uniq([...participants(g), ...bosses]);
+}
+exports.liveAccessGame = onDocumentWritten(`${BASE}/eventsList/{eventId}`, async (event) => {
+  const g = event.data.after.exists ? event.data.after.data() : null;
+  const ls = g && g.livestream;
+  if (!ls) return;
+  const vis = ls.visibility || "all";
+  try {
+    if (vis === "all") { if (ls.allow) await event.data.after.ref.update({ "livestream.allow": FV.delete() }); return; }
+    const allow = await gameLiveAllow(g, vis);
+    if (!sameList(allow, ls.allow)) await event.data.after.ref.update({ "livestream.allow": allow });
+  } catch (e) { logger.warn("liveAccessGame", event.params.eventId, e.message); }
+});
+exports.liveAccessVs = onDocumentWritten(`${BASE}/vsMatches/{matchId}`, async (event) => {
+  const m = event.data.after.exists ? event.data.after.data() : null;
+  const ls = m && m.livestream;
+  if (!ls) return;
+  const vis = ls.visibility || "all";
+  try {
+    if (vis === "all") { if (ls.allow) await event.data.after.ref.update({ "livestream.allow": FV.delete() }); return; }
+    const allow = await vsPeople(m);
+    if (!sameList(allow, ls.allow)) await event.data.after.ref.update({ "livestream.allow": allow });
+  } catch (e) { logger.warn("liveAccessVs", event.params.matchId, e.message); }
+});
+exports.liveAccessTourney = onDocumentWritten(`${BASE}/tournaments/{id}`, async (event) => {
+  const t = event.data.after.exists ? event.data.after.data() : null;
+  if (!t) return;
+  const want = (x, m) => {
+    const vis = (m.livestream && m.livestream.visibility) || "all";
+    if (vis === "all") return null;
+    if (vis === "teams") return uniq([x.organizerId, ...ttTeamPeople(x, m.a), ...ttTeamPeople(x, m.b)]);
+    return uniq([x.organizerId, ...ttPeople(x)]);
+  };
+  const needs = (x) => arr(x.matches).some((m) => m.livestream && (want(x, m) ? !sameList(want(x, m), m.livestream.allow) : !!m.livestream.allow));
+  if (!needs(t)) return;
+  try {
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(event.data.after.ref); if (!s.exists) return;
+      const x = s.data();
+      if (!needs(x)) return;
+      const ms = arr(x.matches).map((m) => {
+        if (!m.livestream) return m;
+        const a = want(x, m);
+        const ls = { ...m.livestream };
+        if (a) ls.allow = a; else delete ls.allow;
+        return { ...m, livestream: ls };
+      });
+      tx.update(event.data.after.ref, { matches: ms });
+    });
+  } catch (e) { logger.warn("liveAccessTourney", event.params.id, e.message); }
 });

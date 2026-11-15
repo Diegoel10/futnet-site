@@ -17,7 +17,8 @@ import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTran
 import { smartText } from './smart-text.js';
 import { teamLogoHtml as baseLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
-import { liveSource, liveLinkProblem, liveSlotHtml } from './livestream.js';   // same YouTube / Facebook player as games
+import { watchLive, liveStatsHtml } from './live-stats.js';   // 📊 who watched (same as games)
+import { liveSource, liveLinkProblem, liveSlotHtml, liveButtonsHtml, liveEndedHtml, withReplay, registerLiveChat, liveVisPickerHtml, liveVisValue, liveCanWatch, liveLockedHtml, liveVisBossHtml } from './livestream.js';   // same YouTube / Facebook player as games
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const jsq = (v) => esc(String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
@@ -1418,14 +1419,16 @@ window.openVsLivestream = function () {
             <li><b>YouTube / Facebook:</b> open the live video, tap <b>Share → Copy link</b>. On Facebook, set it to <b>Public</b>.</li>
             <li>Paste it here.</li></ol>
         <input id="vls-url" type="url" inputmode="url" class="${INPUT}" placeholder="XbotGo, YouTube or Facebook live link" value="${esc(window.liveLastLink ? window.liveLastLink() : '')}">
+        ${liveVisPickerHtml('vls-vis', 'vs', false)}
         <button onclick="startVsLivestream()" class="w-full bg-red-600 text-white font-black py-3 rounded-xl text-sm">Go live</button>`);
 };
 window.startVsLivestream = async function () {
     const url = val('vls-url'); const src = lsSource(url);
     if (!src) { toast(liveLinkProblem(url), 'error'); return; }
     window.liveRememberLink && window.liveRememberLink(url, src);
+    const vis = liveVisValue('vls-vis');
     try {
-        await changeMatch(V.open.id, (x) => { x._edit = { livestream: { url, ...src, status: 'live', startedAt: Date.now(), startedBy: myUid(), startedByName: myName() } }; });
+        await changeMatch(V.open.id, (x) => { x._edit = { livestream: { url, ...src, status: 'live', startedAt: Date.now(), startedBy: myUid(), startedByName: myName(), visibility: vis } }; });
         document.getElementById('vs-ls')?.remove(); V.tab = 'live'; toast("You're live! 🔴 Everyone in the match was notified."); drawPage();
     } catch (e) { toast("Couldn't start the livestream.", 'error'); }
 };
@@ -1433,6 +1436,20 @@ window.endVsLivestream = async function () {
     if (!confirm('End the livestream? The video stays on the match as a replay.')) return;
     try { await changeMatch(V.open.id, (x) => { if (!x.livestream) return false; x._edit = { livestream: { ...x.livestream, status: 'ended', endedAt: Date.now() } }; }); } catch (e) { /* ignore */ }
 };
+window.setVsLiveVis = async function (v) {
+    const m = V.open; if (!m) return;
+    try { await changeMatch(m.id, (x) => { if (!x.livestream) return false; x._edit = { livestream: { ...x.livestream, visibility: v } }; }); toast('Saved.'); }
+    catch (e) { toast("Couldn't save it.", 'error'); }
+};
+window.addVsReplay = function () {
+    const m = V.open; if (!m) return;
+    window.openAddReplay('', async (url) => {
+        try { await changeMatch(m.id, (x) => { const r = withReplay(x.livestream, url); if (!r) return false; x._edit = { livestream: r }; }); return true; }
+        catch (e) { toast("Couldn't save it.", 'error'); return false; }
+    });
+};
+// ⛶ full screen: the match comments go on the side
+registerLiveChat('vs', { chat: () => (V.open ? commentsHtml(V.open) : ''), inputId: 'vs-comment', redraw: () => drawPage() });
 window.removeVsLivestream = async function () {
     if (!confirm('Remove the video from this match?')) return;
     try { await changeMatch(V.open.id, (x) => { x._edit = { livestream: null }; }); V.tab = 'info'; } catch (e) { /* ignore */ }
@@ -1441,13 +1458,23 @@ function liveTabHtml(m, boss) {
     const ls = m.livestream;
     if (!ls || !lsKey(ls)) return '<p class="text-xs text-white/50 text-center py-8">No livestream on this match.</p>';
     const on = ls.status === 'live';
-    setTimeout(() => { if (window.mountLivePlayer) window.mountLivePlayer(); }, 0);
+    // XbotGo's link is the live room: once the live ends there's nothing to play until the replay is added
+    const xbEnded = ls.provider === 'xbotgo' && !on;
+    const canWatch = liveCanWatch(ls, boss);
+    if (!xbEnded && canWatch) setTimeout(() => { if (window.mountLivePlayer) window.mountLivePlayer(); }, 0);
+    // 📊 viewers: counted like a game's (stored under eventsList/vs_<id>/liveViews)
+    const statsEv = { id: 'vs_' + m.id, livestream: ls, comments: V.comments.map(c => ({ uid: c.byUid, createdAt: msTs(c.at) })) };
+    if (canWatch) setTimeout(() => watchLive(statsEv), 0);
     return `<div class="space-y-3">
         <div class="flex items-center gap-2">${on ? '<span class="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">● LIVE</span>' : '<span class="bg-white/10 text-white/80 text-[10px] font-black px-2 py-0.5 rounded-full">▶ REPLAY</span>'}
             <span class="flex-1 text-xs text-white/60 truncate">${on ? `Streaming now · ${esc(ls.startedByName || '')}` : 'The livestream has ended. Watch the replay.'}</span>
             <a href="${esc(ls.url || `https://youtu.be/${ls.videoId}`)}" target="_blank" rel="noopener" class="text-[10px] font-black text-white/70 underline shrink-0">Open in ${ls.provider === 'facebook' ? 'Facebook' : ls.provider === 'xbotgo' ? 'XbotGo' : 'YouTube'}</a></div>
-        ${liveSlotHtml(ls)}
+        ${boss ? liveVisBossHtml(ls, 'vs', false, 'setVsLiveVis') : ''}
+        ${!canWatch ? liveLockedHtml(ls, 'vs') : xbEnded ? liveEndedHtml(boss, 'addVsReplay()') : liveSlotHtml(ls) + liveButtonsHtml(ls, 'vs')}
         ${liveScoreHtml(m)}
+        ${boss ? liveStatsHtml(statsEv) : ''}
+        ${on ? `<div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] pt-1">💬 Comments</div>
+            ${window.liveIsFull && window.liveIsFull() ? '<p class="text-center text-xs text-white/50 py-4">💬 The chat is open in full screen.</p>' : commentsHtml(m)}` : ''}
         ${boss ? `<div class="flex gap-2">${on ? `<button onclick="endVsLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">End livestream</button>`
             : `<button onclick="openVsLivestream()" class="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-xl">Start a new livestream</button><button onclick="removeVsLivestream()" class="${DARK}">Remove video</button>`}</div>` : ''}
     </div>`;
@@ -2247,7 +2274,7 @@ function watchComments(id) {
     try {
         V.commentsUnsub = onSnapshot(query(collection(db, 'artifacts', appId, 'vsMatches', id, 'comments'), orderBy('at', 'desc'), limit(100)), s => {
             V.comments = s.docs.map(d => ({ ...d.data(), id: d.id })).reverse();
-            if (V.open && V.open.id === id) drawPage();
+            if (V.open && V.open.id === id) { drawPage(); window.liveFullRefresh && window.liveFullRefresh(); }
         }, () => {});
     } catch (e) { /* ignore */ }
 }
@@ -2337,7 +2364,7 @@ window.openVsTeamCard = function (teamId) {
     const H = (x) => `<div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">${x}</div>`;
     const chip = (p) => { const nm = p.uid ? personName(p.uid, p.name) : p.name;
         return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold"><img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span>`; };
-    const methodName = { cash: 'Cash', venmo: 'Venmo', zelle: 'Zelle', cashapp: 'Cash App', other: 'Other' };
+    const methodName = { cash: 'Cash', venmo: 'Venmo', zelle: 'Zelle', cashapp: 'Cash App', applepay: 'Apple Pay', other: 'Other' };
     sheet('vs-teamcard', esc(t.name), `
         <div class="flex items-center gap-3">${teamLogoHtml(t, 56)}
             <div class="flex-1 min-w-0 space-y-1">
@@ -2432,7 +2459,7 @@ window.openVsPayment = function (teamId) {
     sheet('vs-pay', `Payment from ${esc(t.name)}`, `
         <p class="text-[11px] text-white/60">${money(paidCents(m, teamId))} of ${money(m.priceCents)} paid · ${money(left)} left</p>
         ${m.partial ? `<div>${LBL('Amount received ($)')}<input id="vp-amount" inputmode="decimal" class="${INPUT}" value="${(left / 100).toFixed(left % 100 ? 2 : 0)}"></div>` : `<p class="text-xs font-bold">This match takes the full fee at once: ${money(left)}.</p>`}
-        <div>${LBL('How did they pay?')}${seg('vp-method', [['cash', 'Cash'], ['venmo', 'Venmo'], ['zelle', 'Zelle'], ['cashapp', 'Cash App'], ['other', 'Other']], 'cash')}</div>
+        <div>${LBL('How did they pay?')}${seg('vp-method', [['cash', 'Cash'], ['venmo', 'Venmo'], ['zelle', 'Zelle'], ['cashapp', 'Cash App'], ['applepay', 'Apple Pay'], ['other', 'Other']], 'cash')}</div>
         <button onclick="saveVsPayment('${jsq(teamId)}')" class="${BTN} w-full py-3">Got it: mark received</button>`);
 };
 window.saveVsPayment = async function (teamId) {
