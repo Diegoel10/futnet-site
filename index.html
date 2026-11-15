@@ -55,7 +55,7 @@
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6090723692830298" crossorigin="anonymous"></script>
     <!-- Custom Styles -->
     <link rel="stylesheet" href="css/styles.css">
-    <script>try { var _ft = localStorage.getItem('futnet_theme'); if (_ft && _ft !== 'classic') document.documentElement.setAttribute('data-futtheme', _ft); } catch (e) {}</script>
+    <script>/* no theme picked yet = Tokyo Rooftop (the default since Nov 2026) */ var _ft = 'tokyo'; try { _ft = localStorage.getItem('futnet_theme') || 'tokyo'; } catch (e) {} if (_ft !== 'classic') document.documentElement.setAttribute('data-futtheme', _ft);</script>
     <style>
         /* Prevent mobile browsers from auto-zooming and breaking layout on input focus */
         @media screen and (max-width: 768px) {
@@ -75,6 +75,10 @@
         }
         html[data-futtheme="favela"], html[data-futtheme="favela"] body {
             background: #0C0A14 url('img/theme-favela.jpg') center 62% / cover no-repeat fixed !important;
+        }
+        html[data-futtheme="faveladay"], html[data-futtheme="faveladay"] body {
+            background: linear-gradient(rgba(8,18,26,.25), rgba(8,18,26,.25)), #08121A url('img/theme-favela-day.jpg') center 60% / cover no-repeat fixed !important;
+            background-attachment: fixed !important;
         }
         html[data-futtheme="tokyo"], html[data-futtheme="tokyo"] body {
             background: linear-gradient(rgba(6,14,30,.30), rgba(6,14,30,.30)), #081226 url('img/theme-tokyo.jpg') center 65% / cover no-repeat fixed !important;

@@ -2920,10 +2920,23 @@ async function fillMissingNames(dir) {
   }));
 }
 
-exports.communityTop = onCall(async (request) => {
+// Ready-made community tops: one saved answer per community (futnetPrivate/communityTop/by/{cid}, server only), good for 20 minutes,
+// thrown away when one of its games ends, and rebuilt every night. minInstances 1 = no slow "cold start".
+const topCacheRef = (cid) => db.collection("futnetPrivate").doc("communityTop").collection("by").doc(String(cid));   // server-only
+exports.communityTop = onCall({ minInstances: 1 }, async (request) => {
   if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
   const communityId = String((request.data || {}).communityId || "");
   if (!communityId) throw new HttpsError("invalid-argument", "Missing community.");
+  try {
+    const s = await topCacheRef(communityId).get();
+    const d = s.exists ? s.data() : null;
+    if (d && d.data && Date.now() - (Number(d.at) || 0) < 20 * 60000 && d.day === new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date())) return d.data;
+  } catch (e) { /* build it below */ }
+  const data = await computeCommunityTop(communityId);
+  await topCacheRef(communityId).set({ data, at: Date.now(), day: new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date()) }).catch(() => {});
+  return data;
+});
+async function computeCommunityTop(communityId) {
   const { byUid } = await ratingData();
   const pop = skillPopulation(byUid, communityId);
   const rows = [];
@@ -3003,7 +3016,7 @@ exports.communityTop = onCall(async (request) => {
       worst: worst.map((r) => ({ ...who(r.uid), w: r.w, d: r.d, l: r.l, pts: r.pts, gd: r.gd, goals: r.goals })),
     } : null,
   };
-});
+}
 
 /** Stars for a list of players (rosters): { ratings: { uid: { skill, attendance } } } */
 exports.playerRatings = onCall(async (request) => {
@@ -3041,6 +3054,7 @@ async function saveStats(uid, cid) {
 }
 async function refreshStatsFor(uids, cids) {
   endedCache.at = 0; ratingIndex.at = 0;            // read the games again
+  for (const c of uniq(cids.filter(Boolean))) await topCacheRef(c).delete().catch(() => {});   // community tops: rebuilt on next open
   for (const u of uniq(uids).filter(isRealPlayer)) {
     for (const c of uniq(["", ...cids.filter(Boolean)])) {
       try { await saveStats(u, c); } catch (e) { logger.warn("stats rebuild failed", u, c, e.message); }
@@ -3048,7 +3062,7 @@ async function refreshStatsFor(uids, cids) {
   }
 }
 
-exports.playerStats = onCall(async (request) => {
+exports.playerStats = onCall({ minInstances: 1 }, async (request) => {   // always warm: no slow first open
   if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
   const uid = String((request.data || {}).uid || request.auth.uid);
   const communityId = String((request.data || {}).communityId || "");
@@ -3071,6 +3085,12 @@ exports.rebuildPlayerStats = onSchedule({ schedule: "every day 04:00", timeZone:
     }
   }
   logger.info(`Rebuilt ${n} saved stats`);
+  // community tops too, so the first open of the day is instant
+  const cids = uniq(Object.values(byUid).flat().map((r) => r.communityId).filter(Boolean));
+  for (const c of cids) {
+    try { await topCacheRef(c).set({ data: await computeCommunityTop(c), at: Date.now(), day: new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date()) }); }
+    catch (e) { logger.warn("community top rebuild failed", c, e.message); }
+  }
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -3962,11 +3982,11 @@ async function mergeAccounts(keep, drop, dry) {
   const vs = await col("vsMatches").get();
   for (const d of vs.docs) {
     const m = d.data() || {};
-    if (m.organizerId !== drop && !JSON.stringify(m.results || []).includes(drop) && !JSON.stringify(m.live || {}).includes(drop)) continue;
+    if (m.organizerId !== drop && !JSON.stringify(m.results || []).includes(drop) && !JSON.stringify(m.live || {}).includes(drop) && !JSON.stringify(m.live2 || {}).includes(drop)) continue;
     out.vs++;
     if (dry) continue;
     const fix = (x) => JSON.parse(JSON.stringify(x).split(`"${drop}"`).join(`"${keep}"`));
-    await d.ref.update({ ...(m.organizerId === drop ? { organizerId: keep } : {}), results: fix(m.results || []), ...(m.live ? { live: fix(m.live) } : {}) });
+    await d.ref.update({ ...(m.organizerId === drop ? { organizerId: keep } : {}), results: fix(m.results || []), ...(m.live ? { live: fix(m.live) } : {}), ...(m.live2 ? { live2: fix(m.live2) } : {}) });
   }
   return out;
 }
@@ -4095,6 +4115,14 @@ exports.onTourneyChat = onDocumentCreated(`${BASE}/tournaments/{id}/chat/{msgId}
   try {
     const t = (await col("tournaments").doc(event.params.id).get()).data() || {};
     if (!t.name || t.status === "cancelled") return;
+    if (msg.matchId) {
+      // a comment on one match: the organizer + the players of those two teams (tab "match:<id>" opens that match)
+      const m = arr(t.matches).find((x) => x.id === msg.matchId);
+      if (!m) return;
+      const who = uniq([t.organizerId, ...(m.a ? ttTeamPeople(t, m.a) : []), ...(m.b ? ttTeamPeople(t, m.b) : [])]);
+      await notify(who, { tourneyId: event.params.id, senderUid: msg.uid || "", type: "tourney_chat", title: `💬 ${ttLabel(m)}: ${ttName(t, m.a) || "?"} vs ${ttName(t, m.b) || "?"}`, body: `${msg.name || "Someone"}: ${String(msg.text || "").slice(0, 200)}`, tab: `match:${msg.matchId}` }, { exclude: [msg.uid], key: `ttchat_${event.params.msgId}` });
+      return;
+    }
     await notify(ttPeople(t), { tourneyId: event.params.id, senderUid: msg.uid || "", type: "tourney_chat", title: `💬 ${t.name}`, body: `${msg.name || "Someone"}: ${String(msg.text || "").slice(0, 200)}`, tab: "chat" }, { exclude: [msg.uid], key: `ttchat_${event.params.msgId}` });
   } catch (e) { logger.warn("onTourneyChat", e.message); }
 });
@@ -4139,23 +4167,55 @@ async function logBlocked(kind, id, name, uid, why) {
 // Regular games: we don't undo team changes there (joining, leaving and captains all touch the teams),
 // but anyone who changes a game's teams without being its organizer, a community admin or a team captain
 // shows up in the manager's list, so you can see who is doing it.
+// Regular games: only the game admin (organizer, community admins) and the team captains may change the teams.
+// A captain may only change their own team (players, spots, name, formation), not the captain choice or "Teams set".
+// Anything else is put back (only the team fields, so other changes made at the same time stay) and logged.
 exports.gameTeamsWatch = onDocumentUpdatedWithAuthContext(`${BASE}/eventsList/{eventId}`, async (event) => {
   const uid = byUser(event); if (!uid) return;
   const b = event.data.before.data() || {}, a = event.data.after.data() || {};
-  const keys = ["teamAssignments", "teamNames", "teamColors", "teamCaptains", "teamSlots", "teamFormations", "teamsSet"];
+  if (a.guardFix && a.guardFix !== b.guardFix) return;
+  const keys = ["teamAssignments", "teamNames", "teamColors", "teamCaptains", "teamSlots", "teamSlotsSig", "teamFormations", "teamsSet"];
   const changed = keys.filter((k) => !same(b[k], a[k]));
   if (!changed.length) return;
-  if (b.organizerId === uid || Object.values(b.teamCaptains || {}).map(String).includes(uid)) return;
+  if (String(b.organizerId || "") === uid) return;
   // a player leaving the game is taken off their team by the app: that's fine
   const inBefore = arr(b.attendees).some((x) => uidOf(x) === uid), inAfter = arr(a.attendees).some((x) => uidOf(x) === uid);
-  if (inBefore && !inAfter && changed.every((k) => k === "teamAssignments" || k === "teamSlots")) return;
-  if (b.communityId) { try { const { admins } = await communityMembers(b.communityId); if (admins.includes(uid)) return; } catch (e) { /* check failed: log it */ } }
+  if (inBefore && !inAfter && changed.every((k) => k === "teamAssignments" || k === "teamSlots" || k === "teamSlotsSig")) return;
+  if (b.communityId) { try { const { admins } = await communityMembers(b.communityId); if (admins.includes(uid)) return; } catch (e) { return; /* can't check: leave it */ } }
   if (await isOwnerUid(uid)) return;
+  const why = gameTeamProblem(b, a, uid, changed);
+  if (!why) return;
+  const fix = { guardFix: Date.now() };
+  for (const k of changed) fix[k] = b[k] === undefined ? admin.firestore.FieldValue.delete() : b[k];
+  await event.data.after.ref.update(fix).catch((e) => logger.warn("game teams fix", e.message));
   let who = "";
   try { who = cardName((await col("directory").doc(uid).get()).data() || {}); } catch (e) { /* none */ }
   await col("managerLog").add({ action: "blocked", kind: "game teams", id: event.params.eventId, name: b.title || b.location || "game", uid, who,
-    why: `changed ${changed.join(", ")} without being an admin or captain (not undone)`, at: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+    why: `${why} (put back)`, at: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
 });
+/** Why this person (not an admin) can't make this team change ("" = fine). */
+function gameTeamProblem(b, a, uid, changed) {
+  const capsOf = (g) => g.teamCaptains || {};
+  const captainOf = (g, i) => String(capsOf(g)[i] ?? capsOf(g)[String(i)] ?? "");
+  const n = Math.max(parseInt(b.teamsCount, 10) || 0, parseInt(a.teamsCount, 10) || 0, 8);
+  const mine = new Set();
+  for (let i = 0; i < n; i++) if (captainOf(b, i) === uid) mine.add(i);
+  if (!mine.size) return `changed ${changed.join(", ")} without being an admin or captain`;
+  if (changed.includes("teamsSet")) return "changed \"Teams set\" (admins only)";
+  if (changed.includes("teamCaptains")) return "changed the captains (admins only)";
+  const at = (g, k, i) => { const v = g[k]; if (!v) return undefined; return Array.isArray(v) ? v[i] : (v[i] ?? v[String(i)]); };
+  const uidsOf = (g, i) => arr(at(g, "teamAssignments", i)).map(uidOf).sort().join(",");
+  for (let i = 0; i < n; i++) {
+    if (mine.has(i)) continue;
+    if (uidsOf(b, i) !== uidsOf(a, i)) return `changed another team's players (team ${i + 1})`;
+    // (the apps re-save every team's spots and formation the way they show them, so only names and colors are checked)
+    const nb = String(at(b, "teamNames", i) || "").trim(), na = String(at(a, "teamNames", i) || "").trim();
+    if (nb && na && nb !== na) return `renamed another team (team ${i + 1})`;
+    const cb = String(at(b, "teamColors", i) || "").toLowerCase(), ca = String(at(a, "teamColors", i) || "").toLowerCase();
+    if (cb && ca && cb !== ca) return `changed another team's color (team ${i + 1})`;
+  }
+  return "";
+}
 // Invites live in teamInvites until the player answers (then the app deletes it), so keep our own copy to check joins.
 exports.onTeamInvite = onDocumentCreated(`${BASE}/teamInvites/{id}`, (e) =>
   db.collection("futnetPrivate").doc("teamInvites").collection("by").doc(e.params.id).set({ ...(e.data.data() || {}), at: Date.now() }).catch(() => {}));
@@ -4429,6 +4489,22 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
       perDay.push({ day, taps: n, users: arr(x.users).length });
     }
     return { totals: Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 80), perDay: perDay.reverse() };
+  }
+  if (action === "themes") {
+    // 🎨 who uses which theme (users/{uid}/profile/data.theme). No theme saved = they see Tokyo Rooftop (the default).
+    const [people, profs] = await Promise.all([col("people").get(), db.collectionGroup("profile").get()]);
+    const pre = `artifacts/${APP_ID}/users/`;
+    const prof = {};
+    profs.docs.forEach((x) => { if (x.id === "data" && x.ref.path.startsWith(pre)) prof[x.ref.path.slice(pre.length).split("/")[0]] = x.data() || {}; });
+    const list = people.docs.map((x) => {
+      const p = x.data() || {};
+      if (!p.name || p.hidden || p.deleted || p.mergedInto) return null;
+      const f = prof[x.id] || {};
+      const ms = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : Number(v) || 0);
+      return { uid: x.id, name: p.name, avatar: realPic(p.avatar) && String(p.avatar).startsWith("http") ? p.avatar : "",
+        theme: typeof f.theme === "string" ? f.theme : "", at: ms(f.themeAt), from: String(f.themeFrom || ""), sawIntro: !!f.themeIntro };
+    }).filter(Boolean).sort((a, b) => (b.at - a.at) || a.name.localeCompare(b.name));
+    return { list };
   }
   if (action === "books") {
     const ref = col("ownerBooks").doc("main").collection("entries");

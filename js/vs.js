@@ -199,8 +199,8 @@ export function vsCardHtml(m) {
             </div>
             <h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${esc(vsTitleOf(m))}</h3>
             ${vsStormOn(m) ? `<div class="flex justify-center gap-1.5"><span class="px-2 py-0.5 rounded-full border text-[10px] font-black bg-amber-500/15 text-amber-200 border-amber-400/60">⛈️ Storm watch</span><span class="px-2 py-0.5 rounded-full border text-[10px] font-black ${VS_STORM[vsStormState(m)].cls}">${VS_STORM[vsStormState(m)].emoji} ${VS_STORM[vsStormState(m)].label}</span></div>` : ''}
-            <div class="flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0])}${middle}${slotHtml(slots[1])}` : slots.map(s => slotHtml(s, 36)).join(vsBadge(24))}</div>
-            ${isLiveNow && n > 2 ? (() => { const [a, b] = livePair(m); return a && b ? `<div class="text-center text-[11px] font-black"><span class="text-red-400">● LIVE</span> ${esc(a.name)} ${liveGoals(m, a.teamId)} - ${liveGoals(m, b.teamId)} ${esc(b.name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span></div>` : ''; })() : ''}
+            ${n >= 5 ? `<div class="grid grid-cols-3 gap-2 justify-items-center">${slots.map(s => slotHtml(s, 36)).join('')}</div>` : `<div class="flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0])}${middle}${slotHtml(slots[1])}` : slots.map(s => slotHtml(s, 36)).join(vsBadge(24))}</div>`}
+            ${isLiveNow && n > 2 ? (() => { const [a, b] = livePair(m); return a && b ? `<div class="text-center text-[11px] font-black"><span class="text-red-400">● LIVE</span> ${esc(a.name)} ${liveGoals(m, a.teamId)} - ${liveGoals(m, b.teamId)} ${esc(b.name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span>${m.live2 ? ' <span class="text-red-300">· +1 more game</span>' : ''}</div>` : ''; })() : ''}
             <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                 <div class="flex items-center gap-2"><i class="fa-solid fa-calendar text-[#00F296] w-3.5"></i><span>${esc((window.fmtGameDate || prettyDate)(m.date || ''))}</span></div>
                 <div class="flex items-center gap-2"><i class="fa-solid fa-clock text-[#00F296] w-3.5"></i><span>${esc(prettyTime(m.time))}</span></div>
@@ -331,7 +331,7 @@ window.openCreateVs = function (prefill = {}) {
         </div>
 ${whereFields('vs', prefill)}
         <div>${LBL('Format')}${seg('vs-format', SIZES.map(s => [s, s]), prefill.format || '7v7')}</div>
-        <div>${LBL('How many teams?')}${seg('vs-count', [['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams']], String(prefill.teamsCount || 2))}</div>
+        <div>${LBL('How many teams?')}${seg('vs-count', [['2', '2 teams'], ['3', '3'], ['4', '4'], ['5', '5'], ['6', '6 teams']], String(prefill.teamsCount || 2))}</div>
         <div>${LBL('Level')}${seg('vs-level', LEVELS, prefill.level || 'casual')}</div>
         <div>${LBL('Price per team ($, 0 = free)')}<input id="vs-price" inputmode="decimal" class="${INPUT}" value="${esc(prefill.priceCents ? (prefill.priceCents / 100) : '')}" placeholder="0"></div>
         ${communityPickHtml(prefill)}
@@ -479,7 +479,7 @@ window.openChallenge = function (teamId) {
         <div id="ch-overlap" class="space-y-2"></div>
 ${whereFields('ch', {})}
         <div>${LBL('Format')}${seg('ch-format', SIZES.map(s => [s, s]), '7v7')}</div>
-        <div>${LBL('How many teams?')}${seg('ch-count', [['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams']], '2')}
+        <div>${LBL('How many teams?')}${seg('ch-count', [['2', '2 teams'], ['3', '3'], ['4', '4'], ['5', '5'], ['6', '6 teams']], '2')}
             <p class="text-[10px] text-white/45 mt-1">More than 2: the other spots are open for any team to join.</p></div>
         <div>${LBL('Price per team ($, 0 = free)')}<input id="ch-price" inputmode="decimal" class="${INPUT}" placeholder="0"></div>
         <div>${LBL('Message (optional)')}<input id="ch-msg" class="${INPUT}" maxlength="140" placeholder="e.g. Rematch from last week? 😤"></div>
@@ -735,7 +735,7 @@ function drawPage() {
         : vsBadge(n === 2 ? 70 : 34);
     const canTakeSpot = m.status === 'open' && !isFull(m) && !(m.date && m.date < ymdToday()) && !!myUid();
     const lp = liveNow ? livePair(m) : [];
-    const statusLine = liveNow && n > 2 ? `<span class="${liveRunning(m.live) ? 'text-red-400' : 'text-amber-300'}">${liveRunning(m.live) ? '● LIVE' : 'PAUSED'}</span> ${esc(lp[0].name)} ${liveGoals(m, lp[0].teamId)} - ${liveGoals(m, lp[1].teamId)} ${esc(lp[1].name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span>`
+    const statusLine = liveNow && n > 2 ? `<span class="${liveRunning(m.live) ? 'text-red-400' : 'text-amber-300'}">${liveRunning(m.live) ? '● LIVE' : 'PAUSED'}</span> ${esc(lp[0].name)} ${liveGoals(m, lp[0].teamId)} - ${liveGoals(m, lp[1].teamId)} ${esc(lp[1].name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span>${m.live2 ? ' <span class="text-red-300">· +1 game on Field 2</span>' : ''}`
         : m.status === 'cancelled' ? '❌ Cancelled' : m.status === 'final' ? `🏁 Final${m.forfeit ? ` · ${esc((shown.find(t => t.teamId === m.forfeit) || {}).name || '')} didn't show` : ''}`
         : m.status === 'challenge' ? 'Challenge · waiting for an answer' : isFull(m) ? '✅ All spots taken' : `${n - spotsTaken(m)} of ${n} spots open`;
     const mapsUrl = m.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(m.location) : '';
@@ -762,7 +762,7 @@ function drawPage() {
             </div>
             ${clash ? `<div class="bg-amber-400/10 border border-amber-400/40 rounded-xl p-3 text-[11px] text-amber-200">👕 Both teams wear similar colors. ${esc(conf[1].name)}, please bring your second color.</div>` : ''}
             ${m.livestream && m.livestream.status === 'live' && tab !== 'live' ? `<button onclick="vsTab('live')" class="w-full bg-red-600 text-white rounded-2xl px-4 py-3 flex items-center gap-3"><span class="bg-white text-red-600 text-[10px] font-black px-2 py-0.5 rounded-full">● LIVE</span><span class="flex-1 text-left text-sm font-black">This match is live now</span><span class="text-xs font-black">Watch ›</span></button>` : ''}
-            ${m.live && conf.length >= 2 ? liveScoreHtml(m) : ''}
+            ${anyLive(m) && conf.length >= 2 ? liveScoreHtml(m) : ''}
             ${canJoin ? `<button onclick="openJoinVs()" class="${BTN} w-full py-3 text-sm">Join with my team</button>` : ''}
             ${squadBoxHtml(m)}
         </div>`;
@@ -771,10 +771,10 @@ function drawPage() {
     const tool = (onclick, icon, label, cls = DARK) => `<button onclick="${onclick}" class="${cls} !px-2 flex flex-col items-center justify-center gap-1 py-3 min-h-[72px]"><span class="text-lg leading-none">${icon}</span><span class="text-center leading-tight">${label}</span></button>`;
     const played = m.results || [];
     const admin = `<div class="space-y-3">
-            ${m.live ? liveScoreHtml(m) : ''}
+            ${anyLive(m) ? liveScoreHtml(m) : ''}
             <div class="text-[10px] font-black uppercase tracking-wider text-white/55">Organizer tools</div>
             <div class="grid grid-cols-3 gap-2">
-                ${live || m.status === 'final' ? tool('openVsManage()', '⏱️', 'Match management', m.live ? BTN + ' !px-2' : DARK) : ''}
+                ${live || m.status === 'final' ? tool('openVsManage()', '⏱️', 'Match management', anyLive(m) ? BTN + ' !px-2' : DARK) : ''}
                 ${tool('openVsNotify()', '📣', 'Notify players')}
                 ${tool('openVsViews()', '📈', 'Analytics')}
                 ${live ? tool('openVsStorm()', '⛈️', 'Storm watch', vsStormOn(m) ? DARK + ' !border-amber-400/70 !text-amber-200' : DARK) : ''}
@@ -811,7 +811,7 @@ function drawPage() {
         </div>
         <div class="relative overflow-hidden bg-[#040E13]/95 border-2 border-emerald-500/30 rounded-3xl p-4 shadow-2xl">
             <div class="absolute inset-0 pointer-events-none opacity-30" style="background:radial-gradient(circle at 50% 45%, #E8262B 0%, transparent 60%)"></div>
-            <div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72, canTakeSpot, true)}${scoreMid}${slotHtml(slots[1], 72, canTakeSpot, true)}` : slots.map(x => slotHtml(x, 46, canTakeSpot, true)).join(vsBadge(28))}</div>
+            ${n >= 5 ? `<div class="relative grid grid-cols-3 gap-3 justify-items-center">${slots.map(x => slotHtml(x, 46, canTakeSpot, true)).join('')}</div>` : `<div class="relative flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0], 72, canTakeSpot, true)}${scoreMid}${slotHtml(slots[1], 72, canTakeSpot, true)}` : slots.map(x => slotHtml(x, 46, canTakeSpot, true)).join(vsBadge(28))}</div>`}
             <div class="relative text-center text-[11px] font-black text-white/75 mt-2">${statusLine}</div>
         </div>
         <div data-scroll-hint class="bg-black/40 border-2 border-emerald-500/30 p-1.5 rounded-2xl flex items-center space-x-1 overflow-x-auto shadow-md backdrop-blur-md">
@@ -1405,7 +1405,9 @@ window.copyVs = function () {
 //   m.live = the game being played now (like a normal game's liveMatchActive):
 //            { a, b (team ids), mode: 'timer'|'stopwatch', durationSeconds, elapsedSeconds, isRunning, lastUpdatedTimestamp,
 //              alarmEnabled, startedAt, goals: [{ teamId, name, own (own goal by the other team), minute, at }] }
-//   m.results = games already played: [{ a, b, ga, gb, goals, at }]. With 2 teams, saving the game is the final score.
+//   m.live2 = a 2nd game at the same time (Field 2), same shape as m.live. Only with 4+ confirmed teams; no team plays on both fields.
+//            Match management shows "Field 1 | Field 2" on top; V.field says which one you're looking at.
+//   m.results = games already played: [{ a, b, ga, gb, goals, at, field? }]. With 2 teams, saving the game is the final score.
 const lsKey = (ls) => (ls && (ls.videoId || ls.embedUrl)) || '';
 const lsSource = (u) => liveSource(u);
 window.openVsLivestream = function () {
@@ -1461,27 +1463,36 @@ export function liveSecs(L, now = Date.now()) {
 }
 const liveRunning = (L) => !!(L && (L.isRunning != null ? L.isRunning : L.running));
 const clockText = (secs) => { const s = Math.max(0, Math.floor(secs)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
-const liveGoals = (m, teamId) => ((m.live && m.live.goals) || []).filter(g => g.teamId === teamId).length;
-/** The two teams on the field: the ones picked (3-4 team matches), else the first two confirmed. */
-function livePair(m) {
+const liveGoals = (m, teamId, L0) => (((L0 || m.live) && (L0 || m.live).goals) || []).filter(g => g.teamId === teamId).length;
+// ⚽⚽ Two games at once: "live" = Field 1, "live2" = Field 2. Match management works on the field picked (V.field).
+const liveKey = () => V.field === 2 ? 'live2' : 'live';
+const curLive = (m) => (m && m[liveKey()]) || null;
+const otherLive = (m) => (m && m[V.field === 2 ? 'live' : 'live2']) || null;
+const anyLive = (m) => !!(m && (m.live || m.live2));
+/** The two teams on the field: the ones picked (3+ team matches), else the first two confirmed. */
+function livePair(m, L0) {
     const conf = confirmedTeams(m);
-    const L = m.live || {};
+    const L = L0 || m.live || {};
     const a = conf.find(t => t.teamId === L.a), b = conf.find(t => t.teamId === L.b);
     return a && b ? [a, b] : [conf[0], conf[1]];
 }
 const goalName = (g) => g.own ? `${g.name || 'Player'} (own goal)` : (g.name || 'Goal');
-/** Live score card (everyone sees it on the match page). */
+/** Live score card (everyone sees it on the match page). Two games at once = two cards (Field 1, Field 2). */
 function liveScoreHtml(m) {
-    const conf = confirmedTeams(m);
-    if (conf.length < 2 || !m.live) return '';
-    const [a, b] = livePair(m);
-    const L = m.live, run = liveRunning(L);
+    if (confirmedTeams(m).length < 2) return '';
+    const both = !!(m.live && m.live2);
+    return [['live', 1], ['live2', 2]].filter(([k]) => m[k]).map(([k, f]) => liveScoreOne(m, m[k], k, both ? f : 0)).join('');
+}
+function liveScoreOne(m, L, key, field) {
+    const [a, b] = livePair(m, L);
+    if (!a || !b) return '';
+    const run = liveRunning(L);
     const list = (t) => (L.goals || []).filter(g => g.teamId === t.teamId).map(g => `<div>⚽ ${esc(goalName(g))}${g.minute ? ` <span class="text-white/40">${esc(g.minute)}'</span>` : ''}</div>`).join('');
     return `<div class="bg-black/50 border border-white/10 rounded-2xl p-3 space-y-2">
-        <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider"><span class="${run ? 'text-red-400' : 'text-amber-300'}">${run ? '● Live' : 'Paused'}</span><span data-vs-clock="${esc(m.id)}" class="text-[#00F296] text-sm font-mono">${clockText(liveSecs(L))}</span></div>
+        <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider"><span class="${run ? 'text-red-400' : 'text-amber-300'}">${run ? '● Live' : 'Paused'}${field ? ` · Field ${field}` : ''}</span><span data-vs-clock="${esc(m.id)}" data-vs-key="${key}" class="text-[#00F296] text-sm font-mono">${clockText(liveSecs(L))}</span></div>
         <div class="flex items-center gap-2">
             <div class="flex-1 min-w-0 flex flex-col items-center gap-1">${teamLogoHtml(a, 40)}<span class="text-[11px] font-black truncate max-w-full">${esc(a.name)}</span></div>
-            <div class="text-3xl font-black font-mono shrink-0">${liveGoals(m, a.teamId)} <span class="text-white/40">-</span> ${liveGoals(m, b.teamId)}</div>
+            <div class="text-3xl font-black font-mono shrink-0">${liveGoals(m, a.teamId, L)} <span class="text-white/40">-</span> ${liveGoals(m, b.teamId, L)}</div>
             <div class="flex-1 min-w-0 flex flex-col items-center gap-1">${teamLogoHtml(b, 40)}<span class="text-[11px] font-black truncate max-w-full">${esc(b.name)}</span></div>
         </div>
         <div class="grid grid-cols-2 gap-2 text-[11px] text-white/70"><div>${list(a)}</div><div class="text-right">${list(b)}</div></div>
@@ -1492,15 +1503,17 @@ function liveScoreHtml(m) {
 async function saveLive(fn) {
     const m = V.open; if (!m) return false;
     try {
-        await changeMatch(m.id, (x) => { const L = x.live ? { ...x.live, goals: [...(x.live.goals || [])] } : null; const r = fn(L, x); if (r === false) return false; x._edit = { ...(x._edit || {}), live: r === null ? null : (r || L) }; });
+        const key = liveKey();
+        await changeMatch(m.id, (x) => { const L = x[key] ? { ...x[key], goals: [...(x[key].goals || [])] } : null; const r = fn(L, x); if (r === false) return false; x._edit = { ...(x._edit || {}), [key]: r === null ? null : (r || L) }; });
         return true;
-    } catch (e) { toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : "Couldn't save. Check your connection.", 'error'); return false; }
+    } catch (e) { toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : String(e && e.message) === 'BUSY' ? 'That team is playing on the other field.' : "Couldn't save. Check your connection.", 'error'); return false; }
 }
 window.openVsManage = async function () {
     const m = V.open; if (!m) return;
     const conf = confirmedTeams(m);
     if (conf.length < 2 && !(m.results || []).length) { toast('Two teams need to be confirmed first. Mark their payment in Teams ("Got a payment"), or add a team.', 'error'); return; }
     // Opens the hub (games played + Edit). A new game only starts when you tap "Start Match".
+    V.field = !m.live && m.live2 ? 2 : 1;
     V.manage = true;
     drawManage();
 };
@@ -1509,12 +1522,50 @@ window.vsStartLive = async function () {
     const conf = confirmedTeams(m);
     if (conf.length < 2) { toast('Two teams need to be confirmed first.', 'error'); return; }
     if (m.status === 'final') { toast('This match is over. Fix games with "Edit Game" below.', 'error'); return; }
+    V.field = 1;
     if (!m.live || !m.live.mode) {
-        await saveLive((L) => ({ a: conf[0].teamId, b: conf[1].teamId, mode: 'timer', durationSeconds: 600, elapsedSeconds: 600, isRunning: false,
+        // the first two teams that aren't playing on Field 2
+        const busy = new Set(m.live2 ? [m.live2.a, m.live2.b] : []);
+        const free = conf.filter(t => !busy.has(t.teamId));
+        if (free.length < 2) { toast('Not enough free teams for another game.', 'error'); return; }
+        await saveLive((L) => ({ a: free[0].teamId, b: free[1].teamId, mode: 'timer', durationSeconds: 600, elapsedSeconds: 600, isRunning: false,
             lastUpdatedTimestamp: Date.now(), alarmEnabled: true, goals: (L && L.goals) || [] }));
     }
     drawManage();
 };
+/** ⚽⚽ Start a 2nd game at the same time (Field 2): 4+ confirmed teams, with the two teams that aren't playing on Field 1.
+ *  Same clock length / mode as Field 1, so both games run alike. */
+window.vsStartField2 = async function () {
+    const m = V.open; if (!m) return;
+    const conf = confirmedTeams(m);
+    if (conf.length < 4) { toast('Two games at once needs 4 or more confirmed teams.', 'error'); return; }
+    if (!m.live) { V.field = 1; drawManage(); return; }
+    if (m.live2) { V.field = 2; drawManage(); return; }
+    const busy = new Set([m.live.a, m.live.b]);
+    const free = conf.filter(t => !busy.has(t.teamId));
+    if (free.length < 2) { toast('Not enough free teams for a 2nd game.', 'error'); return; }
+    const L1 = m.live, mode = L1.mode || 'timer', d = +L1.durationSeconds || 600;
+    V.field = 2;
+    await saveLive(() => ({ a: free[0].teamId, b: free[1].teamId, mode, durationSeconds: d, elapsedSeconds: mode === 'stopwatch' ? 0 : d, isRunning: false,
+        lastUpdatedTimestamp: Date.now(), alarmEnabled: L1.alarmEnabled !== false, goals: [] }));
+    drawManage();
+};
+window.vsField = function (f) { V.field = f === 2 ? 2 : 1; drawManage(); };
+/** "Field 1 · A 1-0 B | Field 2 · …" switch at the top of the live screen (only with 4+ teams). */
+function fieldSwitchHtml(m) {
+    const conf = confirmedTeams(m);
+    if (conf.length < 4 || m.status === 'final') return '';
+    const chip = (f) => {
+        const L = m[f === 2 ? 'live2' : 'live'], on = V.field === f;
+        if (!L) return `<button onclick="${f === 2 ? 'vsStartField2()' : 'vsStartLive()'}" class="flex-1 min-w-0 rounded-2xl px-3 py-2.5 text-left border-2 border-dashed border-[#6ee7a0]/60 text-[#6ee7a0]">
+            <span class="block text-[10px] font-black uppercase tracking-wider">Field ${f}</span><span class="block text-sm font-black truncate">＋ Start a ${f === 2 ? '2nd ' : ''}game</span></button>`;
+        const [a, b] = livePair(m, L), run = liveRunning(L);
+        return `<button onclick="vsField(${f})" class="flex-1 min-w-0 rounded-2xl px-3 py-2.5 text-left border-2 ${on ? 'border-[#6ee7a0] bg-[#6ee7a0]/10' : 'border-white/15 bg-black/40'}">
+            <span class="flex items-center justify-between text-[10px] font-black uppercase tracking-wider"><span class="${on ? 'text-[#6ee7a0]' : 'text-white/60'}">Field ${f}</span><span class="${run ? 'text-red-400' : 'text-white/40'}">${run ? '● ' : ''}<span data-vs-clock="${esc(m.id)}" data-vs-key="${f === 2 ? 'live2' : 'live'}" class="font-mono">${clockText(liveSecs(L))}</span></span></span>
+            <span class="block text-xs font-black text-white truncate">${esc((a && a.name) || '?')} ${liveGoals(m, a && a.teamId, L)}-${liveGoals(m, b && b.teamId, L)} ${esc((b && b.name) || '?')}</span></button>`;
+    };
+    return `<div class="flex gap-2">${chip(1)}${chip(2)}</div>`;
+}
 /** Match management when no game is being played: Start Match (or the final results) + the games played with Edit / Delete. */
 function drawManageHub(m, el) {
     const results = m.results || [];
@@ -1543,9 +1594,10 @@ function drawManage() {
     if (!V.manage || !m) { document.getElementById('vs-manage')?.remove(); return; }
     let el = document.getElementById('vs-manage');
     if (!el) { el = document.createElement('div'); el.id = 'vs-manage'; el.dataset.close = 'closeVsManage'; el.className = 'fixed inset-0 z-[160] flex flex-col bg-black/85 backdrop-blur-sm text-white'; document.body.appendChild(el); }
-    if (!m.live) { drawManageHub(m, el); return; }
-    const L = m.live, conf = confirmedTeams(m);
-    const [A, B] = livePair(m);
+    if (!anyLive(m)) { drawManageHub(m, el); return; }
+    if (!curLive(m)) V.field = m.live ? 1 : 2;   // that field's game ended: show the one still going
+    const L = curLive(m), conf = confirmedTeams(m);
+    const [A, B] = livePair(m, L);
     const run = liveRunning(L), mode = L.mode || 'timer', secs = liveSecs(L);
     const goalsA = (L.goals || []).filter(g => g.teamId === A.teamId), goalsB = (L.goals || []).filter(g => g.teamId === B.teamId);
     const untouched = !goalsA.length && !goalsB.length && (mode === 'stopwatch' ? secs === 0 : secs === (+L.durationSeconds || 600));
@@ -1558,8 +1610,9 @@ function drawManage() {
     const goalList = (goals) => goals.length ? `<div class="space-y-1.5 pt-1 text-left">${goals.map(g => `
         <div class="flex items-center gap-2 text-sm text-white/90"><span class="text-base leading-none">⚽</span><span class="flex-1 truncate">${esc(goalName(g))}${g.minute ? ` <span class="text-white/40 text-xs">${esc(g.minute)}'</span>` : ''}</span>
             <button onclick="vsRemoveGoal(${(L.goals || []).indexOf(g)})" class="w-6 h-6 rounded-full bg-white/15 hover:bg-white/25 text-white/80 text-[11px] flex items-center justify-center shrink-0" title="Remove goal"><i class="fa-solid fa-xmark"></i></button></div>`).join('')}</div>` : '';
+    const O = otherLive(m), busy = O ? [O.a, O.b] : [];
     const teamSelect = (id, cur, other) => `<select id="${id}" onchange="vsPickTeams()" class="w-full appearance-none bg-[#0b151b] border-2 border-white/20 rounded-2xl px-4 py-3 text-white text-sm font-bold focus:outline-none">
-        ${conf.map(t => `<option value="${esc(t.teamId)}" ${t.teamId === cur ? 'selected' : ''} ${t.teamId === other ? 'disabled' : ''}>${esc(t.name)}</option>`).join('')}</select>`;
+        ${conf.map(t => `<option value="${esc(t.teamId)}" ${t.teamId === cur ? 'selected' : ''} ${t.teamId === other || busy.includes(t.teamId) ? 'disabled' : ''}>${esc(t.name)}${busy.includes(t.teamId) ? ' (other field)' : ''}</option>`).join('')}</select>`;
     const scoreCard = (t, goals) => { const c = col(t); return `
         <div class="rounded-3xl p-4 space-y-3 text-center self-start" style="border:2px solid ${c}99;background:#081117">
             <div class="flex flex-col items-center gap-1.5">${teamLogoHtml(t, 44)}<span class="font-bold text-white truncate max-w-full text-sm flex items-center gap-1.5">${shirt(kitOf(m, t.teamId), 'text-sm')}${esc(t.name)}</span></div>
@@ -1578,6 +1631,7 @@ function drawManage() {
             </div>
             <p class="text-sm text-white/55 leading-snug">The clock keeps running even if you close this screen. Everyone sees the score live.</p>
         </div>
+        ${fieldSwitchHtml(m)}
         <div class="rounded-3xl p-4 sm:p-5 space-y-4 border-2 border-[#1f4a44]" style="background:#081117">
             <div class="grid grid-cols-2 gap-1 p-1 rounded-full bg-black/60 border border-[#1f4a44]">
                 <button onclick="vsLiveMode('stopwatch')" class="py-2.5 rounded-full text-sm font-bold ${mode === 'stopwatch' ? 'bg-[#6ee7a0] text-slate-950' : 'text-white'}"><i class="fa-solid fa-stopwatch mr-1.5"></i>Stopwatch (Up)</button>
@@ -1591,7 +1645,7 @@ function drawManage() {
                     <input type="checkbox" class="w-6 h-6 accent-[#6ee7a0]" ${L.alarmEnabled !== false ? 'checked' : ''} onchange="vsLiveAlarm(this.checked)"></label>
             </div>` : ''}
             <div class="flex items-center justify-between gap-2">
-                <div data-vs-clock="${esc(m.id)}" class="text-[44px] min-[400px]:text-[52px] sm:text-7xl font-black text-[#6ee7a0] font-mono leading-none tabular-nums min-w-0">${clockText(secs)}</div>
+                <div data-vs-clock="${esc(m.id)}" data-vs-key="${liveKey()}" class="text-[44px] min-[400px]:text-[52px] sm:text-7xl font-black text-[#6ee7a0] font-mono leading-none tabular-nums min-w-0">${clockText(secs)}</div>
                 <div class="flex items-center gap-2 shrink-0">
                     <button onclick="vsLiveToggle()" class="bg-[#6ee7a0] text-slate-950 font-black px-5 py-3 rounded-full text-base flex items-center gap-2 whitespace-nowrap">${startLabel}</button>
                     <button onclick="vsLiveReset()" title="Reset clock" class="w-12 h-12 shrink-0 rounded-full bg-black/60 border-2 border-[#1f4a44] text-white flex items-center justify-center"><i class="fa-solid fa-rotate-left text-lg"></i></button>
@@ -1603,7 +1657,7 @@ function drawManage() {
             <div class="space-y-1.5"><label class="block text-xs font-black text-white/60 tracking-wider">TEAM 2</label>${teamSelect('vs-lb', B.teamId, A.teamId)}</div></div>` : ''}
         <div class="grid grid-cols-2 gap-3 items-start">${scoreCard(A, goalsA)}${scoreCard(B, goalsB)}</div>
         <div class="space-y-3 pt-1">
-            <button onclick="vsLiveSave()" class="w-full bg-gradient-to-r from-[#6ee7a0] to-[#4fbfa8] text-slate-950 font-black py-4 rounded-3xl text-lg flex items-center justify-center gap-3"><i class="fa-solid fa-flag-checkered"></i> Save &amp; End ${conf.length > 2 ? 'Game' : 'Match'}</button>
+            <button onclick="vsLiveSave()" class="w-full bg-gradient-to-r from-[#6ee7a0] to-[#4fbfa8] text-slate-950 font-black py-4 rounded-3xl text-lg flex items-center justify-center gap-3"><i class="fa-solid fa-flag-checkered"></i> Save &amp; End ${conf.length > 2 ? 'Game' : 'Match'}${m.live && m.live2 ? ` (Field ${V.field})` : ''}</button>
             <button onclick="vsLiveDelete()" class="w-full text-red-400 font-bold py-2 text-base">Delete live game</button>
             <button onclick="closeVsManage()" class="w-full text-white/60 font-bold py-2 text-base">Close (the game keeps going)</button>
         </div>
@@ -1622,11 +1676,12 @@ window.vsLiveAlarm = (on) => saveLive((L) => ({ ...L, alarmEnabled: !!on }));
 window.vsPickTeams = () => {
     const a = val('vs-la'), b = val('vs-lb');
     if (a === b) { toast('Pick two different teams.', 'error'); return; }
-    saveLive((L) => ({ ...L, a, b }));
+    const otherKey = liveKey() === 'live' ? 'live2' : 'live';
+    saveLive((L, x) => { const O = x[otherKey]; if (O && [O.a, O.b].some(t => t === a || t === b)) throw new Error('BUSY'); return { ...L, a, b }; });
 };
 window.vsGoalPicker = function (teamId) {
-    const m = V.open; if (!m || !m.live) return;
-    const [A, B] = livePair(m);
+    const m = V.open; if (!m || !curLive(m)) return;
+    const [A, B] = livePair(m, curLive(m));
     const other = teamId === A.teamId ? B : A;
     const playersOf = (t) => { const full = teamFull(t.teamId); const roster = (t.roster || []).map(id => ((full && full.members) || []).find(p => p.id === id)).filter(Boolean); return roster.length ? roster : ((full && full.members) || []); };
     const entry = (m.teams || []).find(t => t.teamId === teamId) || {};
@@ -1648,7 +1703,7 @@ window.vsGoal = async function (teamId, name, own, uid) {
     });
 };
 window.vsRemoveGoal = async function (i) {
-    const m = V.open; const g = m && m.live && (m.live.goals || [])[i]; if (!g) return;
+    const m = V.open; const g = curLive(m) && (curLive(m).goals || [])[i]; if (!g) return;
     if (!confirm(`Remove the goal by ${goalName(g)}?`)) return;
     await saveLive((L) => { const at = (L.goals || []).findIndex(x => x.at === g.at && x.teamId === g.teamId); if (at < 0) return false; L.goals.splice(at, 1); return L; });
 };
@@ -1665,18 +1720,18 @@ const pname = (p) => (p.uid ? personName(p.uid, p.name) : p.name) || 'Player';
 const liveMinute = (L) => L && L.startedAt ? Math.max(1, Math.ceil((L.mode === 'stopwatch' ? liveSecs(L) : ((+L.durationSeconds || 600) - liveSecs(L))) / 60)) : 0;
 function onFieldOf(m, t) {
     const all = playersOfTeam(t);
-    const ids = ((m.live && m.live.onField) || {})[t.teamId];
+    const ids = ((curLive(m) && curLive(m).onField) || {})[t.teamId];
     return Array.isArray(ids) ? all.filter(p => ids.includes(pid(p))) : all;
 }
 function lineupBtnHtml(m, t) {
-    const n = onFieldOf(m, t).length, subs = ((m.live && m.live.subs) || []).filter(s => s.teamId === t.teamId).length;
+    const n = onFieldOf(m, t).length, subs = ((curLive(m) && curLive(m).subs) || []).filter(s => s.teamId === t.teamId).length;
     return `<button onclick="openVsLineup('${jsq(t.teamId)}')" class="w-full bg-black/50 border border-white/15 text-white/85 font-bold py-2 rounded-2xl text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-people-group"></i> Playing (${n})${subs ? ` · 🔁 ${subs}` : ''}</button>`;
 }
 window.openVsLineup = function (teamId) {
-    const m = V.open; if (!m || !m.live) return;
+    const m = V.open; if (!m || !curLive(m)) return;
     const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
     const all = playersOfTeam(t), on = new Set(onFieldOf(m, t).map(pid));
-    const subs = ((m.live.subs) || []).filter(s => s.teamId === teamId);
+    const subs = ((curLive(m).subs) || []).filter(s => s.teamId === teamId);
     const sel = (id, list, ph) => `<select id="${id}" class="w-full bg-black/60 border border-white/20 rounded-xl px-2 py-2.5 text-white text-xs font-bold"><option value="">${ph}</option>${list.map(p => `<option value="${esc(pid(p))}">${esc(pname(p))}</option>`).join('')}</select>`;
     sheet('vs-lineup', `👥 ${esc(t.name)}: who's playing`, `
         <p class="text-[11px] text-white/60">Tick who is on the field this game. Use "Make a sub" when someone comes off.</p>
@@ -1693,14 +1748,14 @@ window.openVsLineup = function (teamId) {
     document.getElementById('vs-lineup').style.zIndex = '200';
 };
 window.vsToggleOnField = async function (teamId, id, onNow) {
-    const m = V.open; if (!m || !m.live) return;
+    const m = V.open; if (!m || !curLive(m)) return;
     const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
     const cur = onFieldOf(m, t).map(pid);
     const next = onNow ? [...new Set([...cur, id])] : cur.filter(x => x !== id);
     await saveLive((L) => L ? { ...L, onField: { ...(L.onField || {}), [teamId]: next } } : false);
 };
 window.vsMakeSub = async function (teamId) {
-    const m = V.open; if (!m || !m.live) return;
+    const m = V.open; if (!m || !curLive(m)) return;
     const t = (m.teams || []).find(x => x.teamId === teamId); if (!t) return;
     const outId = val('vs-sub-out'), inId = val('vs-sub-in');
     if (!outId || !inId) { toast('Pick who comes off and who goes on.', 'error'); return; }
@@ -1724,10 +1779,11 @@ function gameLineupHtml(m, r) {
     return rows ? `<div class="space-y-0.5 border-t border-white/10 pt-2">${rows}</div>` : '';
 }
 
-async function endLiveGame(matchId, silent) {
+async function endLiveGame(matchId, silent, key = 'live') {
     let final = false;
     await changeMatch(matchId, (x) => {
-        const L = x.live; if (!L) return false;
+        const L = x[key]; if (!L) return false;
+        const twoAtOnce = !!(x.live && x.live2);
         const conf = confirmedTeams(x);
         const a = L.a && conf.some(t => t.teamId === L.a) ? L.a : (conf[0] && conf[0].teamId);
         const b = L.b && conf.some(t => t.teamId === L.b) ? L.b : (conf[1] && conf[1].teamId);
@@ -1738,19 +1794,19 @@ async function endLiveGame(matchId, silent) {
         if (L.onField && typeof L.onField === 'object') { if (L.onField[a]) lineup[a] = L.onField[a]; if (L.onField[b]) lineup[b] = L.onField[b]; }
         const subs = (L.subs || []).filter(sb => sb.teamId === a || sb.teamId === b);
         const results = [...(x.results || []), { a, b, ga, gb, goals, at: Date.now(), seconds: L.mode === 'stopwatch' ? liveSecs(L) : (+L.durationSeconds || 600) - liveSecs(L),
-            ...(Object.keys(lineup).length ? { onField: lineup } : {}), ...(subs.length ? { subs } : {}) }];
+            ...(Object.keys(lineup).length ? { onField: lineup } : {}), ...(subs.length ? { subs } : {}), ...(twoAtOnce || key === 'live2' ? { field: key === 'live2' ? 2 : 1 } : {}) }];
         // 2 teams: that's the final score. 3-4 teams: the game is saved and the next one can start.
         if (conf.length <= 2) { x.score = { [a]: ga, [b]: gb }; x.forfeit = ''; x.status = 'final'; final = true; }
-        x._edit = { live: null, results };
+        x._edit = { [key]: null, results };
     });
     if (!silent) toast(final ? 'Final score saved. 🏁' : 'Game saved. Start the next one when ready.');
     return final;
 }
 window.vsLiveSave = async function () {
-    const m = V.open; if (!m || !m.live) return;
+    const m = V.open; if (!m || !curLive(m)) return;
     const two = confirmedTeams(m).length <= 2;
-    if (!confirm(two ? 'Save and end the match? This is the final score.' : 'Save this game and end it?')) return;
-    try { await endLiveGame(m.id); if (two) { window.closeVsManage(); V.tab = 'info'; drawPage(); autoCards(m.id); } } catch (e) { toast("Couldn't save the game.", 'error'); }   // 3-4 teams: back to the hub for the next game
+    if (!confirm(two ? 'Save and end the match? This is the final score.' : `Save this game${m.live && m.live2 ? ` (Field ${V.field})` : ''} and end it?`)) return;
+    try { await endLiveGame(m.id, false, liveKey()); if (two) { window.closeVsManage(); V.tab = 'info'; drawPage(); autoCards(m.id); } } catch (e) { toast("Couldn't save the game.", 'error'); }   // 3-4 teams: back to the hub for the next game
 };
 function playEndAlarm() {
     try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.5; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 1.2); } catch (e) { /* ignore */ }
@@ -1760,17 +1816,19 @@ const ending = new Set();
 setInterval(() => {
     document.querySelectorAll('[data-vs-clock]').forEach(el => {
         const m = V.list.find(x => x.id === el.dataset.vsClock) || (V.open && V.open.id === el.dataset.vsClock ? V.open : null);
-        if (m && m.live) el.textContent = clockText(liveSecs(m.live));
+        const L = m && m[el.dataset.vsKey || 'live'];
+        if (L) el.textContent = clockText(liveSecs(L));
     });
-    V.list.filter(m => m.organizerId === myUid() && m.live && m.live.mode === 'timer' && m.live.isRunning && liveSecs(m.live) <= 0 && !ending.has(m.id)).forEach(m => {
-        ending.add(m.id);
-        if (m.live.alarmEnabled !== false) {
-            playEndAlarm(); toast("⏰ Time's up! Game ended.");
-            endLiveGame(m.id, true).catch(() => {}).finally(() => { ending.delete(m.id); if (V.open && V.open.id === m.id) window.closeVsManage(); });
+    ['live', 'live2'].forEach(key => V.list.filter(m => m.organizerId === myUid() && m[key] && m[key].mode === 'timer' && m[key].isRunning && liveSecs(m[key]) <= 0 && !ending.has(m.id + key)).forEach(m => {
+        const tag = m.id + key, both = !!(m.live && m.live2);
+        ending.add(tag);
+        if (m[key].alarmEnabled !== false) {
+            playEndAlarm(); toast(both ? `⏰ Time's up on Field ${key === 'live2' ? 2 : 1}! Game ended.` : "⏰ Time's up! Game ended.");
+            endLiveGame(m.id, true, key).catch(() => {}).finally(() => { ending.delete(tag); if (V.open && V.open.id === m.id) { if (both) drawManage(); else window.closeVsManage(); } });
         } else {
-            changeMatch(m.id, (x) => { if (!x.live) return false; x._edit = { live: { ...x.live, isRunning: false, elapsedSeconds: 0, lastUpdatedTimestamp: Date.now() } }; }).catch(() => {}).finally(() => ending.delete(m.id));
+            changeMatch(m.id, (x) => { if (!x[key]) return false; x._edit = { [key]: { ...x[key], isRunning: false, elapsedSeconds: 0, lastUpdatedTimestamp: Date.now() } }; }).catch(() => {}).finally(() => ending.delete(tag));
         }
-    });
+    }));
 }, 1000);
 
 // ---------------------------------------------------------------- ✏️ games played: edit / delete (organizer), like a normal game's "Previous matches"
@@ -1786,7 +1844,7 @@ function playedGamesAdminHtml(m) {
     return `<div class="space-y-2">
         <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Games played</div>
         ${results.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => `<div class="space-y-1.5">
-            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Game ${i + 1}</div>
+            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Game ${i + 1}${r.field ? ` · Field ${r.field}` : ''}</div>
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2.5">
                 <div class="flex items-center gap-2">
                     <span class="flex-1 min-w-0 flex items-center gap-1.5 text-xs font-black">${shirt(kitOf(m, r.a), 'text-sm')}<span class="truncate">${esc(teamOf(r.a).name)}</span></span>
@@ -1964,11 +2022,11 @@ function autoCards(id) {
 /** 3-4 teams: no single final score, so the organizer ends the event; the table decides the winner and loser. */
 window.vsEndEvent = async function () {
     const m = V.open; if (!m) return;
-    if (m.live) { toast('Save or delete the game being played first.', 'error'); return; }
+    if (anyLive(m)) { toast('Save or delete the game being played first.', 'error'); return; }
     if (!(m.results || []).length) { toast('Play at least one game first.', 'error'); return; }
     if (!confirm('End the event? The table decides the winner and loser, and the result cards are made.')) return;
     try {
-        await changeMatch(m.id, (x) => { x.status = 'final'; x.score = {}; x.forfeit = ''; x._edit = { live: null }; });
+        await changeMatch(m.id, (x) => { x.status = 'final'; x.score = {}; x.forfeit = ''; x._edit = { live: null, live2: null }; });
         window.closeVsManage(); V.tab = 'info'; drawPage();
         toast('Event ended. 🏁'); autoCards(m.id);
     } catch (e) { toast("Couldn't end the event.", 'error'); }
@@ -2067,10 +2125,12 @@ function statsHtml(m) {
     let body = '';
     if (sub === 'matches') {
         const lp = m.live ? livePair(m) : [];
+        const lp2 = m.live2 ? livePair(m, m.live2) : [];
         body = `<div class="space-y-3">
-            ${m.live && lp.length === 2 ? matchCard(`🔴 Live · Match ${results.length + 1}`, lp[0].teamId, lp[1].teamId, m.live.goals || [], '<span class="text-[10px] text-[#00F296] font-bold animate-pulse">In progress</span>') : ''}
-            ${!results.length && !m.live ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
-            ${results.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => matchCard(`Match ${i + 1}`, r.a, r.b, r.goals || [], '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Finished</span>', r.ga, r.gb)).join('')}
+            ${m.live && lp.length === 2 ? matchCard(`🔴 Live · Match ${results.length + 1}${m.live2 ? ' · Field 1' : ''}`, lp[0].teamId, lp[1].teamId, m.live.goals || [], '<span class="text-[10px] text-[#00F296] font-bold animate-pulse">In progress</span>') : ''}
+            ${m.live2 && lp2.length === 2 ? matchCard(`🔴 Live · Match ${results.length + (m.live ? 2 : 1)} · Field 2`, lp2[0].teamId, lp2[1].teamId, m.live2.goals || [], '<span class="text-[10px] text-[#00F296] font-bold animate-pulse">In progress</span>') : ''}
+            ${!results.length && !anyLive(m) ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
+            ${results.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => matchCard(`Match ${i + 1}${r.field ? ` · Field ${r.field}` : ''}`, r.a, r.b, r.goals || [], '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Finished</span>', r.ga, r.gb)).join('')}
         </div>`;
     } else if (sub === 'leaderboard') {
         const table = {};
@@ -2081,7 +2141,7 @@ function statsHtml(m) {
             if (f > g) t.w++; else if (f === g) t.d++; else t.l++;
         });
         results.forEach(r => add(r.a, r.b, r.ga, r.gb));
-        if (m.live) { const [A, B] = livePair(m); const G = m.live.goals || []; if (A && B) add(A.teamId, B.teamId, G.filter(g => g.teamId === A.teamId).length, G.filter(g => g.teamId === B.teamId).length, true); }
+        [m.live, m.live2].forEach(L => { if (!L) return; const [A, B] = livePair(m, L); const G = L.goals || []; if (A && B) add(A.teamId, B.teamId, G.filter(g => g.teamId === A.teamId).length, G.filter(g => g.teamId === B.teamId).length, true); });
         const rows = Object.values(table).map(t => ({ ...t, pts: t.w * 3 + t.d, gd: t.gf - t.ga })).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
         body = `<div class="bg-[#141821] border border-white/10 rounded-2xl overflow-hidden shadow-xl"><table class="w-full text-left border-collapse text-sm">
             <thead><tr class="border-b border-white/10 text-white/50 font-bold text-xs"><th class="py-3 pl-4 pr-2">Club</th><th class="py-3 px-1.5 text-center w-9">MP</th><th class="py-3 px-1.5 text-center w-9">W</th><th class="py-3 px-1.5 text-center w-9">D</th><th class="py-3 px-1.5 text-center w-9">L</th><th class="py-3 px-1.5 text-center w-10">GD</th><th class="py-3 pl-1.5 pr-4 text-center w-11 text-[#00F296]">Pts</th></tr></thead>
@@ -2092,7 +2152,7 @@ function statsHtml(m) {
                     <td class="py-3 px-1.5 text-center text-white/80">${t.gd >= 0 ? '+' + t.gd : t.gd}</td><td class="py-3 pl-1.5 pr-4 text-center font-black text-[#00F296]">${t.pts}</td></tr>
                 ${open ? `<tr class="border-b border-white/5"><td colspan="7"><div class="flex flex-wrap gap-1.5 pb-3 pl-[46px] pr-4">${ps.length ? ps.map(p => { const nm = p.uid ? personName(p.uid, p.name) : p.name; return `<div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full"><img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover"><span class="text-[10px] font-bold">${esc(String(nm || '').split(' ')[0])}</span></div>`; }).join('') : '<span class="text-[10px] text-white/40 italic">No players listed</span>'}</div></td></tr>` : ''}`; }).join('')}</tbody></table></div>`;
     } else {
-        const all = [...results.flatMap(r => r.goals || []), ...(m.live ? m.live.goals || [] : [])];
+        const all = [...results.flatMap(r => r.goals || []), ...(m.live ? m.live.goals || [] : []), ...(m.live2 ? m.live2.goals || [] : [])];
         const sc = {};
         all.filter(g => g.name && !g.own).forEach(g => { const k = (g.uid || g.name.toLowerCase()) + '|' + g.teamId; sc[k] = sc[k] || { g, n: 0 }; sc[k].n++; });
         const top = Object.values(sc).sort((a, b) => b.n - a.n || String(a.g.name).localeCompare(String(b.g.name)));
@@ -2438,7 +2498,7 @@ window.appealVs = async function () {
 window.cancelVs = async function () {
     const m = V.open; if (!m || !confirm('Cancel this match? Every team gets a notification.')) return;
     try {
-        await changeMatch(m.id, (x) => { x.status = 'cancelled'; x._edit = { live: null }; });
+        await changeMatch(m.id, (x) => { x.status = 'cancelled'; x._edit = { live: null, live2: null }; });
         toast('Match cancelled.');
         window.closeVsManage(); window.closeVsMatch && window.closeVsMatch();       // it's off the Games list now
         if (typeof window.renderEvents === 'function') window.renderEvents();

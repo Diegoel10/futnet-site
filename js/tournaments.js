@@ -14,13 +14,18 @@
 // their game (server: onTourneyWritten, onTourneyChat, tourneyReminders).
 // Firestore: artifacts/{appId}/tournaments/{id} (+ /chat/{msgId})
 //   { name, park, city, location, format, minTeams, maxTeams, minPlayers, maxPlayers, priceCents, description,
-//     days: [{ date, time, until, label }], date, time (first day, for lists), prizes: [{ place, prize }], prizeNote,
+//     days: [{ date, time, until, label }], date, time (first day, for lists), prizes: [{ place, prize, auto? }], prizeNote,
+//     prizeCash (true/false) + prizeCents ($ for the champion), trophy (true/false) + trophyPhoto (optional picture),
+//       set when creating / editing; they also fill in the 🥇 1st prize line (auto: true) unless the organizer wrote their own.
 //     organizerId, organizerName, status, plan, teams: [{ teamId, name, short, logo, colors, paid, joinedBy, joinedAt,
 //     roster: [{ id, name, number, uid, position }] }], teamIds, participantUids, matches, championId, announcements }
 //   match = { id, key, stage, group, a, b, aFrom, bFrom, ga, gb, pens, goals: [{ teamId, name, uid, own }], done, date, time, place }
+//   Each match with a time shows in the Games list as its own gold event (everyone sees it). Tapping it opens the
+//   match page: the two teams + players, the result and goals, and comments (chat messages with matchId).
+//   From the tournament's Day 2 on, its days show a "Resumed" banner (registration closed, stats, comments).
 // This file loads after the page is ready, so it never slows down opening the app.
 import { db, appId } from './firebase-config.js';
-import { doc, getDoc, setDoc, collection, onSnapshot, runTransaction, serverTimestamp, addDoc, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, getDoc, setDoc, collection, onSnapshot, runTransaction, serverTimestamp, addDoc, query, orderBy, limit, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { teamLogoHtml, canManage } from './teams.js';
 import { smartText } from './smart-text.js';
 
@@ -68,6 +73,7 @@ function start() {
         TT.list = s.docs.map(d => ({ ...d.data(), id: d.id })).filter(t => t.status !== 'cancelled' && (lastDayOf(t) || t.date || '') >= cut);
         try { window.renderEvents && document.getElementById('events-grid') && window.renderEvents(); } catch (e) { /* ignore */ }
         if (TT.open) { const fresh = TT.list.find(t => t.id === TT.open.id); if (fresh) { TT.open = fresh; drawPage(); } }
+        if (MP.tid && document.getElementById('tt-match')) drawMatchPage();
     }, () => {});
 }
 let started = '';
@@ -186,7 +192,7 @@ export function tourneyMatchCardHtml(t, m) {
     const A = teamOf(t, m.a), B = teamOf(t, m.b);
     const side = (X, ref) => X ? `<div class="flex flex-col items-center gap-1 min-w-0 w-24">${teamLogoHtml(X, 44)}<span class="text-[11px] font-black truncate max-w-full">${esc(X.name)}</span></div>`
         : `<div class="flex flex-col items-center gap-1 w-24"><div class="w-11 h-11 rounded-2xl border-2 border-dashed border-amber-300/60 flex items-center justify-center text-amber-200 text-lg">?</div><span class="text-[10px] font-bold text-white/55 text-center leading-tight">${esc(fromLabel(ref))}</span></div>`;
-    return `<div onclick="openTourney('${jsq(t.id)}', null, 'bracket')" class="relative rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-amber-400 cursor-pointer p-4 space-y-3" style="background:linear-gradient(160deg,rgba(250,204,21,.18),rgba(1,10,15,.95) 55%)">
+    return `<div onclick="openTourneyMatch('${jsq(t.id)}', '${jsq(m.id)}')" class="relative rounded-2xl overflow-hidden shadow-xl border-[1.6px] border-amber-400 cursor-pointer p-4 space-y-3" style="background:linear-gradient(160deg,rgba(250,204,21,.18),rgba(1,10,15,.95) 55%)">
         <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/60 border border-amber-400/70 text-amber-200 text-[10px] font-black">${TROPHY(13)}<span>${esc(matchLabel(m).toUpperCase())}</span></div>
             <span class="text-[10px] font-bold text-white/60 truncate">${esc(t.name)}</span>
@@ -198,7 +204,7 @@ export function tourneyMatchCardHtml(t, m) {
         </div>
         <div class="flex items-center justify-between text-[10px] font-bold text-white/70 border-t border-white/10 pt-2">
             <span class="truncate"><i class="fa-solid fa-location-dot text-amber-300 mr-1"></i>${esc(placeOf(t, m))}</span>
-            <span class="shrink-0 text-amber-200/80">Follow live · stats</span>
+            <span class="shrink-0 text-amber-200/80">${m.done ? 'Result · rosters · comments' : 'Rosters · comments'}</span>
         </div>
     </div>`;
 }
@@ -292,11 +298,16 @@ function wrapEvents() {
         if (grid.querySelector('.fa-spin')) return;
         const day = window.selectedDateStr || ymdToday();
         const live = TT.list.filter(t => t.status !== 'cancelled');
-        const items = [], shown = new Set();
+        const items = [], tops = [], shown = new Set();
         live.forEach(t => {
             const ms = ['set', 'running', 'final'].includes(t.status) ? (t.matches || []).filter(m => m.date === day) : [];
-            if (ms.length) { ms.forEach(m => items.push({ k: m.time || t.time || '', html: tourneyMatchCardHtml(t, m) })); shown.add(t.id); }
-            else if (['signup', 'draw', 'waiting'].includes(t.status) && daysOf(t).some(d => d.date === day)) { items.push({ k: t.time || '', html: flyerHtml(t, true) }); shown.add(t.id); }
+            const dayIdx = daysOf(t).findIndex(d => d.date === day);
+            const isLater = dayIdx >= 1 || (dayIdx < 0 && ms.length && day > (daysOf(t)[0].date || ''));
+            // Day 1: the tournament banner; Day 2 on: "Resumed" (registration closed, stats, comments). Then the day's matches.
+            const top = (ms.length || dayIdx >= 0) ? (isLater ? resumedHtml(t, day) : flyerHtml(t, !ms.length)) : '';
+            if (ms.length) { ms.forEach(m => items.push({ k: m.time || t.time || '', html: tourneyMatchCardHtml(t, m) })); }
+            if (top) tops.push(top);   // drawn above the day's matches
+            if (top || ms.length) shown.add(t.id);
         });
         items.sort((a, b) => String(b.k).localeCompare(String(a.k)));
         const in45 = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
@@ -304,17 +315,107 @@ function wrapEvents() {
             .sort((a, b) => String(daysOf(a)[0].date).localeCompare(String(daysOf(b)[0].date)));
         const empty = !!grid.querySelector('.fa-calendar-xmark');
         if (empty) {
-            if (items.length) { grid.innerHTML = items.map(x => x.html).join(''); return; }
+            if (items.length || tops.length) { grid.innerHTML = tops.join('') + items.map(x => x.html).join(''); return; }
             if (promo.length) grid.innerHTML = `<div class="col-span-full text-center py-2"><div class="text-sm font-black text-white">No games today</div><div class="text-xs text-amber-200 font-bold">…but check out this tournament 🏆</div></div>` + flyerHtml(promo[0], true);
             return;
         }
         items.forEach(x => grid.insertAdjacentHTML('afterbegin', x.html));
+        tops.slice().reverse().forEach(h => grid.insertAdjacentHTML('afterbegin', h));
         if (promo.length) grid.insertAdjacentHTML('afterbegin', flyerHtml(promo[0]));
     };
     w._tt = true; w._vs = orig._vs; window.renderEvents = w;
 }
 setTimeout(wrapEvents, 0); setTimeout(wrapEvents, 2000);
 window.__ttWrap = wrapEvents;
+
+/** Day 2 on: "🏆 Name · Day 2 · Resumed" (no registering), how it's going, and quick links to the stats and comments. */
+function resumedHtml(t, day) {
+    const days = daysOf(t), n = Math.max(1, days.findIndex(d => d.date === day) + 1) || days.length;
+    const ms = (t.matches || []), done = ms.filter(m => m.done), goals = done.reduce((a, m) => a + (+m.ga || 0) + (+m.gb || 0), 0);
+    const sc = {};
+    ms.forEach(m => (m.goals || []).forEach(g => { if (!g.own && g.name) { const k = g.uid || g.name; sc[k] = sc[k] || { name: g.name, n: 0 }; sc[k].n++; } }));
+    const top = Object.values(sc).sort((a, b) => b.n - a.n)[0];
+    const champ = t.championId ? teamOf(t, t.championId) : null;
+    return `<div class="col-span-full relative rounded-2xl overflow-hidden border-[1.6px] border-amber-400 shadow-xl p-3.5 space-y-2.5" style="background:linear-gradient(120deg,rgba(250,204,21,.22),rgba(1,10,15,.94) 60%)">
+        <div class="flex items-center gap-2.5 cursor-pointer" onclick="openTourney('${jsq(t.id)}', null, 'bracket')">
+            <div class="shrink-0">${TROPHY(28)}</div>
+            <div class="flex-1 min-w-0"><div class="text-sm font-black text-white truncate">${esc(t.name)}</div>
+                <div class="text-[10px] font-bold text-white/65 truncate">${esc(t.park || t.location || '')} · registration closed</div></div>
+            <span class="shrink-0 text-[10px] font-black px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950">DAY ${n} · ${t.status === 'final' ? 'DONE' : 'RESUMED'}</span>
+        </div>
+        <div class="text-[11px] text-amber-100/90 font-bold">${champ ? `🏆 Champions: ${esc(champ.name)} · ` : ''}${done.length}/${ms.length} games played · ⚽ ${goals} goal${goals === 1 ? '' : 's'}${top ? ` · 👟 ${esc(top.name)} (${top.n})` : ''}</div>
+        <div class="grid grid-cols-2 gap-2">
+            <button onclick="openTourney('${jsq(t.id)}', null, 'bracket')" class="py-2 rounded-xl bg-black/60 border border-amber-400/60 text-amber-200 text-[11px] font-black">📊 Stats & bracket</button>
+            <button onclick="openTourney('${jsq(t.id)}', null, 'chat')" class="py-2 rounded-xl bg-black/60 border border-white/15 text-white text-[11px] font-black">💬 Comments</button>
+        </div></div>`;
+}
+
+// ---------------------------------------------------------------- 🏟️ one match: teams + players, result, comments (everyone)
+const MP = { tid: '', mid: '', unsub: null, msgs: [] };
+window.openTourneyMatch = function (tid, mid) {
+    const t = TT.list.find(x => x.id === tid) || (TT.open && TT.open.id === tid ? TT.open : null);
+    if (!t) { window.openTourney(tid, null, 'bracket'); return; }
+    if (MP.unsub) MP.unsub();
+    MP.tid = tid; MP.mid = mid; MP.msgs = [];
+    // comments on this match: the tournament chat, only the messages for this match (no index needed: sorted here)
+    MP.unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'tournaments', tid, 'chat'), where('matchId', '==', mid)), s => {
+        MP.msgs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (+a.at || 0) - (+b.at || 0));
+        drawMatchPage(true);
+    }, () => {});
+    const m = document.createElement('div');
+    m.id = 'tt-match';
+    m.className = 'fixed inset-0 z-[175] bg-[#040E13] text-white overflow-y-auto';
+    document.getElementById('tt-match')?.remove();
+    document.body.appendChild(m);
+    drawMatchPage();
+};
+window.closeTourneyMatch = () => { if (MP.unsub) MP.unsub(); MP.unsub = null; MP.tid = ''; document.getElementById('tt-match')?.remove(); };
+function drawMatchPage(keepInput) {
+    const el = document.getElementById('tt-match'); if (!el) return;
+    const t = TT.list.find(x => x.id === MP.tid) || TT.open; if (!t) return;
+    const m = (t.matches || []).find(x => x.id === MP.mid); if (!m) return;
+    const typed = keepInput ? (document.getElementById('tm-in') || {}).value || '' : '';
+    const A = teamOf(t, m.a), B = teamOf(t, m.b), boss = t.organizerId === myUid();
+    const side = (X, ref) => X ? `<div class="flex flex-col items-center gap-1.5 min-w-0 flex-1">${teamLogoHtml(X, 60)}<span class="text-sm font-black text-center leading-tight">${esc(X.name)}</span></div>`
+        : `<div class="flex flex-col items-center gap-1.5 flex-1"><div class="w-[60px] h-[60px] rounded-2xl border-2 border-dashed border-amber-300/60 flex items-center justify-center text-amber-200 text-2xl">?</div><span class="text-[11px] font-bold text-white/55 text-center">${esc(fromLabel(ref))}</span></div>`;
+    const goalsOf = (id) => (m.goals || []).filter(g => g.teamId === id).map(g => `<div>⚽ ${esc(g.name || 'Goal')}${g.own ? ' <span class="text-white/45">(own goal)</span>' : ''}</div>`).join('');
+    const roster = (X) => !X ? '<p class="text-[11px] text-white/45">Not decided yet.</p>' : ((X.roster || []).length
+        ? (X.roster || []).map(p => `<div class="flex items-center gap-2 py-1"><span class="w-6 text-right text-[11px] font-black text-amber-300 font-mono">${esc(p.number ?? '')}</span><span class="text-xs font-bold truncate">${esc(p.name || 'Player')}</span>${p.position ? `<span class="text-[9px] text-white/45 font-bold">${esc(p.position)}</span>` : ''}</div>`).join('')
+        : '<p class="text-[11px] text-white/45">No players listed yet.</p>');
+    const when = [m.date ? new Date(m.date + 'T12:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '', prettyTime(m.time)].filter(Boolean).join(' · ');
+    el.innerHTML = `<div class="max-w-xl mx-auto p-4 pb-28 space-y-4">
+        <div class="flex items-center gap-3">
+            <button onclick="closeTourneyMatch()" class="w-10 h-10 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-arrow-left"></i></button>
+            <div class="flex-1 min-w-0"><div class="text-[10px] font-black uppercase tracking-wider text-amber-300 flex items-center gap-1">${TROPHY(12)} ${esc(matchLabel(m))}</div>
+                <div class="text-sm font-black truncate">${esc(t.name)}</div></div>
+            <button onclick="closeTourneyMatch(); openTourney('${jsq(t.id)}', null, 'bracket')" class="text-[11px] font-black px-3 py-2 rounded-xl bg-black/60 border border-amber-400/60 text-amber-200">📊 Tournament</button>
+        </div>
+        <div class="rounded-3xl border-[1.6px] border-amber-400 p-4 space-y-3" style="background:linear-gradient(160deg,rgba(250,204,21,.18),rgba(1,10,15,.95) 55%)">
+            <div class="flex items-center gap-3">${side(A, m.aFrom)}
+                <div class="text-center shrink-0">${m.done ? `<div class="text-4xl font-black font-mono text-amber-200">${m.ga} - ${m.gb}</div><div class="text-[10px] font-black text-white/55">FINAL${m.pens ? ` · pens: ${esc(nameOf(t, m.pens))}` : ''}</div>` : `<div class="text-2xl font-black text-amber-300">VS</div><div class="text-[11px] font-bold text-white/70">${esc(prettyTime(m.time || t.time))}</div>`}</div>
+                ${side(B, m.bFrom)}</div>
+            ${(m.goals || []).length ? `<div class="grid grid-cols-2 gap-3 text-[11px] font-bold text-white/85 border-t border-white/10 pt-2"><div>${goalsOf(m.a)}</div><div class="text-right">${goalsOf(m.b)}</div></div>` : ''}
+            <div class="text-[11px] font-bold text-white/65 text-center"><i class="fa-solid fa-location-dot text-amber-300 mr-1"></i>${esc(placeOf(t, m))}${when ? ` · ${esc(when)}` : ''}</div>
+            ${boss && m.a && m.b ? `<button onclick="closeTourneyMatch(); openTourney('${jsq(t.id)}', null, 'bracket'); setTimeout(() => openTourneyScore('${jsq(m.id)}'), 350)" class="${GOLDBTN} w-full py-2.5 text-sm">⚽ ${m.done ? 'Change the score' : 'Enter the score'}</button>` : ''}
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            ${[A, B].map((X, i) => `<div class="bg-black/45 border border-white/10 rounded-2xl p-3"><div class="text-[10px] font-black uppercase tracking-wider text-amber-300 mb-1 truncate">${esc(X ? X.name : (i ? fromLabel(m.bFrom) : fromLabel(m.aFrom)))}</div>${roster(X)}</div>`).join('')}
+        </div>
+        <div class="bg-black/45 border border-white/10 rounded-2xl p-3 space-y-3">
+            <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">💬 Comments</div>
+            <div class="space-y-2" id="tm-list">${MP.msgs.map(c => `<div class="flex gap-2 ${c.uid === myUid() ? 'flex-row-reverse text-right' : ''}">
+                <img src="${esc(c.avatar || DEFAULT_AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10 shrink-0" alt="" onerror="this.src='${DEFAULT_AV}'">
+                <div class="max-w-[80%] rounded-2xl px-3 py-2 ${c.uid === myUid() ? 'bg-amber-400/20' : 'bg-white/10'}"><div class="text-[10px] font-black text-white/60">${esc(c.name || 'Player')}</div><div class="text-xs whitespace-pre-wrap break-words">${esc(c.text || '')}</div></div></div>`).join('') || '<p class="text-[11px] text-white/45 text-center py-2">No comments yet. Say something! ⚽</p>'}</div>
+            ${myUid() ? `<div class="flex gap-2"><input id="tm-in" class="${INPUT}" maxlength="1000" placeholder="Comment on this match…" onkeydown="if(event.key==='Enter')sendMatchComment()"><button onclick="sendMatchComment()" class="${BTN} shrink-0"><i class="fa-solid fa-paper-plane"></i></button></div>` : ''}
+        </div></div>`;
+    const inp = document.getElementById('tm-in'); if (inp && typed) inp.value = typed;
+}
+window.sendMatchComment = async function () {
+    const box = document.getElementById('tm-in'); const text = String(box && box.value || '').trim(); if (!text || !MP.tid) return;
+    box.value = '';
+    try { await addDoc(collection(db, 'artifacts', appId, 'tournaments', MP.tid, 'chat'), { text: text.slice(0, 1000), uid: myUid(), name: myName(), avatar: myAvatar(), at: Date.now(), matchId: MP.mid }); }
+    catch (e) { box.value = text; toast("Couldn't send it.", 'error'); }
+};
 
 // ---------------------------------------------------------------- sheets
 function sheet(id, title, body) {
@@ -346,6 +447,7 @@ window.openCreateTourney = function (pre = {}) {
     F.pre = pre || {};
     F.step = 1;
     F.basics = {};
+    F.trophyFile = null; F.trophyPreview = ''; F.trophyCleared = false;
     F.days = (pre.days || []).length ? daysOf(pre).map(d => ({ ...d })) : [];
     drawCreate();
 };
@@ -387,6 +489,7 @@ function drawCreate() {
                 <div class="flex-1"><div class="text-sm font-black">💵 Must pay to be confirmed</div><div class="text-[11px] text-white/55">Teams show as "Pending payment" until you mark them paid. Only paid teams go into the draw.</div></div>
                 <input id="tt-reqpay" type="checkbox" class="w-6 h-6 accent-amber-400" ${payOn ? 'checked' : ''}>
             </label>
+            ${prizeFormHtml(v)}
             ${comms.length ? `<div>${LBL('🏘️ Post in a community (optional)')}<select id="tt-comm" class="${INPUT}"><option value="">No community</option>${comms.map(id => `<option value="${esc(id)}" ${v('communityId') === id ? 'selected' : ''}>${esc(cache[id].name || 'Community')}</option>`).join('')}</select></div>` : ''}
             <div>${LBL('Description / rules')}<textarea id="tt-desc" rows="3" maxlength="800" class="${INPUT}" placeholder="e.g. 25-minute games. Bring light and dark shirts.">${esc(v('description'))}</textarea></div>
             <button onclick="ttCreateNext()" class="${GOLDBTN} w-full py-3.5 text-sm">Next: proposed schedule ›</button>`);
@@ -413,12 +516,53 @@ function drawCreate() {
             <button onclick="saveTourney('${jsq(pre.id || '')}')" class="${GOLDBTN} py-3 text-sm">${editing ? 'Save changes' : 'Create tournament'}</button>
         </div>`);
 }
-window.ttCreateNext = function () {
-    const b = {
+/** 🎁 Prize for the champion: "$ Cash prize" (+ amount) and "🏆 Trophy" (+ optional picture). */
+function prizeFormHtml(v) {
+    const cash = v('prizeCash', false) === true, trophy = v('trophy', false) === true;
+    const cents = +v('prizeCents', 0) || 0;
+    const amt = F.basics.prizeAmt !== undefined ? F.basics.prizeAmt : (cents ? (cents % 100 ? (cents / 100).toFixed(2) : String(cents / 100)) : '');
+    const photo = F.trophyPreview || v('trophyPhoto', '');
+    return `<div class="bg-black/40 border ${cash || trophy ? 'border-amber-400/70' : 'border-white/10'} rounded-2xl p-3 space-y-3" id="tt-prize-box">
+        <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">🎁 Prize for the champion</div>
+        <label class="flex items-center gap-3 cursor-pointer"><div class="flex-1 text-sm font-black">💵 Cash prize</div>
+            <input id="tt-cash" type="checkbox" class="w-6 h-6 accent-amber-400" ${cash ? 'checked' : ''} onchange="document.getElementById('tt-cash-row').style.display=this.checked?'':'none'"></label>
+        <div id="tt-cash-row" style="display:${cash ? '' : 'none'}">${LBL('How much? ($)')}<input id="tt-cash-amt" inputmode="decimal" class="${INPUT}" value="${esc(amt)}" placeholder="e.g. 400"></div>
+        <label class="flex items-center gap-3 cursor-pointer"><div class="flex-1 text-sm font-black">🏆 Trophy</div>
+            <input id="tt-trophy" type="checkbox" class="w-6 h-6 accent-amber-400" ${trophy ? 'checked' : ''} onchange="document.getElementById('tt-trophy-row').style.display=this.checked?'':'none'"></label>
+        <div id="tt-trophy-row" class="space-y-2" style="display:${trophy ? '' : 'none'}">
+            ${photo ? `<div class="relative w-28 h-28"><img src="${esc(photo)}" class="w-28 h-28 rounded-2xl object-cover border border-amber-400/60" alt="Trophy">
+                <button type="button" onclick="ttTrophyClear()" class="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-black border border-white/30 text-xs"><i class="fa-solid fa-xmark"></i></button></div>` : ''}
+            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-black/50 border border-white/15 text-xs font-black cursor-pointer">📷 ${photo ? 'Change the picture' : 'Add a picture of the trophy (optional)'}
+                <input type="file" accept="image/*" class="hidden" onchange="ttTrophyPick(this)"></label>
+        </div></div>`;
+}
+/** Keeps what's typed on page 1 when the trophy picture redraws the form. */
+function readBasics() {
+    return {
         name: val('tt-name'), date: val('tt-start-date'), time: val('tt-start-time'), park: val('tt-park'), city: val('tt-city'),
         format: segVal('tt-format') || '8v8', minTeams: num('tt-minteams', 4), maxTeams: num('tt-maxteams', 8), minPlayers: num('tt-minpl', 7), maxPlayers: num('tt-maxpl', 12),
         price: val('tt-price'), requirePay: !!document.getElementById('tt-reqpay')?.checked, communityId: val('tt-comm'), description: val('tt-desc'),
+        prizeCash: !!document.getElementById('tt-cash')?.checked, prizeAmt: val('tt-cash-amt'), trophy: !!document.getElementById('tt-trophy')?.checked,
+        trophyPhoto: F.trophyCleared ? '' : (F.basics.trophyPhoto !== undefined ? F.basics.trophyPhoto : (F.pre.trophyPhoto || '')),
     };
+}
+window.ttTrophyPick = function (input) {
+    const f = input.files && input.files[0]; if (!f) return;
+    if (!String(f.type).startsWith('image/')) { toast('Pick a picture.', 'error'); return; }
+    F.basics = readBasics();
+    F.trophyFile = f; F.trophyCleared = false;
+    if (F.trophyPreview) URL.revokeObjectURL(F.trophyPreview);
+    F.trophyPreview = URL.createObjectURL(f);
+    drawCreate();
+};
+window.ttTrophyClear = function () {
+    F.basics = readBasics();
+    F.trophyFile = null; F.trophyPreview = ''; F.trophyCleared = true; F.basics.trophyPhoto = '';
+    drawCreate();
+};
+window.ttCreateNext = function () {
+    const b = readBasics();
+    if (b.prizeCash && !(parseFloat(String(b.prizeAmt || '').replace(',', '.')) > 0)) { toast('Put the cash prize amount (or untick it).', 'error'); return; }
     if (!b.name || !b.date || !b.time || !b.park || !b.city) { toast('Fill in the name, starting date and time, park and city.', 'error'); return; }
     if (b.minTeams > b.maxTeams) { toast("Min teams can't be more than max teams.", 'error'); return; }
     if (b.minPlayers > b.maxPlayers) { toast("Min players can't be more than max players.", 'error'); return; }
@@ -452,21 +596,48 @@ window.saveTourney = async function (editId) {
         priceCents: Math.round((parseFloat(String(b.price || '').replace(',', '.')) || 0) * 100), requirePay: !!b.requirePay, description: b.description,
         communityId: cid, communityName: cid ? (((window.communitiesCache || {})[cid] || {}).name || '') : '', updatedAt: serverTimestamp() };
     if (fields.requirePay && !fields.priceCents) fields.requirePay = false;
+    // 🎁 prize for the champion
+    fields.prizeCash = !!b.prizeCash;
+    fields.prizeCents = b.prizeCash ? Math.round((parseFloat(String(b.prizeAmt || '').replace(',', '.')) || 0) * 100) : 0;
+    fields.trophy = !!b.trophy;
+    fields.trophyPhoto = b.trophy ? (b.trophyPhoto || '') : '';
+    const btn = document.querySelector('#tt-create button[onclick^="saveTourney"]'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        if (b.trophy && F.trophyFile) {
+            const { uploadMedia } = await import('./wa-chat.js');
+            fields.trophyPhoto = (await uploadMedia(F.trophyFile, 'teams/trophy')).url;
+        }
+    } catch (e) { toast("Couldn't upload the trophy picture. Saving without it.", 'error'); }
     try {
         if (editId) {
-            await change(editId, (t) => { if ((t.teams || []).length > fields.maxTeams) throw new Error('TOO_MANY'); Object.assign(t, fields); });
+            await change(editId, (t) => { if ((t.teams || []).length > fields.maxTeams) throw new Error('TOO_MANY'); Object.assign(t, fields); t.prizes = withAutoPrize(t.prizes, fields); });
             document.getElementById('tt-create')?.remove(); toast('Tournament updated.');
             return;
         }
         const ref = doc(C('tournaments'));
-        const t = { ...fields, organizerId: myUid(), organizerName: myName(), status: 'signup', plan: '', teams: [], teamIds: [], participantUids: [myUid()], matches: [], prizes: [], championId: '', announcements: [], createdAt: serverTimestamp() };
+        const t = { ...fields, organizerId: myUid(), organizerName: myName(), status: 'signup', plan: '', teams: [], teamIds: [], participantUids: [myUid()], matches: [], prizes: withAutoPrize([], fields), championId: '', announcements: [], createdAt: serverTimestamp() };
         await setDoc(ref, t);
         document.getElementById('tt-create')?.remove();
         window.closeCreateActionSheet && window.closeCreateActionSheet();
         toast('Tournament created! 🏆 Share it so teams can register.');
         window.openTourney(ref.id, { ...t, id: ref.id });
-    } catch (e) { toast(String(e && e.message) === 'TOO_MANY' ? 'More teams already registered than that.' : "Couldn't save the tournament.", 'error'); }
+    } catch (e) { toast(String(e && e.message) === 'TOO_MANY' ? 'More teams already registered than that.' : "Couldn't save the tournament.", 'error'); if (btn) { btn.disabled = false; btn.textContent = editId ? 'Save changes' : 'Create tournament'; } }
 };
+/** The 🥇 1st prize line from the cash / trophy ticks ("$400 + 🏆 Trophy"). Only replaces a line it made itself. */
+export function prizeText(f) {
+    const parts = [];
+    if (f.prizeCash && +f.prizeCents > 0) parts.push(money(+f.prizeCents));
+    if (f.trophy) parts.push('🏆 Trophy');
+    return parts.join(' + ');
+}
+function withAutoPrize(list, f) {
+    const out = (list || []).map(p => ({ ...p }));
+    const text = prizeText(f);
+    const i = out.findIndex(p => p.auto);
+    if (i >= 0) { if (text) out[i].prize = text; else out.splice(i, 1); return out; }
+    if (text && !out.some(p => /1st/.test(p.place || ''))) out.unshift({ place: '🥇 1st', prize: text, auto: true });
+    return out;
+}
 async function change(id, fn) {
     await runTransaction(db, async (tx) => {
         const s = await tx.get(D(id)); if (!s.exists()) throw new Error('GONE');
@@ -955,16 +1126,19 @@ function drawPage() {
         ${['qf', 'sf', 'final'].filter(s => ms.some(m => m.stage === s)).map(s => `<div class="space-y-2"><div class="text-[10px] font-black uppercase tracking-wider ${s === 'final' ? 'text-amber-300' : 'text-white/55'}">${s === 'qf' ? 'Quarter-finals' : s === 'sf' ? 'Semi-finals' : 'Final'}</div>${ms.filter(m => m.stage === s).map(m => matchRow(t, m, boss)).join('')}</div>`).join('')}
         ${scorersHtml(t)}
     </div>`;
+    const mLabel = (id) => { const x = (t.matches || []).find(y => y.id === id); return x ? `${matchLabel(x)}: ${nameOf(t, x.a) || '?'} vs ${nameOf(t, x.b) || '?'}` : ''; };
     const chat = `<div class="space-y-3">
         <div class="space-y-2 max-h-[55vh] overflow-y-auto" id="tt-chat-list">${(TT.chat || []).map(c => `<div class="flex gap-2 ${c.uid === myUid() ? 'flex-row-reverse text-right' : ''}">
             <img src="${esc(c.avatar || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover shrink-0">
             <div class="max-w-[78%] ${c.uid === myUid() ? 'bg-[#00F296]/15 border-[#00F296]/30' : 'bg-black/50 border-white/10'} border rounded-2xl px-3 py-2">
                 <div class="text-[10px] font-black ${c.uid === t.organizerId ? 'text-amber-300' : 'text-white/60'}">${esc(c.name || 'Player')}${c.uid === t.organizerId ? ' · organizer' : ''}${window.badgeHtml ? window.badgeHtml(c.uid) : ''}</div>
+                ${c.matchId && mLabel(c.matchId) ? `<button onclick="openTourneyMatch('${jsq(t.id)}', '${jsq(c.matchId)}')" class="block text-[9px] font-black text-amber-300/90 underline text-left">on ${esc(mLabel(c.matchId))}</button>` : ''}
                 <div class="text-xs text-white/90 whitespace-pre-wrap break-words text-left">${smartText(c.text)}</div>
                 <div class="text-[9px] text-white/35">${esc(new Date(c.at || 0).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}</div></div></div>`).join('') || '<p class="text-xs text-white/45 text-center py-6">No messages yet. Say hi to the other teams!</p>'}</div>
         ${myUid() ? `<div class="flex gap-2"><input id="tt-chat-in" class="${INPUT}" maxlength="1000" placeholder="${iPlay || boss ? 'Message everyone in the tournament…' : 'Ask the organizer a question…'}" onkeydown="if(event.key==='Enter')sendTourneyChat()"><button onclick="sendTourneyChat()" class="${BTN} shrink-0"><i class="fa-solid fa-paper-plane"></i></button></div>` : ''}
     </div>`;
-    const prizes = `<div class="space-y-2">${(t.prizes || []).map(p => `<div class="flex items-center gap-3 bg-amber-400/10 border border-amber-400/40 rounded-2xl p-3"><div class="text-sm font-black text-amber-200 w-20 shrink-0">${esc(p.place)}</div><div class="text-sm font-bold">${esc(p.prize)}</div></div>`).join('') || '<p class="text-xs text-white/45 text-center py-6">No prizes listed yet.</p>'}
+    const prizes = `<div class="space-y-2">
+        ${t.trophy && t.trophyPhoto ? `<div class="flex flex-col items-center gap-1"><img src="${esc(t.trophyPhoto)}" onclick="window.open('${jsq(t.trophyPhoto)}','_blank')" class="w-44 h-44 rounded-3xl object-cover border-2 border-amber-400/70 shadow-xl cursor-pointer" alt="The trophy"><div class="text-[11px] font-black text-amber-200">🏆 The trophy</div></div>` : ''}${(t.prizes || []).map(p => `<div class="flex items-center gap-3 bg-amber-400/10 border border-amber-400/40 rounded-2xl p-3"><div class="text-sm font-black text-amber-200 w-20 shrink-0">${esc(p.place)}</div><div class="text-sm font-bold">${esc(p.prize)}</div></div>`).join('') || '<p class="text-xs text-white/45 text-center py-6">No prizes listed yet.</p>'}
         ${t.prizeNote ? `<p class="text-[11px] text-white/60">${esc(t.prizeNote)}</p>` : ''}
         ${boss ? `<button onclick="openTourneyPrizes()" class="${GOLDBTN} w-full py-3">🎁 Edit prizes</button>` : ''}</div>`;
     const nextStep = {
@@ -988,7 +1162,7 @@ function drawPage() {
         ${+t.priceCents ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 text-xs"><b>Payments:</b> ${(t.teams || []).filter(x => x.paid).length} of ${n} paid · ${money((t.teams || []).filter(x => x.paid).length * t.priceCents)} collected. Mark payments in the Teams tab.</div>` : ''}
         ${(t.announcements || []).length ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-1.5"><div class="text-[10px] font-black uppercase tracking-wider text-white/55">Updates sent</div>${t.announcements.slice().reverse().map(a => `<div class="text-[11px] text-white/75"><span class="text-white/45">${esc(new Date(a.at).toLocaleDateString([], { month: 'short', day: 'numeric' }))}:</span> ${esc(a.text)}</div>`).join('')}</div>` : ''}
     </div>`;
-    const showPrizes = (t.prizes || []).length || boss;
+    const showPrizes = (t.prizes || []).length || t.trophyPhoto || boss;
     el.innerHTML = `<div class="max-w-4xl mx-auto w-full px-4 pt-3 pb-24 space-y-3">
         <div class="bg-[#040E13]/90 backdrop-blur-md border-2 border-emerald-500/30 px-5 py-3.5 rounded-3xl shadow-lg flex items-center justify-between gap-3">
             <button onclick="closeTourney()" aria-label="Back" class="w-9 h-9 bg-black/60 hover:bg-black text-white rounded-full flex items-center justify-center border border-white/20 shrink-0"><i class="fa-solid fa-chevron-left text-xs"></i></button>
@@ -1020,7 +1194,11 @@ window.tourneyMatchCardHtml = tourneyMatchCardHtml;
     const m = h.match(/[#&?]tourney=([^&/]+)/); if (!m) return;
     const id = decodeURIComponent(m[1]);
     const tab = (h.match(/[#&?]tab=(info|teams|bracket|chat|prizes|admin)\b/) || [])[1];
+    const mid = (h.match(/[#&?]tab=match(?::|%3A)([^&/]+)/) || [])[1];   // a comment on one match
     let tries = 0;
-    const go = () => { if (myUid() || tries++ > 20) window.openTourney(id, null, tab); else setTimeout(go, 500); };
+    const go = () => {
+        if (mid) { if (TT.list.some(t => t.id === id)) { window.openTourneyMatch(id, decodeURIComponent(mid)); return; } if (tries++ > 30) { window.openTourney(id, null, 'bracket'); return; } setTimeout(go, 500); return; }
+        if (myUid() || tries++ > 20) window.openTourney(id, null, tab); else setTimeout(go, 500);
+    };
     go();
 })();

@@ -54,7 +54,7 @@ onAuthStateChanged(auth, async (u) => {
 });
 
 // ---------------------------------------------------------------- layout
-const TABS = [['home', '🏠 Home'], ['players', '🔎 Players'], ['verify', '✔️ Verified'], ['messages', '💬 Admin messages'], ['analytics', '📈 Analytics'], ['money', '💰 Money'], ['settings', '⚙️ Settings']];
+const TABS = [['home', '🏠 Home'], ['players', '🔎 Players'], ['verify', '✔️ Verified'], ['messages', '💬 Admin messages'], ['analytics', '📈 Analytics'], ['themes', '🎨 Themes'], ['money', '💰 Money'], ['settings', '⚙️ Settings']];
 window.mgrTab = (k) => { S.tab = k; draw(); };
 function draw() {
     $('app').innerHTML = `
@@ -64,7 +64,7 @@ function draw() {
         </div>
         <div class="flex gap-1 overflow-x-auto bg-black/40 border border-white/10 rounded-2xl p-1">${TABS.map(([k, l]) => `<button onclick="mgrTab('${k}')" class="tab ${S.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <div id="body" class="space-y-4"></div>`;
-    ({ home, players, verify, messages, analytics, money: moneyTab, settings })[S.tab]();
+    ({ home, players, verify, messages, analytics, themes: themesTab, money: moneyTab, settings })[S.tab]();
 }
 const body = (html) => { $('body').innerHTML = html; };
 const loading = () => body('<div class="text-center text-white/60 text-sm py-10"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading…</div>');
@@ -303,6 +303,58 @@ async function analytics(days) {
             ${r.totals.length ? `<div class="space-y-1">${r.totals.map(([k, n]) => `<div class="flex items-center gap-2 text-[12px]"><span class="flex-1 truncate">${esc(nice(k))}</span><span class="font-black text-[#00F296]">${n}</span></div>`).join('')}</div>` : '<p class="text-sm text-white/50">No taps counted yet. Counting starts once this update is live.</p>'}</div>`);
 }
 window.mgrDays = (d) => analytics(d);
+
+// ---------------------------------------------------------------- 🎨 themes: who uses which one
+const THEME_INFO = {
+    tokyo: ['Tokyo Rooftop', '#FF4D5E'], faveladay: ['Favela Day', '#FFD23F'], favela: ['Favela Night', '#B48CFF'],
+    cage: ['Night Cage', '#A6DCFF'], classic: ['Classic', '#00F296'],
+};
+async function themesTab() {
+    loading();
+    const r = await call('themes').catch(() => ({ list: [] }));
+    S.themes = r.list || [];
+    S.themeShow = S.themeShow || '';
+    drawThemes();
+}
+window.mgrThemeShow = (k) => { S.themeShow = S.themeShow === k ? '' : k; drawThemes(); };
+function drawThemes() {
+    const list = S.themes || [];
+    const picked = list.filter(p => p.theme);
+    const counts = {};
+    picked.forEach(p => { counts[p.theme] = (counts[p.theme] || 0) + 1; });
+    const keys = Object.keys(THEME_INFO).concat(Object.keys(counts).filter(k => !THEME_INFO[k]));
+    const max = Math.max(1, ...Object.values(counts));
+    const sawIntro = list.filter(p => p.sawIntro).length;
+    const pickedAfter = list.filter(p => p.sawIntro && p.theme).length;
+    const from = {}; picked.forEach(p => { const f = p.from || 'before tracking'; from[f] = (from[f] || 0) + 1; });
+    const name = (k) => (THEME_INFO[k] || [k])[0];
+    const color = (k) => (THEME_INFO[k] || [0, '#ffffff'])[1];
+    const ago = (ms) => ms ? dt(ms) : '';
+    const row = (k) => {
+        const n = counts[k] || 0, pct = picked.length ? Math.round(n / picked.length * 100) : 0;
+        return `<button onclick="mgrThemeShow('${k}')" class="w-full text-left ${S.themeShow === k ? 'bg-white/10' : ''} rounded-xl px-2 py-1.5">
+            <div class="flex items-center gap-2 text-[13px]"><span class="w-3 h-3 rounded-full shrink-0" style="background:${color(k)}"></span><span class="flex-1 font-bold">${esc(name(k))}</span><span class="font-black">${n}</span><span class="text-white/45 text-[11px] w-10 text-right">${pct}%</span></div>
+            <div class="h-2 mt-1 rounded bg-white/10 overflow-hidden"><div class="h-full rounded" style="width:${Math.round(n / max * 100)}%;background:${color(k)}"></div></div></button>`;
+    };
+    const shown = S.themeShow === '_none' ? list.filter(p => !p.theme) : S.themeShow ? picked.filter(p => p.theme === S.themeShow) : picked;
+    body(`<div class="grid grid-cols-3 gap-2">
+            <div class="card text-center"><div class="text-2xl font-black">${picked.length}</div><div class="text-[11px] text-white/60">Picked a theme</div></div>
+            <div class="card text-center"><div class="text-2xl font-black">${list.length - picked.length}</div><div class="text-[11px] text-white/60">Never picked (see Tokyo)</div></div>
+            <div class="card text-center"><div class="text-2xl font-black">${sawIntro}</div><div class="text-[11px] text-white/60">Saw the "pick your theme" screen</div></div>
+        </div>
+        <div class="card space-y-1"><div class="lbl">Which theme people picked (tap one to see who)</div>
+            ${keys.map(row).join('')}
+            <button onclick="mgrThemeShow('_none')" class="w-full text-left ${S.themeShow === '_none' ? 'bg-white/10' : ''} rounded-xl px-2 py-1.5 text-[13px] text-white/60">⚪ Never picked: <b class="text-white">${list.length - picked.length}</b> (they see Tokyo Rooftop, the default)</button>
+            <p class="text-[11px] text-white/45 pt-1">${sawIntro ? `${pickedAfter} of the ${sawIntro} who saw the theme screen have a theme picked. ` : ''}Picked on: ${Object.entries(from).map(([f, n]) => `${f === 'iphone' ? '📱 iPhone' : f === 'android' ? '🤖 Android' : f === 'web' ? '💻 Website' : f} ${n}`).join(' · ') || '-'}</p>
+        </div>
+        <div class="card"><div class="lbl">${S.themeShow === '_none' ? 'Never picked' : S.themeShow ? esc(name(S.themeShow)) : 'Everyone who picked'} (${shown.length})${S.themeShow ? ' · <button onclick="mgrThemeShow(\'\')" class="underline">show all</button>' : ''}</div>
+            <div class="space-y-1 max-h-[480px] overflow-y-auto">${shown.map(p => `<div class="flex items-center gap-2 text-[12px] py-1">
+                <img src="${esc(p.avatar || AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10" onerror="this.src='${AV}'">
+                <span class="flex-1 truncate font-bold">${esc(p.name)}</span>
+                ${p.theme ? `<span class="font-black" style="color:${color(p.theme)}">${esc(name(p.theme))}</span>` : ''}
+                <span class="text-white/45 w-20 text-right">${esc(ago(p.at))}</span></div>`).join('') || '<p class="text-sm text-white/50">Nobody yet.</p>'}</div>
+            <p class="text-[10px] text-white/40 mt-2">Dates show from this update on (when someone picks a theme).</p></div>`);
+}
 
 // ---------------------------------------------------------------- money (FutNet itself)
 async function moneyTab() {

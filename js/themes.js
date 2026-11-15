@@ -4,7 +4,8 @@
 // The background swap itself lives in index.html (no flash on load); this file adds the color swap,
 // the Settings picker (with a sample game preview) and the saving.
 import { db, appId } from './firebase-config.js';
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+// No theme picked yet = Tokyo Rooftop (the default since Nov 2026; index.html applies it before the page draws).
 
 // accent  = buttons, highlights (FutNet green)       accent2 = borders, labels (FutNet teal)
 // card    = card background (FutNet dark navy)       panel   = slightly lighter boxes      deep = darkest areas
@@ -19,9 +20,14 @@ export const THEMES = {
         pal: { accent: '#A6DCFF', accent2: '#4C7BD9', card: '#07101F', panel: '#0B1628', deep: '#04070F' }, swap: true,
     },
     favela: {
-        name: 'Favela Court', note: 'Rooftop court at dusk, Brazil colors', thumb: 'img/theme-favela-thumb.jpg', photo: 'img/theme-favela.jpg',
+        name: 'Favela Night', note: 'Rooftop court at dusk, Brazil colors', thumb: 'img/theme-favela-thumb.jpg', photo: 'img/theme-favela.jpg',
         // Brazil yellow, court blue, dusk violet-navy
         pal: { accent: '#FFC23D', accent2: '#2F6BD8', card: '#14121F', panel: '#1C1828', deep: '#0C0A14' }, swap: true,
+    },
+    faveladay: {
+        name: 'Favela Day', note: 'Daytime cage under Christ the Redeemer', thumb: 'img/theme-favela-day-thumb.jpg', photo: 'img/theme-favela-day.jpg',
+        // Brazil yellow, Brazil green, deep sea navy
+        pal: { accent: '#FFD23F', accent2: '#1FAF5A', card: '#0E1A24', panel: '#14222E', deep: '#08121A' }, swap: true,
     },
     tokyo: {
         name: 'Tokyo Rooftop', note: 'Daytime cage above the city', thumb: 'img/theme-tokyo-thumb.jpg', photo: 'img/theme-tokyo.jpg',
@@ -103,7 +109,7 @@ window.pickTheme = async function (key) {
     if (window.userProfile) window.userProfile.theme = key;
     const uid = window.currentUser?.uid; if (!uid) return;
     try {
-        await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'), { theme: key }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'), { theme: key, themeAt: Date.now(), themeFrom: 'web' }, { merge: true });   // themeAt / themeFrom: for the manager's 🎨 Themes tab
         if (window.showToast) window.showToast(`Theme: ${THEMES[key].name}`);
     } catch (e) {
         if (window.showToast) window.showToast("Saved on this device only (couldn't reach your profile).", 'error');
@@ -151,4 +157,89 @@ window.themePickerHtml = function () {
         ${previewHtml(cur)}
         <p class="text-[11px] text-white/50">Changes the background, buttons and card colors. Only you see your theme.</p>
     </div>`;
+};
+
+// ---------------------------------------------------------------- 🎨 the one-time "Now you can pick your theme" screen
+// Same rules as the apps (ThemeIntro.swift / ThemeIntro.kt):
+//   • Returning players (account made before Nov 15, 2026): shows the next time they open futnet.site.
+//   • New players: shows on their 5th visit (a visit = a new browser session).
+//   • ONCE per player, ever: saved on the profile (users/{uid}/profile/data.themeIntro) so the apps skip it too, and in this browser.
+//   • Returning players who already picked a theme don't see it.
+const INTRO_SEEN = 'futnet_theme_intro_seen', VISITS = 'futnet_visits';
+const CUTOFF = Date.UTC(2026, 10, 15);
+const ls = { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } } };
+(function themeIntroWatch() {
+    let tries = 0;
+    const t = setInterval(() => {
+        tries++;
+        const u = window.currentUser, p = window.userProfile;
+        if (tries > 120) { clearInterval(t); return; }
+        if (!u || !u.uid || !p) return;
+        clearInterval(t);
+        maybeShowIntro(u).catch(() => {});
+    }, 500);
+})();
+async function maybeShowIntro(u) {
+    if (ls.get(INTRO_SEEN)) return;
+    let visits = +(ls.get(VISITS) || 0);
+    try { if (!sessionStorage.getItem('futnet_visit')) { sessionStorage.setItem('futnet_visit', '1'); visits++; ls.set(VISITS, String(visits)); } } catch (e) { /* ignore */ }
+    const created = Date.parse((u.metadata && u.metadata.creationTime) || '') || Date.now();
+    const returning = created < CUTOFF;
+    if (!returning && visits < 5) return;
+    const ref = doc(db, 'artifacts', appId, 'users', u.uid, 'profile', 'data');
+    const d = (await getDoc(ref)).data() || {};
+    const markSeen = () => { ls.set(INTRO_SEEN, '1'); setDoc(ref, { themeIntro: serverTimestamp() }, { merge: true }).catch(() => {}); };
+    if (d.themeIntro) { ls.set(INTRO_SEEN, '1'); return; }
+    if (returning && typeof d.theme === 'string') { markSeen(); return; }   // already picked one
+    setTimeout(() => { if (ls.get(INTRO_SEEN)) return; markSeen(); window.openThemeIntro(); }, 2000);
+}
+/** The screen itself (also handy for testing: openThemeIntro() in the console). */
+window.openThemeIntro = function () {
+    document.getElementById('theme-intro')?.remove();
+    const keys = ['tokyo', 'faveladay', 'favela', 'cage', 'classic'].filter(k => THEMES[k]), start = Math.max(0, keys.indexOf(current()));
+    const el = document.createElement('div');
+    el.id = 'theme-intro';
+    el.style.cssText = 'position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px 0;color:#fff;font-family:inherit';
+    const card = (k) => { const t = THEMES[k], p = t.pal, mix = (c, n) => `color-mix(in srgb,${c} ${n}%,transparent)`; return `
+        <div data-ti="${k}" style="flex:0 0 min(72vw,300px);height:min(56vh,430px);scroll-snap-align:center;position:relative;border-radius:28px;overflow:hidden;background:${p.deep} url('${t.photo}') center 60%/cover no-repeat;border:1px solid rgba(255,255,255,.2);transition:border-color .2s">
+            <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.35),transparent 40%,rgba(0,0,0,.55))"></div>
+            <div style="position:absolute;top:18px;left:0;right:0;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.6)"><div style="font-size:20px;font-weight:900">${t.name}</div><div style="font-size:11px;font-weight:600;opacity:.85">${t.note}</div></div>
+            <div style="position:absolute;left:12px;right:12px;bottom:12px;padding:11px;border-radius:15px;background:${mix(p.card, 92)};border:1px solid ${mix(p.accent2, 45)}">
+                <div style="display:flex;justify-content:space-between;gap:8px"><div><div style="font-size:13px;font-weight:900">Thursday Night Soccer</div><div style="font-size:10px;opacity:.7">Thu 8:00 PM · Firefighters Park</div></div>
+                    <span style="align-self:flex-start;font-size:9px;font-weight:900;padding:3px 7px;border-radius:999px;background:${mix(p.accent, 18)};color:${p.accent}">8V8</span></div>
+                <div style="height:5px;border-radius:9px;background:rgba(255,255,255,.12);margin-top:8px;overflow:hidden"><div style="height:100%;width:88%;background:${p.accent}"></div></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:10px"><span style="color:${p.accent2};font-weight:800">21/24 going</span><span style="font-weight:900;padding:5px 12px;border-radius:9px;background:${p.accent};color:#06100C">Join</span></div>
+            </div>
+        </div>`; };
+    el.innerHTML = `
+        <span id="ti-new" style="font-size:11px;font-weight:900;color:#000;padding:4px 10px;border-radius:999px">✨ NEW</span>
+        <div style="font-size:24px;font-weight:900;text-align:center;padding:0 24px">Now you can pick your theme</div>
+        <div style="font-size:13px;opacity:.65;text-align:center;padding:0 24px">Swipe to see them all. Change it anytime in Settings › Theme.</div>
+        <div id="ti-strip" style="display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;width:100%;max-width:720px;padding:6px calc(50% - min(36vw,150px));box-sizing:border-box;scrollbar-width:none">${keys.map(card).join('')}</div>
+        <div id="ti-dots" style="display:flex;gap:8px">${keys.map(k => `<button data-dot="${k}" style="height:8px;border-radius:9px;border:0;padding:0;cursor:pointer"></button>`).join('')}</div>
+        <button id="ti-use" style="width:min(88vw,420px);border:0;border-radius:18px;padding:16px;font-size:17px;font-weight:900;color:#06100C;cursor:pointer"></button>
+        <button id="ti-later" style="background:none;border:0;color:rgba(255,255,255,.6);font-size:14px;font-weight:700;cursor:pointer;padding:6px">Not now</button>`;
+    document.body.appendChild(el);
+    const strip = el.querySelector('#ti-strip');
+    let sel = keys[start];
+    const draw = () => {
+        const t = THEMES[sel];
+        el.querySelector('#ti-new').style.background = t.pal.accent;
+        const use = el.querySelector('#ti-use'); use.textContent = `Use ${t.name}`; use.style.background = t.pal.accent;
+        el.querySelectorAll('[data-ti]').forEach(c => { c.style.border = c.dataset.ti === sel ? `3px solid ${t.pal.accent}` : '1px solid rgba(255,255,255,.2)'; });
+        el.querySelectorAll('[data-dot]').forEach(d => { const on = d.dataset.dot === sel; d.style.width = on ? '22px' : '8px'; d.style.background = on ? t.pal.accent : 'rgba(255,255,255,.25)'; });
+    };
+    const centerOn = (k, smooth) => { const c = strip.querySelector(`[data-ti="${k}"]`); if (c) strip.scrollTo({ left: c.offsetLeft - (strip.clientWidth - c.clientWidth) / 2, behavior: smooth ? 'smooth' : 'auto' }); };
+    strip.addEventListener('scroll', () => {
+        const mid = strip.scrollLeft + strip.clientWidth / 2;
+        let best = sel, dist = 1e9;
+        strip.querySelectorAll('[data-ti]').forEach(c => { const d = Math.abs(c.offsetLeft + c.clientWidth / 2 - mid); if (d < dist) { dist = d; best = c.dataset.ti; } });
+        if (best !== sel) { sel = best; draw(); }
+    }, { passive: true });
+    strip.querySelectorAll('[data-ti]').forEach(c => c.addEventListener('click', () => centerOn(c.dataset.ti, true)));
+    el.querySelectorAll('[data-dot]').forEach(d => d.addEventListener('click', () => centerOn(d.dataset.dot, true)));
+    el.querySelector('#ti-use').onclick = () => { el.remove(); window.pickTheme(sel); };
+    el.querySelector('#ti-later').onclick = () => el.remove();
+    draw();
+    requestAnimationFrame(() => centerOn(sel, false));
 };

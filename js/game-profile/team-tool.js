@@ -405,6 +405,8 @@ window.changeTeamColor = async function(eventId, teamIndex, colorHex) {
 };
 
 window.setTeamCaptain = async function(eventId, teamIndex, captainUid) {
+    const evCap = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (evCap && !isTeamAdmin(evCap)) { window.showToast && window.showToast('Only the game admin picks the captains.', 'error'); return; }
     window.teamCaptains[eventId] = window.teamCaptains[eventId] || {};
     window.teamCaptains[eventId][teamIndex] = captainUid;
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
