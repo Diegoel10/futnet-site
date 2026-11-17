@@ -1,6 +1,6 @@
 // js/game-profile/stats-tab.js: Dark-mode themed Game Stats with goalscorers displayed on match cards, live points, and live top scorers
 import { escapeHtml, jsArg, isOwnGoal } from './event-store.js';
-import { flagButtonHtml, canFlagMatch, isEventCaptain, isEventPlayer, matchEndedAt } from '../score-flags.js';
+import { flagButtonHtml, canFlagMatch, isEventCaptain, isEventPlayer, matchEndedAt, missingButtonHtml, gameEndedAt } from '../score-flags.js';
 export function renderStatsTab(event) {
     const subTab = window.activeStatsSubTab || 'matches';
     const teamsCount = event.teamsCount || 3;
@@ -136,6 +136,7 @@ export function renderStatsTab(event) {
                             </div>
                         `;
                     }).join('')}
+                    ${tf === '' && ((event.matches || []).length || event.isSessionEnded) ? missingButtonHtml('event', event.id, notBoss && canFlagMatch(event, gameEndedAt('event', event), flagMe)) : ''}
                 </div>
             ` : ''}
 

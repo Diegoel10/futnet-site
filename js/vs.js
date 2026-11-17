@@ -16,7 +16,7 @@ import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTran
     from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { smartText } from './smart-text.js';
 import { uploadMedia, mediaHtml, showUploadProgress, hideUploadProgress } from './wa-chat.js';
-import { flagButtonHtml, canFlagMatch, adminFlagsHtml, mountAdminFlags } from './score-flags.js';
+import { flagButtonHtml, canFlagMatch, adminFlagsHtml, mountAdminFlags, missingButtonHtml, gameEndedAt } from './score-flags.js';
 import { teamLogoHtml as baseLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
 import { watchLive, liveStatsHtml } from './live-stats.js';
@@ -369,11 +369,12 @@ ${whereFields('vs', prefill)}
         </details>
         ${toggle('vs-squads', '🧩 Free agents can form a squad', "Players without a team can sign up. If enough join for a full team before the spots fill, they play as a temporary squad.", prefill.squadsOn !== false)}
         <details class="rounded-xl border border-white/10 bg-white/5 px-3 py-2" ${prefill.gameType === 'kotf' ? 'open' : ''}>
-            <summary class="text-xs font-black cursor-pointer py-1">🏆 Type of game (optional)</summary>
+            <summary class="text-xs font-black cursor-pointer py-1">⚙️ Advanced settings</summary>
             <div class="space-y-2 pt-2">
-                <select id="vs-gametype" class="${INPUT}"><option value="" ${prefill.gameType !== 'kotf' ? 'selected' : ''}>Normal (pick the teams for each game)</option><option value="kotf" ${prefill.gameType === 'kotf' ? 'selected' : ''}>👑 King of the field</option></select>
-                <p class="text-[10px] text-white/50 leading-snug">King of the field: winner stays on. A team can't draw twice in a row (2nd draw and it's out). A draw in the first game is decided by rock-paper-scissors (counts as a draw). Match management picks the next teams for you.</p>
-                ${toggle('vs-kotf-all', 'If games are played at once, use this same format', 'Two games at once: each field runs its own king of the field with its own teams', prefill.kotfAllFields !== false)}
+                ${LBL('🏆 Type of game')}
+                <select id="vs-gametype" onchange="document.getElementById('vs-kotf-all-box').classList.toggle('hidden', this.value !== 'kotf')" class="${INPUT}"><option value="" ${prefill.gameType !== 'kotf' ? 'selected' : ''}>Normal (pick the teams for each game)</option><option value="kotf" ${prefill.gameType === 'kotf' ? 'selected' : ''}>👑 King of the field</option></select>
+                <p class="text-[10px] text-white/50 leading-snug">King of the field: the winner stays on. A team can't draw twice in a row (2nd draw and it's out). A draw in the very first game is decided by rock-paper-scissors. Match management picks the next teams for you.</p>
+                <div id="vs-kotf-all-box" class="${prefill.gameType === 'kotf' ? '' : 'hidden'}">${toggle('vs-kotf-all', 'Playing 2 games at the same time? King of the field on both fields', 'Needs 4+ teams. Each field has its own winner staying on and its own line of teams. Off = only Field 1 is king of the field.', prefill.kotfAllFields !== false)}</div>
             </div>
         </details>
         <details class="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
@@ -1803,13 +1804,15 @@ function drawManageHub(m, el) {
             <span class="flex items-center gap-1.5">${confirmedTeams(m).map(t => shirt(kitOf(m, t.teamId), 'text-2xl')).join('')}</span>
             <span class="flex-1 min-w-0"><span class="block text-sm font-black">Shirt colors</span><span class="block text-[11px] text-white/55">Pick before the match so nobody wears the same color.</span></span>
             <i class="fa-solid fa-chevron-right text-white/40"></i></button>` : ''}
-        ${multi && m.status !== 'final' ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
-            <label class="flex items-center justify-between gap-2 text-xs font-bold text-white/75">🏆 Type of game
+        ${multi && m.status !== 'final' ? `<details class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+            <summary class="text-xs font-black cursor-pointer text-white/75">⚙️ Advanced settings${isKotfVs(m) ? ' · 👑 King of the field' : ''}</summary>
+            <label class="flex items-center justify-between gap-2 text-xs font-bold text-white/75 pt-2">🏆 Type of game
                 <select onchange="vsSetGameType(this.value)" class="bg-black/60 border border-white/15 rounded-lg px-2 py-1.5 text-white text-xs">
                     <option value="" ${!isKotfVs(m) ? 'selected' : ''}>Normal (pick the teams)</option><option value="kotf" ${isKotfVs(m) ? 'selected' : ''}>👑 King of the field</option></select></label>
-            ${isKotfVs(m) && confirmedTeams(m).length >= 4 ? `<label class="flex items-center justify-between gap-2 text-[11px] text-white/65">If games are played at once, use this same format
-                <input type="checkbox" ${m.kotfAllFields !== false ? 'checked' : ''} onchange="vsSetKotfAll(this.checked)" class="w-5 h-5 accent-[#00F296]"></label>` : ''}
-        </div>` : ''}
+            ${isKotfVs(m) && confirmedTeams(m).length >= 4 ? `<label class="flex items-center justify-between gap-2 text-[11px] text-white/65">Playing 2 games at the same time? King of the field on both fields
+                <input type="checkbox" ${m.kotfAllFields !== false ? 'checked' : ''} onchange="vsSetKotfAll(this.checked)" class="w-5 h-5 accent-[#00F296] shrink-0"></label>` : ''}
+            <p class="text-[10px] text-white/45">King of the field: the winner stays on. A team can't draw twice in a row (2nd draw and it's out). A draw in the very first game is decided by rock-paper-scissors. Match management picks the next teams for you.</p>
+        </details>` : ''}
         ${multi && m.status !== 'final' ? kotfBoxVs(m, 1) + (m.kotfPools && m.kotfPools.f2 ? kotfBoxVs(m, 2) : '') : ''}
         ${top}
         ${results.length ? playedGamesAdminHtml(m) : `<div class="text-[11px] font-black uppercase tracking-wider text-white/50">Previous matches</div><p class="text-sm text-white/50 text-center py-6">No match results recorded yet.</p>`}
@@ -2483,6 +2486,7 @@ function statsHtml(m) {
             ${!results.length && !anyLive(m) ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
             ${shown.reverse().map(({ r, i }) => matchCard(`Match ${i + 1}${r.field ? ` · Field ${r.field}` : ''}`, r.a, r.b, r.goals || [], '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Finished</span>', r.ga, r.gb,
                 canFlag(r) ? `<div class="flex justify-end">${flagButtonHtml('vs', m.id, i, `Game ${i + 1}: ${teamOf(r.a).name} ${r.ga ?? 0} - ${r.gb ?? 0} ${teamOf(r.b).name}`, true)}</div>` : '')).join('')}
+            ${!tf && (results.length || m.status === 'final') ? missingButtonHtml('vs', m.id, !isBoss(m) && canFlagMatch(m, gameEndedAt('vs', m), flagMe)) : ''}
         </div>`;
     } else if (sub === 'leaderboard') {
         const table = {};

@@ -240,10 +240,12 @@ window.openStartMatchScreen = function(eventId) {
                     </span>
                 </div>
                 <p class="text-sm text-white/55 leading-snug">The clock keeps running even if you close this screen. Everyone sees the score live.</p>
-                ${`<label class="flex items-center justify-between gap-2 text-xs font-bold text-white/70">Type of game
+                ${`<details class="bg-black/30 border border-white/10 rounded-xl px-3 py-2"><summary class="text-xs font-bold text-white/70 cursor-pointer">⚙️ Advanced settings${isKotf(event) ? ' · 👑 King of the field' : ''}</summary>
+                    <label class="flex items-center justify-between gap-2 text-xs font-bold text-white/70 pt-2">🏆 Type of game
                     <select onchange="setGameType('${eventId}', this.value)" class="bg-black/60 border border-white/15 rounded-lg px-2 py-1.5 text-white text-xs">
                         <option value="" ${!isKotf(event) ? 'selected' : ''} style="color:#000">Normal (pick the teams)</option>
-                        <option value="kotf" ${isKotf(event) ? 'selected' : ''} style="color:#000">👑 King of the field</option></select></label>`}
+                        <option value="kotf" ${isKotf(event) ? 'selected' : ''} style="color:#000">👑 King of the field</option></select></label>
+                    <p class="text-[10px] text-white/45 pt-1">King of the field: the winner stays on. A team can't draw twice in a row (2nd draw and it's out). A draw in the very first game is decided by rock-paper-scissors. Match management picks the next teams for you.</p></details>`}
             </div>
 
             <!-- Clock -->

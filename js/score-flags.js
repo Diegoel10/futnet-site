@@ -44,6 +44,26 @@ export function matchEndedAt(m) {
     const t = (m && (m.endedAt || m.at || m.timestamp)) || 0;
     return typeof t === 'number' ? t : (Date.parse(t) || 0);
 }
+/** 🕳️ "A game is missing": flag index -3. Allowed while the game is on, and for the same time (default 1 hour) after it finishes. */
+export const MISSING = -3;
+const ms = (t) => !t ? 0 : typeof t === 'number' ? t : typeof t.toMillis === 'function' ? t.toMillis() : (Date.parse(t) || 0);
+/** When the whole game / VS match finished (ms), 0 = still going (or we can't tell). */
+export function gameEndedAt(kind, doc) {
+    if (!doc) return 0;
+    if (kind === 'vs') {
+        if (doc.status !== 'final') return 0;
+        const last = (doc.results || []).slice(-1)[0];
+        return ms(last && (last.endedAt || last.at)) || ms(doc.updatedAt);
+    }
+    if (Number(doc.sessionEndedAt) > 0) return Number(doc.sessionEndedAt);
+    if (!doc.isSessionEnded) return 0;
+    return Math.max(0, ...(doc.matches || []).map(matchEndedAt));
+}
+/** The "🕳️ A game is missing?" button (under the matches list). */
+export function missingButtonHtml(kind, id, show) {
+    if (!show) return '';
+    return `<div class="flex justify-center pt-1"><button onclick="event.stopPropagation(); openFlagScore('${kind}', '${esc(jsq(id))}', ${MISSING}, 'Missing game')" class="text-[11px] font-bold text-amber-300/90 hover:text-amber-200 px-3 py-1.5 rounded-full border border-amber-400/30 bg-amber-400/5">🕳️ A game is missing?</button></div>`;
+}
 export const flagBanned = (doc, uid = me()) => !!(doc && doc.scoreFlags && (doc.scoreFlags.banned || []).includes(uid));
 
 /** A regular game's captain (Team builder captains). */
@@ -61,23 +81,25 @@ export function flagButtonHtml(kind, id, matchIndex, label, show) {
 
 window.openFlagScore = function (kind, id, matchIndex, label) {
     document.getElementById('flag-score-sheet')?.remove();
+    const missing = matchIndex === MISSING;
     const m = document.createElement('div');
     m.id = 'flag-score-sheet';
     m.className = 'fixed inset-0 z-[260] flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm sm:p-4';
     m.innerHTML = `<div class="bg-[#040E13] border border-amber-400/50 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-5 space-y-3 text-white" onclick="event.stopPropagation()">
-        <div class="flex items-center justify-between"><div class="text-base font-black">🚩 Flag this score</div>
+        <div class="flex items-center justify-between"><div class="text-base font-black">${missing ? '🕳️ A game is missing' : '🚩 Flag this score'}</div>
             <button onclick="document.getElementById('flag-score-sheet').remove()" class="w-8 h-8 rounded-full bg-black/60 border border-white/15"><i class="fa-solid fa-xmark text-xs"></i></button></div>
-        <div class="text-sm font-bold bg-black/40 border border-white/10 rounded-xl px-3 py-2">${esc(label)}</div>
-        <div class="text-[11px] text-white/60">The organizer gets it and can fix the score.</div>
-        <div class="text-[10px] font-black uppercase tracking-wider text-white/60">What was the real score? (optional)</div>
+        ${missing ? '' : `<div class="text-sm font-bold bg-black/40 border border-white/10 rounded-xl px-3 py-2">${esc(label)}</div>`}
+        <div class="text-[11px] text-white/60">${missing ? 'A game was played but isn\'t on the list? Tell the organizer which teams played. They can add it.' : 'The organizer gets it and can fix the score.'}</div>
+        <div class="text-[10px] font-black uppercase tracking-wider text-white/60">${missing ? 'What was the score? (optional)' : 'What was the real score? (optional)'}</div>
         <div class="flex items-center gap-2"><input id="fs-a" type="number" min="0" max="99" inputmode="numeric" class="w-20 bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-center font-black"><span class="font-black">-</span><input id="fs-b" type="number" min="0" max="99" inputmode="numeric" class="w-20 bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-center font-black"></div>
-        <textarea id="fs-note" maxlength="300" rows="3" placeholder="What's wrong? e.g. Juan's goal was ours, not theirs." class="w-full bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-sm"></textarea>
+        <textarea id="fs-note" maxlength="300" rows="3" placeholder="${missing ? 'Which teams played? Who scored? e.g. Team 2 vs Team 3, about 7:40 PM' : "What's wrong? e.g. Juan's goal was ours, not theirs."}" class="w-full bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-sm"></textarea>
         <button id="fs-go" class="w-full bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-sm">Send to the organizer</button>
     </div>`;
     m.onclick = () => m.remove();
     document.body.appendChild(m);
     m.querySelector('#fs-go').onclick = async (e) => {
         const note = m.querySelector('#fs-note').value.trim(), a = m.querySelector('#fs-a').value, b = m.querySelector('#fs-b').value;
+        if (missing && !note) { toast('Write which teams played.', 'error'); return; }
         if (!note && (a === '' || b === '')) { toast('Write what\'s wrong, or the real score.', 'error'); return; }
         e.currentTarget.disabled = true; e.currentTarget.textContent = 'Sending…';
         try {

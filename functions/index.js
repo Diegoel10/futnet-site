@@ -808,19 +808,43 @@ exports.onCommunityMemberAdded = onDocumentCreated(`${BASE}/communities/{communi
     }, { key: `commaccepted_${communityId}` });
   }
 
-  // Welcome message (set by the admin): a private chat from the community's creator, so they can reply.
+  // Welcome message (set by the admin): a private chat from one of the community's ADMINS, so the new member can reply to them.
   // Switched off by the admin = nothing is sent (communities saved before the switch existed: on when there's a text).
   const welcome = community.welcomeEnabled === false ? "" : String(community.welcomeMessage || "").trim();
-  const from = community.creatorId || community.adminId || "";
-  if (welcome && from && from !== uid && isRealPlayer(uid)) {
+  if (welcome && isRealPlayer(uid)) {
+    const who = await welcomeSender(communityId, community, uid);
+    if (!who.uid) return;
     try {
       await col("welcomeSent").doc(`${communityId}_${uid}`).create({ communityId, uid, at: Date.now() });   // once per person
     } catch (e) { return; }
     const first = String(member.name || (await nameOf(uid)) || "").trim().split(/\s+/)[0] || "there";
     const text = welcome.replace(/\{name\}/gi, first).slice(0, 2000);
-    try { await sendServerDM(from, uid, text); } catch (e) { logger.error("welcome message failed", communityId, uid, e.message); }
+    try { await sendServerDM(who.uid, uid, text, who.opts); } catch (e) { logger.error("welcome message failed", communityId, uid, e.message); }
   }
 });
+
+/** Who sends a community's welcome chat:
+ *   1) the admin who wrote the welcome message (welcomeBy), if they're still an admin,
+ *   2) else another admin of the community (members with role "admin"), else the owner,
+ *   never the FutNet owner's own account when someone else can send it. If the FutNet owner is the only admin,
+ *   it goes from their account but shows as "<Community> Admin" with the community picture (like "FutNet Admin"). */
+async function welcomeSender(communityId, c, newUid) {
+  const now = Date.now();
+  const admins = [];
+  try {
+    const ms = await col("communities").doc(communityId).collection("members").where("role", "==", "admin").get();
+    ms.docs.forEach((d) => {
+      const m = d.data() || {}, au = m.adminUntil, until = au && au.toMillis ? au.toMillis() : Number(au) || 0;
+      if (!until || until > now) admins.push(String(m.uid || d.id));
+    });
+  } catch (e) { /* owner below */ }
+  const owner = String(c.adminId || c.creatorId || "");
+  const order = uniq([c.welcomeBy && (admins.includes(c.welcomeBy) || c.welcomeBy === owner) ? String(c.welcomeBy) : "", ...admins, owner]).filter((u) => u && u !== newUid);
+  for (const u of order) if (!(await isOwnerUid(u))) return { uid: u, opts: {} };
+  if (!order.length) return { uid: "" };
+  const pic = /^https?:\/\//i.test(String(c.thumbnail || "")) && String(c.thumbnail).length < 400 ? c.thumbnail : "";
+  return { uid: order[0], opts: { asName: `${String(c.name || "Community").slice(0, 40)} Admin`, ...(pic ? { asAvatar: pic } : {}) } };
+}
 
 /** A private chat message written by the server, saved exactly like the website / apps do
  *  (directory/{uid}.chats on both people), so it shows in both Chats lists and pushes like any message. */
@@ -4826,6 +4850,35 @@ exports.gameViews = onCall(async (request) => {
   return { list };
 });
 
+// 📈 Tournament analytics: who opened it (tournaments/{id}/views/{uid}), same as games. Only the organizer (or the owner) reads it.
+exports.recordTourneyView = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) return { ok: false };
+  const id = String((request.data || {}).id || "");
+  if (!id || id.includes("/")) return { ok: false };
+  const t = (await col("tournaments").doc(id).get()).data();
+  if (!t || t.organizerId === uid) return { ok: true };
+  const d = (await col("directory").doc(uid).get()).data() || {};
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date());
+  await col("tournaments").doc(id).collection("views").doc(uid).set({
+    uid, name: cardName(d) || "Player", avatar: String(d.avatar || "").startsWith("http") ? d.avatar : "",
+    count: admin.firestore.FieldValue.increment(1), days: admin.firestore.FieldValue.arrayUnion(today), lastAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { ok: true };
+});
+exports.tourneyViews = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const id = String((request.data || {}).id || "");
+  const t = id && !id.includes("/") ? (await col("tournaments").doc(id).get()).data() : null;
+  if (!t) throw new HttpsError("not-found", "Tournament not found.");
+  if (t.organizerId !== uid && !isOwner(request.auth)) throw new HttpsError("permission-denied", "Only the organizer can see this.");
+  const snap = await col("tournaments").doc(id).collection("views").get();
+  const list = snap.docs.map((x) => { const v = x.data() || {}; return { uid: v.uid || x.id, name: v.name || "Player", avatar: v.avatar || "", count: Number(v.count) || 1, days: arr(v.days), lastAt: v.lastAt && v.lastAt.toMillis ? v.lastAt.toMillis() : 0 }; })
+    .sort((a, b) => b.lastAt - a.lastAt);
+  return { list };
+});
+
 // ---------------------------------------------------------------- 🃏 Card lines (the jokes / disses / hype on the share cards)
 //   futnetPrivate/cardLines = { win: [{ t, s }], lose: [...], draw: [...], pregame: [...] }   (s = 🌶 spicy, else friendly)
 //   Edited by the owner in the Manager (Settings > Card lines); everyone reads them with cardLines() (the apps too).
@@ -4911,11 +4964,19 @@ async function isFlagPlayer(kind, g, uid) {
   return Object.values(g.teamAssignments || {}).some((l) => arr(l).some((p) => p && p.uid === uid));
 }
 function flagEndedAt(kind, g, idx) {
+  if (idx === -3) {   // 🕳️ missing game: from when the whole game finished (0 = still going)
+    const ms = (t) => !t ? 0 : typeof t === "number" ? t : typeof t.toMillis === "function" ? t.toMillis() : Date.parse(t) || 0;
+    if (kind === "vs") { if (g.status !== "final") return 0; const last = arr(g.results).slice(-1)[0]; return ms(last && (last.endedAt || last.at)) || ms(g.updatedAt); }
+    if (Number(g.sessionEndedAt) > 0) return Number(g.sessionEndedAt);
+    if (!g.isSessionEnded) return 0;
+    return Math.max(0, ...arr(g.matches).map((m) => ms(m && (m.endedAt || m.at || m.timestamp))));
+  }
   const m = kind === "vs" ? arr(g.results)[idx] : arr(g.matches)[idx];
   const t = m && (m.endedAt || m.at || m.timestamp);
   return !t ? 0 : typeof t === "number" ? t : Date.parse(t) || 0;
 }
 function flagLabel(kind, g, idx) {
+  if (idx === -3) return "🕳️ Missing game";
   if (kind === "vs") {
     const name = (tid) => (arr(g.teams).find((t) => t && t.teamId === tid) || {}).name || "Team";
     const r = arr(g.results)[idx];
@@ -4947,7 +5008,7 @@ exports.flagScore = onCall(async (request) => {
   if (!label) throw new HttpsError("not-found", "That match isn't there any more.");
   const hours = Number.isFinite(Number(set.hours)) && Number(set.hours) >= 0 ? Number(set.hours) : 1;
   const ended = flagEndedAt(kind, g, idx);
-  if (hours && ended && Date.now() - ended > hours * 3600000) throw new HttpsError("failed-precondition", `Too late: scores can only be flagged up to ${hours < 1 ? Math.round(hours * 60) + " minutes" : hours + (hours === 1 ? " hour" : " hours")} after the match.`);
+  if (hours && ended && Date.now() - ended > hours * 3600000) throw new HttpsError("failed-precondition", `Too late: scores can only be flagged up to ${hours < 1 ? Math.round(hours * 60) + " minutes" : hours + (hours === 1 ? " hour" : " hours")} after ${idx === -3 ? "the game ended" : "the match"}.`);
   const mine = await ref.collection("flags").where("uid", "==", uid).where("status", "==", "open").get();
   if (mine.size >= 5) throw new HttpsError("resource-exhausted", "You already have 5 open flags here. Wait for the organizer.");
   const card = (await col("directory").doc(uid).get()).data() || {};
