@@ -820,7 +820,9 @@ async function change(id, fn) {
 }
 
 // ---------------------------------------------------------------- join with a team + pick the players
-const membersOfTeam = (teamId) => { const full = (TS().mine || []).concat(TS().all || []).find(y => y.id === teamId); return (full && full.members) || []; };
+const TT_MEMBERS = {};   // teams read for the organizer (not their own team)
+const isTTBoss = (t) => !!t && t.organizerId === myUid();
+const membersOfTeam = (teamId) => { const full = (TS().mine || []).find(y => y.id === teamId) || (TT_MEMBERS[teamId] ? { members: TT_MEMBERS[teamId] } : null) || (TS().all || []).find(y => y.id === teamId); return (full && full.members) || []; };
 const pId = (p) => String(p.id || p.uid || p.name);
 window.openJoinTourney = function () {
     const t = TT.open; if (!t) return;
@@ -879,8 +881,13 @@ window.ttBackToRegister = function (tid, teamId) {
     go();
 };
 /** Pick the players for the tournament (when joining, and later to change it). */
-window.openTourneyPlayers = function (teamId, joining) {
+window.openTourneyPlayers = async function (teamId, joining) {
     const t = TT.open; if (!t) return;
+    // the organizer can pick any team's players (even when the team's roster is private): read them from the team
+    const mineTeam = myCaptainTeams().some(x => x.id === teamId);
+    if (!mineTeam && isTTBoss(t)) {
+        try { const s = await getDoc(doc(db, 'artifacts', appId, 'teams', teamId)); if (s.exists()) TT_MEMBERS[teamId] = s.data().members || []; } catch (e) { /* below */ }
+    }
     const members = membersOfTeam(teamId);
     const cur = new Set(rosterOf(teamOf(t, teamId)).map(r => r.id));
     const min = +t.minPlayers || 1, max = +t.maxPlayers || 30;
@@ -892,7 +899,7 @@ window.openTourneyPlayers = function (teamId, joining) {
         <div class="space-y-1.5">${members.map(p => `<label class="flex items-center gap-3 p-2.5 bg-black/40 rounded-xl border border-white/10 cursor-pointer">
             <input type="checkbox" class="w-5 h-5 accent-[#00F296]" data-pl="${esc(pId(p))}" onchange="ttCountPl()" ${!cur.size || cur.has(pId(p)) ? 'checked' : ''}>
             <span class="flex-1 min-w-0 text-xs font-bold truncate">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name || 'Player')}${p.uid ? '' : ' <span class="text-[9px] text-white/40">(no app)</span>'}</span><span class="text-[10px] text-white/45">${esc(p.position || '')}</span></label>`).join('') || '<p class="text-xs text-white/50">This team has no players yet. Add them in the Teams tab first.</p>'}</div>
-        <button onclick="ttGoAddPlayers('${jsq(t.id)}','${jsq(teamId)}')" class="w-full text-[11px] font-bold text-[#00F296] py-1">➕ Add more players to the team</button>
+        ${mineTeam ? `<button onclick="ttGoAddPlayers('${jsq(t.id)}','${jsq(teamId)}')" class="w-full text-[11px] font-bold text-[#00F296] py-1">➕ Add more players to the team</button>` : ''}
         <div id="tt-pl-count" class="text-[11px] text-center text-white/60"></div>
         <button onclick="saveTourneyPlayers('${jsq(teamId)}', ${joining ? 'true' : 'false'})" class="${BTN} w-full py-3 text-sm">${joining ? 'Register my team' : 'Save players'}</button>`);
     window.ttCountPl();
@@ -1280,7 +1287,7 @@ function drawPage() {
                 ${boss && +t.priceCents ? `<button onclick="toggleTourneyPaid('${jsq(x.teamId)}')" class="${x.paid ? DARK : BTN} shrink-0">${x.paid ? 'Undo paid' : '💵 Paid'}</button>` : ''}
             </div>
             ${r.length ? `<div class="flex flex-wrap gap-1">${r.map(p => `<span class="text-[10px] font-bold rounded-full px-2 py-1 bg-white/10">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name || 'Player')}${p.uid && window.badgeHtml ? window.badgeHtml(p.uid) : ''}</span>`).join('')}</div>` : ''}
-            ${(mine || boss) && t.status !== 'final' ? `<div class="flex gap-2">${mine ? `<button onclick="openTourneyPlayers('${jsq(x.teamId)}', false)" class="${DARK}">👥 Change players</button>` : ''}
+            ${(mine || boss) && t.status !== 'final' ? `<div class="flex gap-2">${mine || boss ? `<button onclick="openTourneyPlayers('${jsq(x.teamId)}', false)" class="${DARK}">👥 ${mine ? 'Change players' : 'Pick players'}</button>` : ''}
                 ${t.status === 'signup' ? `<button onclick="leaveTourney('${jsq(x.teamId)}')" class="text-[11px] font-bold text-red-400 px-2">${mine ? 'Leave' : 'Remove'}</button>` : ''}</div>` : ''}
         </div>`; }).join('') || '<p class="text-xs text-white/45 text-center py-6">No teams yet. Share it so captains can register!</p>'}
         ${t.status === 'signup' ? `<p class="text-[11px] text-white/50 text-center">${n} of ${max} teams${n < min ? ` · needs at least ${min}` : ''}</p>` : ''}</div>`;

@@ -1,5 +1,88 @@
 // js/game-profile/match-management.js: Live match tracker with direct team builder roster lookups and custom team color styling
 import { mutateEvent, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
+import { kotfNext, kotfNote } from '../kotf.js';
+
+// ---------------------------------------------------------------- 👑 King of the field (event.gameType === 'kotf')
+// Match management picks the next two teams by itself (winner stays, no 2 draws in a row, RPS on a first-game draw).
+// The teams can still be changed by hand. Teams are counted by their number (team 1, 2, 3…).
+const isKotf = (event) => event && event.gameType === 'kotf';
+function kotfFor(event) {
+    const names = mmTeamNames(event), n = names.length;
+    const pool = Array.from({ length: n }, (_, i) => String(i));
+    const key = (idx, name) => Number.isInteger(idx) ? String(idx) : (names.indexOf(name) >= 0 ? String(names.indexOf(name)) : null);
+    const games = (event.matches || []).filter(m => m && m.isFinished !== false).map(m => ({
+        a: key(m.teamAIndex, m.teamA), b: key(m.teamBIndex, m.teamB),
+        ga: (m.team1Goals || []).length, gb: (m.team2Goals || []).length, rps: m.rps != null ? String(m.rps) : null }));
+    return kotfNext(pool, games);
+}
+/** The 👑 box on the live match screen: what's next, and the rock-paper-scissors question after a first-game draw. */
+function kotfBoxHtml(eventId, event) {
+    if (!isKotf(event)) return '';
+    const r = kotfFor(event), names = {};
+    mmTeamNames(event).forEach((nm, i) => { names[String(i)] = nm; });
+    const note = kotfNote(r, names);
+    const rps = r.needRps ? `<div class="grid grid-cols-2 gap-2 pt-1">${[r.needRps.a, r.needRps.b].map(k => `<button onclick="kotfSetRps('${eventId}', ${r.needRps.index}, ${+k})" class="py-3 rounded-2xl font-black text-sm bg-amber-400 text-slate-950">${escapeHtml(names[k] || 'Team')} won</button>`).join('')}</div>` : '';
+    return `<div class="rounded-3xl p-4 space-y-1.5 border-2 border-amber-400/50 bg-amber-400/10">
+        <div class="text-[10px] font-black tracking-widest text-amber-300">👑 KING OF THE FIELD</div>
+        <div class="text-sm font-black text-white">${escapeHtml(note.title)}</div>
+        <div class="text-xs text-white/70">${escapeHtml(note.line)}</div>${rps}</div>`;
+}
+/** Save who won rock-paper-scissors on that first game; the next game's teams update. */
+window.kotfSetRps = async function (eventId, index, teamIdx) {
+    const res = await mutateEvent(eventId, (draft) => {
+        const m = (draft.matches || [])[index]; if (!m) return false;
+        m.rps = teamIdx;
+        // the next game hasn't started yet: put the right teams on it
+        const L = draft.liveMatchActive;
+        if (L && !L.isRunning && !(L.team1Goals || []).length && !(L.team2Goals || []).length) {
+            const r = kotfFor(draft.id ? draft : { ...draft, id: eventId });
+            if (r.a != null && r.b != null) { L.teamAIndex = +r.a; L.teamBIndex = +r.b; }
+        }
+    });
+    if (res.ok) {
+        document.getElementById('kotf-rps-sheet')?.remove();
+        const ev = (window.eventsList || []).find(e => e.id === eventId);
+        if (document.getElementById('start-match-screen-modal')) openStartMatchScreen(eventId);
+        else if (ev) kotfToastNext(ev);
+    }
+};
+function kotfNames(event) { const names = {}; mmTeamNames(event).forEach((nm, i) => { names[String(i)] = nm; }); return names; }
+function kotfToastNext(event) {
+    const r = kotfFor(event), names = kotfNames(event);
+    if (r.a != null && r.b != null) window.showToast(`👑 Next: ${names[r.a]} vs ${names[r.b]}. Tap Start Match when ready.`);
+}
+/** After a game is saved: "who won rock-paper-scissors?" (first-game draw), else what's next. */
+function kotfAfterSave(eventId) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    if (!isKotf(event)) return false;
+    const r = kotfFor(event);
+    if (!r.needRps) { kotfToastNext(event); return true; }
+    const names = kotfNames(event);
+    document.getElementById('kotf-rps-sheet')?.remove();
+    const el = document.createElement('div');
+    el.id = 'kotf-rps-sheet';
+    el.className = 'fixed inset-0 z-[210] flex items-end sm:items-center justify-center bg-black/70 p-4';
+    el.innerHTML = `<div class="w-full max-w-md bg-[#060d12] border border-amber-400/50 rounded-3xl p-5 space-y-3 text-white">
+        <div class="text-[10px] font-black tracking-widest text-amber-300">👑 KING OF THE FIELD</div>
+        <div class="text-lg font-black">🪨📄✂️ It's a draw! Who won rock-paper-scissors?</div>
+        <p class="text-xs text-white/65">The winner stays on (it counts as a draw: another draw next game and they're out).</p>
+        <div class="grid grid-cols-2 gap-2">${[r.needRps.a, r.needRps.b].map(k => `<button onclick="kotfSetRps('${eventId}', ${r.needRps.index}, ${+k})" class="py-3 rounded-2xl font-black text-sm bg-amber-400 text-slate-950">${escapeHtml(names[k] || 'Team')}</button>`).join('')}</div>
+        <button onclick="document.getElementById('kotf-rps-sheet').remove()" class="w-full text-xs text-white/50 py-1">Later (it's also asked in Match management)</button></div>`;
+    document.body.appendChild(el);
+    return true;
+}
+/** Organizer: switch the type of game from Match management. */
+window.setGameType = async function (eventId, type) {
+    const res = await mutateEvent(eventId, (draft) => {
+        draft.gameType = type === 'kotf' ? 'kotf' : '';
+        const L = draft.liveMatchActive;
+        if (type === 'kotf' && L && !L.isRunning && !(L.team1Goals || []).length && !(L.team2Goals || []).length) {
+            const r = kotfFor(draft.id ? draft : { ...draft, id: eventId });
+            if (r.a != null && r.b != null) { L.teamAIndex = +r.a; L.teamBIndex = +r.b; }
+        }
+    });
+    if (res.ok) { window.showToast(type === 'kotf' ? '👑 King of the field: on' : 'Type of game: normal'); openStartMatchScreen(eventId); }
+};
 
 // Team names/colors come from team-tool.js (single source of truth). Fallbacks only if it isn't loaded yet.
 const MM_FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
@@ -59,11 +142,14 @@ window.openStartMatchScreen = function(eventId) {
     let isNew = false;
     if (!active) {
         isNew = true;
+        // 👑 King of the field: the next two teams by the rules; otherwise the first two
+        const k = isKotf(event) && teamCount > 2 ? kotfFor(event) : null;
+        const kA = k && k.a != null ? +k.a : 0, kB = k && k.b != null ? +k.b : (teamCount > 1 ? 1 : 0);
         active = {
-            teamA: teamNamesArr[0],
-            teamB: teamNamesArr[1] || teamNamesArr[0],
-            teamAIndex: 0,
-            teamBIndex: teamCount > 1 ? 1 : 0,
+            teamA: teamNamesArr[kA],
+            teamB: teamNamesArr[kB] || teamNamesArr[0],
+            teamAIndex: kA,
+            teamBIndex: kB,
             team1Goals: [],
             team2Goals: [],
             durationSeconds: 10 * 60,
@@ -154,6 +240,10 @@ window.openStartMatchScreen = function(eventId) {
                     </span>
                 </div>
                 <p class="text-sm text-white/55 leading-snug">The clock keeps running even if you close this screen. Everyone sees the score live.</p>
+                ${`<label class="flex items-center justify-between gap-2 text-xs font-bold text-white/70">Type of game
+                    <select onchange="setGameType('${eventId}', this.value)" class="bg-black/60 border border-white/15 rounded-lg px-2 py-1.5 text-white text-xs">
+                        <option value="" ${!isKotf(event) ? 'selected' : ''} style="color:#000">Normal (pick the teams)</option>
+                        <option value="kotf" ${isKotf(event) ? 'selected' : ''} style="color:#000">👑 King of the field</option></select></label>`}
             </div>
 
             <!-- Clock -->
@@ -187,6 +277,7 @@ window.openStartMatchScreen = function(eventId) {
                 </div>
             </div>
 
+            ${kotfBoxHtml(eventId, event)}
             <!-- Teams -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="space-y-1.5"><label class="block text-xs font-black text-white/60 tracking-wider">TEAM 1</label>${teamSelect('live-match-teamA', idxA, idxB, colorA)}</div>
@@ -300,7 +391,8 @@ window.removeLiveGoal = async function(eventId, teamKey, index) {
             const at = live[key].findIndex(g => JSON.stringify(g) === JSON.stringify(goal));
             if (at < 0) return false;
             live[key].splice(at, 1);
-        } else live[key].splice(index, 1);
+            if (Array.isArray(live[key + 'By'])) live[key + 'By'].splice(at, 1);
+        } else { live[key].splice(index, 1); if (Array.isArray(live[key + 'By'])) live[key + 'By'].splice(index, 1); }
     });
     if (res.ok && !res.aborted) {
         if (event) event.liveMatchActive = res.event.liveMatchActive;
@@ -454,8 +546,9 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
         picker.className = 'fixed inset-0 z-[220] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm';
         document.body.appendChild(picker);
     }
-    const row = (p, label) => `
-        <div data-goal="${escapeHtml(label)}" onclick="recordLiveGoal('${eventId}', '${teamKey}', this.dataset.goal)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-white/10">
+    // data-uid: the scorer's profile, so the goal is theirs even if they change their name or share it with someone
+    const row = (p, label, own) => `
+        <div data-goal="${escapeHtml(label)}" data-uid="${own ? '' : escapeHtml(String(p.uid || ''))}" onclick="recordLiveGoal('${eventId}', '${teamKey}', this.dataset.goal, this.dataset.uid)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-white/10">
             <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
             <span class="text-xs font-bold text-white">${escapeHtml(p.name)}</span>
         </div>`;
@@ -477,14 +570,14 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
             ${otherPlayers.length ? `
             <div class="space-y-2 pt-2 border-t border-white/10">
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">Own goal by ${escapeHtml(otherName || 'the other team')}</div>
-                ${otherPlayers.map(p => row(p, ownGoalLabel(p.name || 'Player'))).join('')}
+                ${otherPlayers.map(p => row(p, ownGoalLabel(p.name || 'Player'), true)).join('')}
             </div>` : ''}
             <button onclick="document.getElementById('goal-scorer-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
     `;
 };
 
-window.recordLiveGoal = async function(eventId, teamKey, scorerName) {
+window.recordLiveGoal = async function(eventId, teamKey, scorerName, scorerUid) {
     const picker = document.getElementById('goal-scorer-picker-modal');
     if (picker) picker.remove();
 
@@ -496,7 +589,12 @@ window.recordLiveGoal = async function(eventId, teamKey, scorerName) {
     const res = await mutateEvent(eventId, (draft) => {
         if (!draft.liveMatchActive) return false;   // the match was already saved somewhere else
         draft.liveMatchActive[key] = Array.isArray(draft.liveMatchActive[key]) ? draft.liveMatchActive[key] : [];
+        // team1GoalsBy: [{ n: name, u: user id }] next to the names, lined up (apps that don't know it just ignore it)
+        const by = Array.isArray(draft.liveMatchActive[key + 'By']) ? draft.liveMatchActive[key + 'By'] : [];
+        while (by.length < draft.liveMatchActive[key].length) by.push({ n: String(draft.liveMatchActive[key][by.length] || ''), u: '' });
         draft.liveMatchActive[key].push(scorerName);
+        by.push({ n: String(scorerName || ''), u: String(scorerUid || '') });
+        draft.liveMatchActive[key + 'By'] = by;
     });
     if (!res.ok) return;
     if (res.aborted) { window.showToast && window.showToast('This match was already saved.', 'error'); return; }
@@ -530,6 +628,8 @@ window.saveLiveMatchResult = async function(eventId) {
             teamBColor: iB >= 0 ? colorsNow[iB] : (live.teamBColor || null),
             team1Goals: live.team1Goals || [],
             team2Goals: live.team2Goals || [],
+            ...(Array.isArray(live.team1GoalsBy) ? { team1GoalsBy: live.team1GoalsBy } : {}),
+            ...(Array.isArray(live.team2GoalsBy) ? { team2GoalsBy: live.team2GoalsBy } : {}),
             isFinished: true,
             timestamp: new Date().toISOString()
         });
@@ -543,9 +643,10 @@ window.saveLiveMatchResult = async function(eventId) {
     }
     if (res.ok) {
         if (window.liveMatchTimerInterval) clearInterval(window.liveMatchTimerInterval);
-        window.showToast("Match saved and recorded!");
         const modal = document.getElementById('start-match-screen-modal');
         if (modal) modal.remove();
+        // 👑 King of the field: "who won RPS?" after a first-game draw, else "Next: A vs B" (Start Match picks them)
+        if (!kotfAfterSave(eventId)) window.showToast("Match saved and recorded!");
     }
 };
 

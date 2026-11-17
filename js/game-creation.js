@@ -124,6 +124,7 @@ document.addEventListener('DOMContentLoaded', () => window.prepareCreateDate());
 
 window.resetCreateGameForm = function() {
     currentCreationStep = 1;
+    const gt = document.getElementById('ce-game-type'); if (gt) gt.value = '';
     window.prepareCreateDate();
     window.renderCreateGameSteps();
 };
@@ -275,6 +276,7 @@ window.handleCreateEvent = async function(e) {
         allowPlusOnes,
         plusOneLimit,
         claimMinutes: parseInt(document.getElementById('ce-claim')?.value, 10) || 40,
+        gameType: document.getElementById('ce-game-type')?.value === 'kotf' ? 'kotf' : '',   // 👑 king of the field (optional)
         organizerId: window.currentUser.uid,
         organizer: organizerName,
         organizerAvatar: organizerAvatar,

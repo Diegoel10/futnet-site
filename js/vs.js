@@ -17,7 +17,8 @@ import { doc, getDoc, setDoc, updateDoc, addDoc, collection, onSnapshot, runTran
 import { smartText } from './smart-text.js';
 import { teamLogoHtml as baseLogoHtml, canManage, FORMATS, LEVELS } from './teams.js';
 import { attachParkPicker, saveParkIfNew } from './parks.js';
-import { watchLive, liveStatsHtml } from './live-stats.js';   // 📊 who watched (same as games)
+import { watchLive, liveStatsHtml } from './live-stats.js';
+import { kotfNext, kotfNote } from './kotf.js';   // 👑 king of the field   // 📊 who watched (same as games)
 import { liveSource, liveLinkProblem, liveSlotHtml, liveButtonsHtml, liveEndedHtml, withReplay, registerLiveChat, liveVisPickerHtml, liveVisValue, liveCanWatch, liveLockedHtml, liveVisBossHtml } from './livestream.js';   // same YouTube / Facebook player as games
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -347,6 +348,14 @@ ${whereFields('vs', prefill)}
             </div>
         </details>
         ${toggle('vs-squads', '🧩 Free agents can form a squad', "Players without a team can sign up. If enough join for a full team before the spots fill, they play as a temporary squad.", prefill.squadsOn !== false)}
+        <details class="rounded-xl border border-white/10 bg-white/5 px-3 py-2" ${prefill.gameType === 'kotf' ? 'open' : ''}>
+            <summary class="text-xs font-black cursor-pointer py-1">🏆 Type of game (optional)</summary>
+            <div class="space-y-2 pt-2">
+                <select id="vs-gametype" class="${INPUT}"><option value="" ${prefill.gameType !== 'kotf' ? 'selected' : ''}>Normal (pick the teams for each game)</option><option value="kotf" ${prefill.gameType === 'kotf' ? 'selected' : ''}>👑 King of the field</option></select>
+                <p class="text-[10px] text-white/50 leading-snug">King of the field: winner stays on. A team can't draw twice in a row (2nd draw and it's out). A draw in the first game is decided by rock-paper-scissors (counts as a draw). Match management picks the next teams for you.</p>
+                ${toggle('vs-kotf-all', 'If games are played at once, use this same format', 'Two games at once: each field runs its own king of the field with its own teams', prefill.kotfAllFields !== false)}
+            </div>
+        </details>
         <details class="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
             <summary class="text-xs font-black cursor-pointer py-1">Payment & roster settings</summary>
             <div class="space-y-2 pt-2">
@@ -396,6 +405,7 @@ window.saveCreateVs = async function () {
             format: segVal('vs-format') || '7v7', level: segVal('vs-level') || 'casual', teamsCount: parseInt(segVal('vs-count'), 10) || 2, priceCents: price0,
             firstToPay: !!document.getElementById('vs-first')?.checked, partial: !!document.getElementById('vs-partial')?.checked,
             payByHours: parseInt(segVal('vs-payby'), 10) || 0, rosterLockHours: parseInt(segVal('vs-lock'), 10) || 0, squadsOn: !!document.getElementById('vs-squads')?.checked,
+            ...readGameType(),
             description: val('vs-desc'), rules: val('vs-rules'), refundNote: val('vs-refund'), ...readCommunity() };
         try {
             await changeMatch(pre0.editId, (x) => { if (fields.teamsCount < spotsTaken(x)) throw new Error('TOO_FEW'); Object.assign(x, fields); x._edit = fields; settle(x); });
@@ -419,7 +429,7 @@ window.saveCreateVs = async function () {
         teamsCount: parseInt(segVal('vs-count'), 10) || 2, priceCents: price,
         firstToPay: !!document.getElementById('vs-first')?.checked, partial: !!document.getElementById('vs-partial')?.checked,
         payByHours: parseInt(segVal('vs-payby'), 10) || 0, rosterLockHours: parseInt(segVal('vs-lock'), 10) || 0,
-        squadsOn: !!document.getElementById('vs-squads')?.checked, forming: [],
+        squadsOn: !!document.getElementById('vs-squads')?.checked, forming: [], ...readGameType(),
         description: val('vs-desc'), rules: val('vs-rules'), refundNote: val('vs-refund'), ...readCommunity(),
         organizerId: myUid(), organizerName: myName(), organizerAvatar: myAvatar(), status: 'open', teams, teamIds: teams.map(t => t.teamId), payments: [],
         rematchOf: pre.rematchOf || '', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
@@ -719,7 +729,8 @@ function drawPage() {
             ${splitProgressHtml(m, t)}
             <div class="flex flex-wrap gap-2">
                 ${canKit(m, t.teamId) && t.state !== 'invited' ? `<button onclick="openVsKits()" class="${DARK}">${shirt(kitOf(m, t.teamId), 'text-sm mr-1')}Shirt color</button>` : ''}
-                ${iCap && live && t.state !== 'invited' ? `<button onclick="openVsRoster('${jsq(t.teamId)}')" class="${DARK}" ${rosterLocked(m) ? 'disabled' : ''}>${rosterLocked(m) ? '🔒 Roster locked' : `Pick who's coming (${(t.roster || []).length})`}</button>` : ''}
+                ${iCap && !boss && live && t.state !== 'invited' ? `<button onclick="openVsRoster('${jsq(t.teamId)}')" class="${DARK}" ${rosterLocked(m) ? 'disabled' : ''}>${rosterLocked(m) ? '🔒 Roster locked' : `Pick who's coming (${(t.roster || []).length})`}</button>` : ''}
+                ${boss && live && t.state !== 'invited' ? `<button onclick="openVsRoster('${jsq(t.teamId)}')" class="${DARK}">👥 Pick who's coming (${(t.roster || []).length})</button>` : ''}
                 ${full && full.temp && (full.memberUids || []).includes(myUid()) ? `<button onclick="vsSquadChat('${jsq(t.teamId)}')" class="${DARK}"><i class="fa-solid fa-comments mr-1"></i>Squad chat</button>` : ''}
                 ${boss && live && price && t.state !== 'invited' && paid < price ? `<button onclick="openVsPayment('${jsq(t.teamId)}')" class="${BTN}">💵 Got a payment</button>` : ''}
                 ${iCap && creditOn(m) && t.state !== 'invited' && paid < price ? `<button onclick="openVsCreditPay('${jsq(t.teamId)}')" class="${BTN}">💳 Pay with credit</button>` : ''}
@@ -1556,6 +1567,62 @@ function liveSaved(id) {
     const loc = liveLocal[id]; if (!loc) return;
     if (--loc.n <= 0) delete liveLocal[id];
 }
+// ---------------------------------------------------------------- 👑 King of the field (m.gameType === 'kotf')
+//   Match management picks the next two teams by itself (kotf.js). With two games at once and m.kotfAllFields on,
+//   each field runs its own rotation: when Field 2 starts, the teams waiting are split (m.kotfPools = { f1: [...], f2: [...] }).
+const readGameType = () => ({ gameType: val('vs-gametype') === 'kotf' ? 'kotf' : '', kotfAllFields: document.getElementById('vs-kotf-all') ? !!document.getElementById('vs-kotf-all').checked : true });
+const isKotfVs = (m) => !!(m && m.gameType === 'kotf');
+/** The rotation on a field: its teams (in order) and the games played there. */
+function kotfVs(m, field) {
+    const conf = confirmedTeams(m).map(t => t.teamId);
+    const pools = m.kotfPools;
+    const pool = pools && pools['f' + field] ? pools['f' + field].filter(id => conf.includes(id)) : conf;
+    const games = (m.results || []).filter(r => (+r.field || 1) === field).map(r => ({ a: r.a, b: r.b, ga: r.ga, gb: r.gb, rps: r.rps || null }));
+    return kotfNext(pool, games);
+}
+/** Field 2 starts (king of the field on both fields): split the waiting teams between the fields. */
+function kotfSplit(m) {
+    const conf = confirmedTeams(m).map(t => t.teamId);
+    const onF1 = m.live ? [m.live.a, m.live.b] : [];
+    const r1 = kotfVs({ ...m, kotfPools: null }, 1);
+    const waiting = r1.line.filter(id => !onF1.includes(id));
+    const n2 = Math.max(2, Math.floor(conf.length / 2));
+    const f2 = waiting.slice(0, n2);
+    return { f1: conf.filter(id => !f2.includes(id)), f2, at: Date.now() };
+}
+const kotfOnField = (m, field) => isKotfVs(m) && (field === 1 || m.kotfAllFields !== false);
+/** The 👑 box in Match management: what's next on this field + the rock-paper-scissors question. */
+function kotfBoxVs(m, field) {
+    if (!kotfOnField(m, field)) return '';
+    const r = kotfVs(m, field), names = {};
+    (m.teams || []).forEach(t => { names[t.teamId] = t.name; });
+    const note = kotfNote(r, names);
+    const rps = r.needRps ? `<div class="grid grid-cols-2 gap-2 pt-1">${[r.needRps.a, r.needRps.b].map(k => `<button onclick="vsKotfRps(${field}, '${jsq(k)}')" class="py-3 rounded-2xl font-black text-sm bg-amber-400 text-slate-950">${esc(names[k] || 'Team')} won</button>`).join('')}</div>` : '';
+    return `<div class="rounded-3xl p-4 space-y-1.5 border-2 border-amber-400/50 bg-amber-400/10">
+        <div class="text-[10px] font-black tracking-widest text-amber-300">👑 KING OF THE FIELD${m.live && m.live2 ? ` · FIELD ${field}` : ''}</div>
+        <div class="text-sm font-black text-white">${esc(note.title)}</div><div class="text-xs text-white/70">${esc(note.line)}</div>${rps}</div>`;
+}
+window.vsKotfRps = async function (field, teamId) {
+    const m = V.open; if (!m) return;
+    const r = kotfVs(m, field); if (!r.needRps) return;
+    const all = m.results || [];
+    // the index among this field's games → the index in all results
+    const idx = all.map((x, i) => ({ x, i })).filter(({ x }) => (+x.field || 1) === field)[r.needRps.index];
+    if (!idx) return;
+    try {
+        await changeMatch(m.id, (x) => { const res = [...(x.results || [])]; if (!res[idx.i]) return false; res[idx.i] = { ...res[idx.i], rps: teamId }; x._edit = { results: res }; });
+        toast('Got it. 👑'); drawManage();
+    } catch (e) { toast("Couldn't save it.", 'error'); }
+};
+window.vsSetGameType = async function (type) {
+    const m = V.open; if (!m) return;
+    try { await changeMatch(m.id, (x) => { x._edit = { gameType: type === 'kotf' ? 'kotf' : '', kotfAllFields: x.kotfAllFields !== false }; }); drawManage(); }
+    catch (e) { toast("Couldn't save it.", 'error'); }
+};
+window.vsSetKotfAll = async function (on) {
+    const m = V.open; if (!m) return;
+    try { await changeMatch(m.id, (x) => { x._edit = { kotfAllFields: !!on }; }); drawManage(); } catch (e) { toast("Couldn't save it.", 'error'); }
+};
 async function saveLive(fn) {
     const m = V.open; if (!m) return false;
     const key = liveKey();
@@ -1597,9 +1664,10 @@ window.vsStartLive = async function () {
     if (m.status === 'final') { toast('This match is over. Fix games with "Edit Game" below.', 'error'); return; }
     V.field = 1;
     if (!m.live || !m.live.mode) {
-        // the first two teams that aren't playing on Field 2
+        // the first two teams that aren't playing on Field 2 (👑 king of the field: the next two by the rules)
         const busy = new Set(m.live2 ? [m.live2.a, m.live2.b] : []);
-        const free = conf.filter(t => !busy.has(t.teamId));
+        let free = conf.filter(t => !busy.has(t.teamId));
+        if (isKotfVs(m)) { const r = kotfVs(m, 1); const ka = free.find(t => t.teamId === r.a), kb = free.find(t => t.teamId === r.b); if (ka && kb) free = [ka, kb]; }
         if (free.length < 2) { toast('Not enough free teams for another game.', 'error'); return; }
         await saveLive((L) => ({ a: free[0].teamId, b: free[1].teamId, mode: 'timer', durationSeconds: 600, elapsedSeconds: 600, isRunning: false,
             lastUpdatedTimestamp: Date.now(), alarmEnabled: true, goals: (L && L.goals) || [] }));
@@ -1615,7 +1683,18 @@ window.vsStartField2 = async function () {
     if (!m.live) { V.field = 1; drawManage(); return; }
     if (m.live2) { V.field = 2; drawManage(); return; }
     const busy = new Set([m.live.a, m.live.b]);
-    const free = conf.filter(t => !busy.has(t.teamId));
+    let free = conf.filter(t => !busy.has(t.teamId));
+    if (kotfOnField(m, 2)) {
+        // 👑 each field its own king of the field: split the teams the first time Field 2 starts
+        let pools = m.kotfPools && m.kotfPools.f2 && m.kotfPools.f2.length >= 2 ? m.kotfPools : null;
+        if (!pools) {
+            pools = kotfSplit(m);
+            try { await changeMatch(m.id, (x) => { x._edit = { kotfPools: pools }; }); m.kotfPools = pools; } catch (e) { /* the pick below still works */ }
+        }
+        const r = kotfVs({ ...m, kotfPools: pools }, 2);
+        const ka = free.find(t => t.teamId === r.a), kb = free.find(t => t.teamId === r.b);
+        if (ka && kb) free = [ka, kb];
+    }
     if (free.length < 2) { toast('Not enough free teams for a 2nd game.', 'error'); return; }
     const L1 = m.live, mode = L1.mode || 'timer', d = +L1.durationSeconds || 600;
     V.field = 2;
@@ -1657,6 +1736,14 @@ function drawManageHub(m, el) {
             <span class="flex items-center gap-1.5">${confirmedTeams(m).map(t => shirt(kitOf(m, t.teamId), 'text-2xl')).join('')}</span>
             <span class="flex-1 min-w-0"><span class="block text-sm font-black">Shirt colors</span><span class="block text-[11px] text-white/55">Pick before the match so nobody wears the same color.</span></span>
             <i class="fa-solid fa-chevron-right text-white/40"></i></button>` : ''}
+        ${multi && m.status !== 'final' ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+            <label class="flex items-center justify-between gap-2 text-xs font-bold text-white/75">🏆 Type of game
+                <select onchange="vsSetGameType(this.value)" class="bg-black/60 border border-white/15 rounded-lg px-2 py-1.5 text-white text-xs">
+                    <option value="" ${!isKotfVs(m) ? 'selected' : ''}>Normal (pick the teams)</option><option value="kotf" ${isKotfVs(m) ? 'selected' : ''}>👑 King of the field</option></select></label>
+            ${isKotfVs(m) && confirmedTeams(m).length >= 4 ? `<label class="flex items-center justify-between gap-2 text-[11px] text-white/65">If games are played at once, use this same format
+                <input type="checkbox" ${m.kotfAllFields !== false ? 'checked' : ''} onchange="vsSetKotfAll(this.checked)" class="w-5 h-5 accent-[#00F296]"></label>` : ''}
+        </div>` : ''}
+        ${multi && m.status !== 'final' ? kotfBoxVs(m, 1) + (m.kotfPools && m.kotfPools.f2 ? kotfBoxVs(m, 2) : '') : ''}
         ${top}
         ${results.length ? playedGamesAdminHtml(m) : `<div class="text-[11px] font-black uppercase tracking-wider text-white/50">Matches played</div><p class="text-sm text-white/50 text-center py-6">No match results recorded yet.</p>`}
       </div></div></div>`;
@@ -1725,6 +1812,7 @@ function drawManage() {
                 </div>
             </div>
         </div>
+        ${conf.length > 2 ? kotfBoxVs(m, V.field === 2 ? 2 : 1) : ''}
         ${conf.length > 2 ? `<div class="grid grid-cols-2 gap-3">
             <div class="space-y-1.5"><label class="block text-xs font-black text-white/60 tracking-wider">TEAM 1</label>${teamSelect('vs-la', A.teamId, B.teamId)}</div>
             <div class="space-y-1.5"><label class="block text-xs font-black text-white/60 tracking-wider">TEAM 2</label>${teamSelect('vs-lb', B.teamId, A.teamId)}</div></div>` : ''}
@@ -2475,11 +2563,17 @@ window.leaveVs = async function (teamId) {
 };
 
 // ---- roster: who's coming
-window.openVsRoster = function (teamId) {
+const isBoss = (m) => !!m && m.organizerId === myUid();
+// The organizer can pick any team's players too (even when the team's roster is private), and after the roster lock.
+window.openVsRoster = async function (teamId) {
     const m = V.open; if (!m) return;
     const entry = (m.teams || []).find(t => t.teamId === teamId);
-    const team = (TS().mine || []).find(t => t.id === teamId);
-    if (!entry || !team) return;
+    if (!entry) return;
+    let team = (TS().mine || []).find(t => t.id === teamId);
+    if (!team && isBoss(m)) {   // not my team: read its players straight from the team
+        try { const s = await getDoc(D('teams', teamId)); if (s.exists()) team = { ...s.data(), id: teamId }; } catch (e) { /* below */ }
+    }
+    if (!team) { toast("Couldn't load the team's players.", 'error'); return; }
     const on = new Set(entry.roster || []);
     window._vsRoster = on;
     sheet('vs-roster', `Who's coming? (${esc(team.name)})`, `
@@ -2492,7 +2586,8 @@ window.openVsRoster = function (teamId) {
 window.saveVsRoster = async function (teamId) {
     const m = V.open; if (!m) return;
     try {
-        await changeMatch(m.id, (x) => { if (rosterLocked(x)) throw new Error('LOCKED'); const t = x.teams.find(y => y.teamId === teamId); if (!t) return false; t.roster = [...window._vsRoster]; });
+        const boss = isBoss(m);
+        await changeMatch(m.id, (x) => { if (rosterLocked(x) && !boss) throw new Error('LOCKED'); const t = x.teams.find(y => y.teamId === teamId); if (!t) return false; t.roster = [...window._vsRoster]; });
         document.getElementById('vs-roster')?.remove();
     } catch (e) { toast(String(e && e.message) === 'LOCKED' ? 'Rosters are locked now.' : "Couldn't save.", 'error'); }
 };
