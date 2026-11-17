@@ -268,7 +268,7 @@ export function renderTeamsTab() {
             ${mineToInvite.length ? '' : '<p class="text-[11px] text-white/45">Create a team to invite free agents.</p>'}
             <div class="space-y-2">${T.agents.filter(x => x.uid !== myUid() && !(window.isBlocked && window.isBlocked(x.uid))).map(x => `
                 <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-3">
-                    <img src="${esc(avatarOf(x.uid, x.name, x.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(x.uid)}','${jsq(x.name)}','')" class="w-11 h-11 rounded-full object-cover border border-emerald-500/40 cursor-pointer">
+                    <img src="${esc(avatarOf(x.uid, x.name, x.avatar) || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(x.uid)}','${jsq(x.name)}','')" class="w-11 h-11 rounded-full object-cover border border-emerald-500/40 cursor-pointer">
                     <div class="flex-1 min-w-0">
                         <div class="text-sm font-black text-white truncate">${esc(x.name || 'Player')}</div>
                         <div class="text-[11px] text-[#00F296] font-bold">${esc((x.positions || []).join(' · ') || 'Any position')}${x.level ? ' · ' + esc(levelLabel(x.level)) : ''}</div>
@@ -292,7 +292,7 @@ export function renderTeamsTab() {
     const dirOf = (u) => [...(window.cachedDirectoryList || []), ...(window.directoryList || [])].find(d => String(d.uid || d.id) === u) || {};
     const friendReqs = reqIds.length ? `<div class="text-[10px] font-black text-[#00F296] uppercase tracking-wider">👋 Friend requests (${reqIds.length})</div>
             <div class="space-y-2">${reqIds.map(u => { const d = dirOf(u); const nm = d.name || `${d.firstName || ''} ${d.lastName || ''}`.trim() || 'Player'; return `<div class="flex items-center gap-3 bg-[#00F296]/10 border border-[#00F296]/40 rounded-2xl p-3">
-                <img src="${esc(avatarOf(u, nm, d.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(u)}','${jsq(nm)}','')" class="w-10 h-10 rounded-full object-cover cursor-pointer">
+                <img src="${esc(avatarOf(u, nm, d.avatar) || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(u)}','${jsq(nm)}','')" class="w-10 h-10 rounded-full object-cover cursor-pointer">
                 <div class="flex-1 min-w-0 text-sm font-black text-white truncate">${esc(nm)}</div>
                 <button onclick="denyFriendRequest('${jsq(u)}')" class="${DARK}">Ignore</button>
                 <button onclick="acceptFriendRequest('${jsq(u)}')" class="${BTN}">Accept</button></div>`; }).join('')}</div>` : '';
@@ -678,7 +678,7 @@ window.openHandOverTeam = function () {
         ${people.length ? `<div class="space-y-1.5 max-h-72 overflow-y-auto">${people.map(m => {
             const nm = m.uid ? (window.fullName ? (window.fullName((window.cachedDirectoryList || []).find(u => u.uid === m.uid) || {}) || m.name) : m.name) : m.name;
             return `<button onclick="confirmHandOver('${jsq(m.uid)}','${jsq(nm || 'Player')}')" class="w-full flex items-center gap-3 rounded-xl px-2 py-2 bg-black/40 border border-white/10 hover:bg-white/5 text-left">
-                <img src="${esc(avatarOf(m.uid, nm, m.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
+                <img src="${esc(avatarOf(m.uid, nm, m.avatar) || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
                 <span class="flex-1 min-w-0"><span class="block text-sm font-bold truncate">${esc(nm || 'Player')}</span><span class="block text-[11px] text-white/50">${m.role === 'captain' ? 'Captain' : m.role === 'co' ? 'Co-captain' : 'Player'}</span></span>
                 <i class="fa-solid fa-chevron-right text-white/40"></i></button>`;
         }).join('')}</div>`
@@ -845,7 +845,7 @@ function rosterHtml(t, boss) {
         ${boss ? `<button onclick="openAddTeamPlayer()" class="${BTN} w-full py-3"><i class="fa-solid fa-user-plus mr-1"></i> Add player</button>` : ''}
         ${list.map(p => `<div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-2.5">
             <div class="w-9 text-center text-lg font-black text-[#00F296]">${esc(p.number || '')}</div>
-            ${p.uid ? `<img src="${esc(avatarOf(p.uid, p.name) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover cursor-pointer" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(p.uid)}','${jsq(p.name)}','')">`
+            ${p.uid ? `<img src="${esc(avatarOf(p.uid, p.name) || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover cursor-pointer" onclick="openPlayerStatsSheet && openPlayerStatsSheet('${jsq(p.uid)}','${jsq(p.name)}','')">`
                 : '<div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white/50"><i class="fa-solid fa-user"></i></div>'}
             <div class="flex-1 min-w-0">
                 <div class="text-sm font-black truncate">${esc(p.name || 'Player')}${p.uid === myUid() ? ' <span class="text-white/45 font-semibold text-xs">(you)</span>' : ''}</div>
@@ -858,7 +858,7 @@ function rosterHtml(t, boss) {
 function requestsHtml(t) {
     if (!T.requests.length) return '<p class="text-xs text-white/45 text-center py-6">No requests right now.</p>';
     return `<div class="space-y-2">${T.requests.map(r => `<div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-2.5">
-        <img src="${esc(avatarOf(r.uid, r.name, r.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover">
+        <img src="${esc(avatarOf(r.uid, r.name, r.avatar) || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover">
         <div class="flex-1 min-w-0 text-sm font-black truncate">${esc(r.name || 'Player')}</div>
         <button onclick="answerTeamRequest('${jsq(r.uid)}', false)" class="${DARK}">Decline</button>
         <button onclick="answerTeamRequest('${jsq(r.uid)}', true)" class="${BTN}">Add</button></div>`).join('')}</div>`;
@@ -914,7 +914,7 @@ window.teamAddSearch = function (q) {
     const nm = (u) => (window.fullName ? window.fullName(u) : (u.name || `${u.firstName || ''} ${u.lastName || ''}`)).trim() || 'Player';
     const list = (ql ? people.filter(u => `${nm(u)} ${u.nickname || ''}`.toLowerCase().includes(ql)) : people.slice(0, 0)).slice(0, 30);
     box.innerHTML = ql ? (list.map(u => `<button onclick="addAppPlayer('${jsq(u.uid)}','${jsq(nm(u))}')" class="w-full flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white/5 text-left">
-        <img src="${esc(avatarOf(u.uid, nm(u), u.avatar) || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
+        <img src="${esc(avatarOf(u.uid, nm(u), u.avatar) || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-9 h-9 rounded-full object-cover">
         <span class="flex-1 min-w-0"><span class="block text-sm font-bold truncate">${esc(nm(u))}</span><span class="block text-[11px] text-white/50 truncate">${esc((window.personSubtitle && window.personSubtitle(u)) || u.position || 'Player')}</span></span>
         <i class="fa-solid fa-plus text-[#00F296]"></i></button>`).join('') || '<p class="text-xs text-white/45 py-3 text-center">Nobody found.</p>')
         : '<p class="text-[11px] text-white/45 py-2">Type a name to search.</p>';
@@ -1103,7 +1103,7 @@ function lineupHtml(t, boss) {
             <select onchange="lineupFormat(this.value)" class="${INPUT} !w-28">${Object.keys(FORMATS).map(f => `<option ${l.format === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
             <select onchange="lineupFormation(this.value)" class="${INPUT}">${FORMATS[l.format].map(f => `<option ${l.formation === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
         </div>` : `<div class="text-xs text-white/60 text-center">${esc(l.format)} · ${esc(l.formation)}</div>`}
-        <div class="relative w-full rounded-3xl overflow-hidden border-2 shadow-2xl bg-[#03140C]" style="aspect-ratio:3/4;background-image:url('img/TeamBuildField.png');background-size:cover;background-position:center;border-color:${p}">
+        <div class="relative w-full rounded-3xl overflow-hidden border-2 shadow-2xl bg-[#03140C]" style="aspect-ratio:3/4;background-image:url('img/TeamBuildField.jpg');background-size:cover;background-position:center;border-color:${p}">
             <div class="absolute inset-0 bg-black/40 pointer-events-none"></div>
             ${spots.map((_, i) => shirt(byId.get(l.spots[String(i)]), i)).join('')}
         </div>

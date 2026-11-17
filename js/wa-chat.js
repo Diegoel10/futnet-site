@@ -427,7 +427,7 @@ export function renderWhatsApp(messages, opts = {}) {
         const name = !mine && opts.group && startsRun
             ? `<div class="wa-name" style="color:${nameColor(m.uid || m.name)}">${esc(m.name || 'Player')}</div>` : '';
         const photo = !mine && opts.group
-            ? (startsRun ? `<img class="wa-av" src="${esc(avatarOf(m.uid, m.name, m.avatar))}" onerror="this.src='${DEFAULT_AVATAR}'" style="align-self:flex-start">` : '<span class="wa-av-space"></span>')
+            ? (startsRun ? `<img class="wa-av" src="${esc(avatarOf(m.uid, m.name, m.avatar))}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'" style="align-self:flex-start">` : '<span class="wa-av-space"></span>')
             : '';
         const deleted = m.deleted === true;
         const media = !deleted && m.media && m.media.url ? mediaHtml(m.media) : '';

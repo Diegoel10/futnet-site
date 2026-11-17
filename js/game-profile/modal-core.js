@@ -134,7 +134,7 @@ window.renderInfoTab = function(event) {
     // ---- 1. You: "Are you in?" / "You're in!" / waitlist (same look as the iPhone app)
     const myAvatar = safeAvatar(window.userProfile?.avatar) || safeAvatar(window.currentUser?.photoURL) || resolveAvatar({ uid: userId, name: window.userProfile?.firstName || 'Me' });
     const myCircle = (ring, badge) => `<div class="relative w-[76px] h-[76px] mx-auto">
-            <img src="${escapeHtml(myAvatar)}" class="w-full h-full rounded-full object-cover bg-black" style="${ring}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+            <img src="${escapeHtml(myAvatar)}" class="w-full h-full rounded-full object-cover bg-black" style="${ring}" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
             ${badge ? `<span class="gi-badge absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-black flex items-center justify-center text-[20px] leading-none">${badge}</span>` : ''}
         </div>`;
     const realGoing = attendeesArr.reduce((n, a) => n + 1 + (Array.isArray(a.guests) ? a.guests.length : 0), 0);

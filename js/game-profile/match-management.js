@@ -549,7 +549,7 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
     // data-uid: the scorer's profile, so the goal is theirs even if they change their name or share it with someone
     const row = (p, label, own) => `
         <div data-goal="${escapeHtml(label)}" data-uid="${own ? '' : escapeHtml(String(p.uid || ''))}" onclick="recordLiveGoal('${eventId}', '${teamKey}', this.dataset.goal, this.dataset.uid)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-white/10">
-            <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+            <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
             <span class="text-xs font-bold text-white">${escapeHtml(p.name)}</span>
         </div>`;
 

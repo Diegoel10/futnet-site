@@ -11,7 +11,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/fi
 // card    = card background (FutNet dark navy)       panel   = slightly lighter boxes      deep = darkest areas
 export const THEMES = {
     classic: {
-        name: 'Classic Night', note: 'The original FutNet stadium', thumb: 'img/theme-classic-thumb.jpg', photo: 'img/GamesBackground.png',
+        name: 'Classic Night', note: 'The original FutNet stadium', thumb: 'img/theme-classic-thumb.jpg', photo: 'img/GamesBackground.jpg',
         pal: { accent: '#00F296', accent2: '#00B4AE', card: '#040E13', panel: '#07141E', deep: '#01060A' }, swap: false,
     },
     cage: {

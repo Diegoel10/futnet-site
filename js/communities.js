@@ -1003,7 +1003,7 @@ function topRowsHtml(rows, right, cid, empty, first = '#FCD34D') {
     return rows.length ? rows.map((r, i) => `
             <button onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(cid)}')" class="w-full flex items-center gap-2.5 py-1.5 text-left">
                 <span class="w-5 text-center text-xs font-black" style="color:${i === 0 ? first : 'rgba(255,255,255,.5)'}">${i + 1}</span>
-                <img src="${esc(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(r) : (r.avatar || DEFAULT_AVATAR))}" onerror="this.src='${DEFAULT_AVATAR}'" class="w-8 h-8 rounded-full object-cover border border-white/15 shrink-0">
+                <img src="${esc(window.resolvePlayerAvatar ? window.resolvePlayerAvatar(r) : (r.avatar || DEFAULT_AVATAR))}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'" class="w-8 h-8 rounded-full object-cover border border-white/15 shrink-0">
                 <span class="flex-1 min-w-0 text-xs font-bold text-white truncate">${esc(r.name)}</span>
                 ${right(r)}
             </button>`).join('') : `<p class="text-[11px] text-white/45 py-2">${empty}</p>`;

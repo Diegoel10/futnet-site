@@ -262,7 +262,7 @@ async function verify() {
     const now = Date.now();
     body(`<div class="card text-[12px] text-white/70">${BLUE} Blue runs out 60 days after their last game with a real organizer. Ones running out within 14 days are on top.</div>
         <div class="space-y-2">${r.list.map(v => { const left = v.blueUntil ? Math.ceil((v.blueUntil - now) / 86400000) : null; return `<button onclick="mgrPlayer('${jsq(v.uid)}')" class="card w-full text-left flex items-center gap-3">
-            <img src="${esc(v.avatar || AV)}" onerror="this.src='${AV}'" class="w-9 h-9 rounded-full object-cover">
+            <img src="${esc(v.avatar || AV)}" onerror="this.onerror=null;this.src='${AV}'" class="w-9 h-9 rounded-full object-cover">
             <div class="flex-1 min-w-0"><div class="font-black truncate">${esc(v.name)} ${v.gold ? GOLD : ''}${v.blue ? BLUE : ''}</div>
             <div class="text-[11px] ${left !== null && left <= 14 ? 'text-amber-300' : 'text-white/55'}">${v.blue ? (left > 0 ? `Blue: ${left} days left` : 'Blue ran out') : ''}${v.gold ? ` · Gold: ${esc(v.gold.name)}` : ''}</div></div></button>`; }).join('') || '<p class="text-sm text-white/50">Nobody verified yet. Open a player in Players to verify them.</p>'}</div>`);
 }
@@ -277,7 +277,7 @@ async function messages() {
             ${x.details || x.note ? `<div class="text-white/60">"${esc(x.details || x.note)}"</div>` : ''}
             ${x.targetUid ? `<button onclick="mgrPlayer('${jsq(x.targetUid)}')" class="text-[#00F296] font-bold">Open player ›</button>` : ''}</div>`).join('')}</div>` : ''}
         <div class="space-y-2">${r.threads.map((t, i) => `<div class="card space-y-2">
-            <div class="flex items-center gap-2"><img src="${esc(t.avatar || AV)}" onerror="this.src='${AV}'" class="w-8 h-8 rounded-full object-cover"><div class="flex-1 min-w-0"><div class="font-black truncate">${esc(t.name)}</div><div class="text-[10px] text-white/45">${t.last ? new Date(t.last.createdAt).toLocaleString() : ''}</div></div>
+            <div class="flex items-center gap-2"><img src="${esc(t.avatar || AV)}" onerror="this.onerror=null;this.src='${AV}'" class="w-8 h-8 rounded-full object-cover"><div class="flex-1 min-w-0"><div class="font-black truncate">${esc(t.name)}</div><div class="text-[10px] text-white/45">${t.last ? new Date(t.last.createdAt).toLocaleString() : ''}</div></div>
                 <button onclick="mgrPlayer('${jsq(t.id)}')" class="btn-dark !py-1 !px-2 text-[11px]">Player</button></div>
             <div class="space-y-1 max-h-48 overflow-y-auto">${t.messages.slice(-8).map(m => `<div class="text-[12px] ${String(m.senderUid) === String(t.id) ? 'text-white' : 'text-[#00F296]'}"><b>${String(m.senderUid) === String(t.id) ? esc(t.name.split(' ')[0]) : 'FutNet Admin'}:</b> ${esc(m.text || (m.media ? '📷' : ''))}</div>`).join('')}</div>
             <div class="flex gap-2"><input id="r-${i}" class="inp" placeholder="Reply as FutNet Admin…" onkeydown="if(event.key==='Enter')mgrReply(${i})"><button onclick="mgrReply(${i})" class="btn">Send</button></div>
@@ -412,7 +412,7 @@ function drawThemes() {
         </div>
         <div class="card"><div class="lbl">${S.themeShow === '_none' ? 'Never picked' : S.themeShow ? esc(name(S.themeShow)) : 'Everyone who picked'} (${shown.length})${S.themeShow ? ' · <button onclick="mgrThemeShow(\'\')" class="underline">show all</button>' : ''}</div>
             <div class="space-y-1 max-h-[480px] overflow-y-auto">${shown.map(p => `<div class="flex items-center gap-2 text-[12px] py-1">
-                <img src="${esc(p.avatar || AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10" onerror="this.src='${AV}'">
+                <img src="${esc(p.avatar || AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10" onerror="this.onerror=null;this.src='${AV}'">
                 <span class="flex-1 truncate font-bold">${esc(p.name)}</span>
                 ${p.theme ? `<span class="font-black" style="color:${color(p.theme)}">${esc(name(p.theme))}</span>` : ''}
                 <span class="text-white/45 w-20 text-right">${esc(ago(p.at))}</span></div>`).join('') || '<p class="text-sm text-white/50">Nobody yet.</p>'}</div>

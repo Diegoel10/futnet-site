@@ -422,7 +422,7 @@ function drawMatchPage(keepInput) {
 }
 function matchCommentsHtml() {
     return `<div class="space-y-2" id="tm-list">${MP.msgs.map(c => `<div class="flex gap-2 ${c.uid === myUid() ? 'flex-row-reverse text-right' : ''}">
-                <img src="${esc(c.avatar || DEFAULT_AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10 shrink-0" alt="" onerror="this.src='${DEFAULT_AV}'">
+                <img src="${esc(c.avatar || DEFAULT_AV)}" class="w-7 h-7 rounded-full object-cover bg-white/10 shrink-0" alt="" onerror="this.onerror=null;this.src='${DEFAULT_AV}'">
                 <div class="max-w-[80%] rounded-2xl px-3 py-2 ${c.uid === myUid() ? 'bg-amber-400/20' : 'bg-white/10'}"><div class="text-[10px] font-black text-white/60">${esc(c.name || 'Player')}</div><div class="text-xs whitespace-pre-wrap break-words">${esc(c.text || '')}</div></div></div>`).join('') || '<p class="text-[11px] text-white/45 text-center py-2">No comments yet. Say something! ⚽</p>'}</div>
             ${myUid() ? `<div class="flex gap-2"><input id="tm-in" class="${INPUT}" maxlength="1000" placeholder="Comment on this match…" onkeydown="if(event.key==='Enter')sendMatchComment()"><button onclick="sendMatchComment()" class="${BTN} shrink-0"><i class="fa-solid fa-paper-plane"></i></button></div>` : ''}`;
 }
@@ -1303,7 +1303,7 @@ function drawPage() {
     const mLabel = (id) => { const x = (t.matches || []).find(y => y.id === id); return x ? `${matchLabel(x)}: ${nameOf(t, x.a) || '?'} vs ${nameOf(t, x.b) || '?'}` : ''; };
     const chat = `<div class="space-y-3">
         <div class="space-y-2 max-h-[55vh] overflow-y-auto" id="tt-chat-list">${(TT.chat || []).map(c => `<div class="flex gap-2 ${c.uid === myUid() ? 'flex-row-reverse text-right' : ''}">
-            <img src="${esc(c.avatar || DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover shrink-0">
+            <img src="${esc(c.avatar || DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover shrink-0">
             <div class="max-w-[78%] ${c.uid === myUid() ? 'bg-[#00F296]/15 border-[#00F296]/30' : 'bg-black/50 border-white/10'} border rounded-2xl px-3 py-2">
                 <div class="text-[10px] font-black ${c.uid === t.organizerId ? 'text-amber-300' : 'text-white/60'}">${esc(c.name || 'Player')}${c.uid === t.organizerId ? ' · organizer' : ''}${window.badgeHtml ? window.badgeHtml(c.uid) : ''}</div>
                 ${c.matchId && mLabel(c.matchId) ? `<button onclick="openTourneyMatch('${jsq(t.id)}', '${jsq(c.matchId)}')" class="block text-[9px] font-black text-amber-300/90 underline text-left">on ${esc(mLabel(c.matchId))}</button>` : ''}

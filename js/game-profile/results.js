@@ -78,7 +78,7 @@ function avatarStack(players, size = 'w-8 h-8', max = 7) {
     const shown = players.slice(0, max);
     const more = players.length - shown.length;
     return `<div class="flex -space-x-2">${shown.map(p =>
-        `<img src="${escapeHtml(avatarOf(p))}" title="${escapeHtml(p.name || '')}" class="${size} rounded-full object-cover border-2 border-[#040E13]" onerror="this.src='${DEFAULT_AVATAR}'">`).join('')}
+        `<img src="${escapeHtml(avatarOf(p))}" title="${escapeHtml(p.name || '')}" class="${size} rounded-full object-cover border-2 border-[#040E13]" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">`).join('')}
         ${more > 0 ? `<span class="${size} rounded-full bg-black/80 border-2 border-[#040E13] text-[10px] font-black text-white flex items-center justify-center">+${more}</span>` : ''}</div>`;
 }
 
@@ -120,7 +120,7 @@ window.openSessionResults = function(eventId) {
             <div class="text-xs text-white/70">${w.points} pts · ${w.wins}W ${w.draws}D ${w.losses}L · ${w.gf}-${w.ga} goals</div>
             <div class="flex flex-wrap justify-center gap-3 pt-2">${w.players.map(p => `
                 <div class="flex flex-col items-center w-16">
-                    <img src="${escapeHtml(avatarOf(p))}" class="w-14 h-14 rounded-full object-cover border-2 shadow-lg" style="border-color:${wColor}" onerror="this.src='${DEFAULT_AVATAR}'">
+                    <img src="${escapeHtml(avatarOf(p))}" class="w-14 h-14 rounded-full object-cover border-2 shadow-lg" style="border-color:${wColor}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">
                     <span class="text-[10px] font-bold text-white mt-1 truncate w-full">${escapeHtml(String(p.name || 'Player').split(' ')[0])}</span>
                 </div>`).join('') || '<span class="text-xs text-white/50 italic">No players were placed on this team.</span>'}</div>
         </div>`
@@ -149,7 +149,7 @@ window.openSessionResults = function(eventId) {
             </div>
             <div class="flex flex-wrap gap-1.5">${t.players.map(p => `
                 <span class="flex items-center gap-1.5 bg-black/60 border border-white/10 rounded-full pl-0.5 pr-2.5 py-0.5">
-                    <img src="${escapeHtml(avatarOf(p))}" class="w-6 h-6 rounded-full object-cover" onerror="this.src='${DEFAULT_AVATAR}'">
+                    <img src="${escapeHtml(avatarOf(p))}" class="w-6 h-6 rounded-full object-cover" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">
                     <span class="text-[10px] font-bold text-white">${escapeHtml(p.name || 'Player')}</span>
                 </span>`).join('') || '<span class="text-[10px] text-white/40 italic">No players placed</span>'}</div>
         </div>`;
@@ -158,7 +158,7 @@ window.openSessionResults = function(eventId) {
     const scorers = r.scorers.slice(0, 5).map((s, i) => `
         <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl p-2.5">
             <span class="w-5 text-center text-xs font-black text-white/50">${i + 1}</span>
-            <img src="${escapeHtml(s.avatar)}" class="w-8 h-8 rounded-full object-cover" onerror="this.src='${DEFAULT_AVATAR}'">
+            <img src="${escapeHtml(s.avatar)}" class="w-8 h-8 rounded-full object-cover" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">
             <span class="flex-1 text-xs font-bold truncate">${escapeHtml(s.name)}</span>
             <span class="text-xs font-black text-[#00F296]">⚽ ${s.goals}</span>
         </div>`).join('');
@@ -197,7 +197,7 @@ function photoGrid(players, ring, size) {
     return `<div class="flex flex-wrap justify-center gap-2">${players.map(p => `
         <img src="${escapeHtml(avatarOf(p))}" title="${escapeHtml(p.name || '')}"
              class="${size} rounded-full object-cover border-[3px] shadow-xl"
-             style="border-color:${ring}" onerror="this.src='${DEFAULT_AVATAR}'">`).join('')}</div>`;
+             style="border-color:${ring}" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">`).join('')}</div>`;
 }
 
 const LOSER_LINES = [
@@ -235,7 +235,7 @@ window.openCelebration = function(eventId) {
     const scorers = r.scorers.slice(0, 5).map((s, i) => `
         <div class="flex items-center gap-3 bg-black/35 border rounded-2xl px-3.5 py-2.5 ${i === 0 ? 'border-amber-300/40' : 'border-white/10'}">
             <span class="w-7 text-center font-black text-white/60 ${i < 3 ? 'text-lg' : 'text-sm'}">${medals[i] || (i + 1)}</span>
-            <img src="${escapeHtml(s.avatar)}" class="${i === 0 ? 'w-11 h-11 border-amber-300' : 'w-9 h-9 border-white/30'} rounded-full object-cover border-[3px] shadow-lg" onerror="this.src='${DEFAULT_AVATAR}'">
+            <img src="${escapeHtml(s.avatar)}" class="${i === 0 ? 'w-11 h-11 border-amber-300' : 'w-9 h-9 border-white/30'} rounded-full object-cover border-[3px] shadow-lg" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">
             <span class="flex-1 text-left text-[15px] font-extrabold truncate">${escapeHtml(s.name)}</span>
             <span class="text-xl font-black text-[#00F296]">${s.goals} <span class="text-sm">⚽</span></span>
         </div>`).join('');

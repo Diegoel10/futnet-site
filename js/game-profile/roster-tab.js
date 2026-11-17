@@ -142,7 +142,7 @@ export function renderRosterTab(event) {
             <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3 cursor-pointer group" onclick="openPlayerProfileModal('${jsArg(att.uid || '')}', '${jsArg(rawName)}', '')">
-                        <img src="${escapeHtml(safeAvatar)}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${escapeHtml(safeAvatar)}" class="w-9 h-9 rounded-full object-cover border border-emerald-500/40 group-hover:scale-105 transition" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div>
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="text-xs font-bold text-white group-hover:text-[#00F296] transition">${escapeHtml(rawName)}${window.statusEmoji ? window.statusEmoji(att.uid) : ''}</span>
@@ -293,7 +293,7 @@ window.openPlayerProfileModal = function(uid, name, avatar) {
     modal.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/30 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-white">
             <div class="text-center space-y-2">
-                <img id="player-popup-img" class="w-24 h-24 rounded-full object-cover border-2 border-[#00F296] mx-auto" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                <img id="player-popup-img" class="w-24 h-24 rounded-full object-cover border-2 border-[#00F296] mx-auto" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                 <div id="player-popup-name" class="text-lg font-black"></div>
                 <span class="inline-block text-[9px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 ${isOrganizer ? 'bg-[#00F296] text-slate-950' : 'bg-white/10 text-white/80'}">${isOrganizer ? 'Organizer' : 'Player'}</span>
             </div>

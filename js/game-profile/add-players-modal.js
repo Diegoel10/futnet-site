@@ -155,7 +155,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
             return `
             <div class="flex items-center justify-between py-2.5 px-3 rounded-xl opacity-45 select-none" title="Already in this game">
                 <div class="flex items-center gap-3">
-                    <img src="${escapeHtml(av)}" class="w-8 h-8 rounded-full object-cover border border-white/20 grayscale" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <img src="${escapeHtml(av)}" class="w-8 h-8 rounded-full object-cover border border-white/20 grayscale" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                     <div class="text-xs font-bold text-white">${escapeHtml(name)}</div>
                 </div>
                 <span class="text-[9px] font-black px-2 py-0.5 rounded border ${u._already === 'in' ? 'text-[#00F296] border-[#00F296]/40' : 'text-amber-300 border-amber-400/40'}">${u._already === 'in' ? 'Already in' : 'On waitlist'}</span>
@@ -176,7 +176,7 @@ window.renderAddPlayersList = function(eventId, queryStr) {
         return `
             <div class="flex items-center justify-between py-2.5 px-3 hover:bg-black/50 rounded-xl cursor-pointer transition select-none" onclick="toggleAddPlayerSelection(this, '${escapeHtml(u.uid)}')">
                 <div class="flex items-center gap-3">
-                    <img src="${escapeHtml(avatar)}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <img src="${escapeHtml(avatar)}" class="w-8 h-8 rounded-full object-cover border border-emerald-500/40" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                     <div>
                         <div class="text-xs font-bold text-white flex items-center gap-2">
                             ${escapeHtml(name)}

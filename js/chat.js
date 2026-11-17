@@ -150,7 +150,7 @@ function chatRowHtml(r) {
     const fallback = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
     return `
         <div onclick="openChatThread('${esc(r.id)}')" class="flex items-center gap-3 px-3 py-2.5 cursor-pointer transition ${selected ? 'bg-[#2A3942]' : 'hover:bg-[#202C33]'}">
-            <img src="${esc(r.avatar || fallback)}" onerror="this.src='${fallback}'" class="w-12 h-12 rounded-full object-cover shrink-0 bg-[#202C33]">
+            <img src="${esc(r.avatar || fallback)}" onerror="this.onerror=null;this.src='${fallback}'" class="w-12 h-12 rounded-full object-cover shrink-0 bg-[#202C33]">
             <div class="flex-1 min-w-0 border-b border-white/5 pb-2.5 -mb-2.5">
                 <div class="flex items-baseline justify-between gap-2">
                     <span class="text-[15px] font-semibold text-[#E9EDEF] truncate">${r.isGroup ? `<i class="fa-solid ${r.isTeam ? 'fa-shield-halved' : 'fa-people-group'} text-[11px] text-[#8696A0] mr-1.5"></i>` : ''}${esc(r.name)}</span>
@@ -304,7 +304,7 @@ window.renderChatsList = async function() {
             people = `<div class="px-4 pt-4 pb-1 text-[13px] font-semibold text-[#25D366]">Start a new chat</div>` + found.map(u => {
                 const n = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Player';
                 return `<div onclick="startChatWithPlayer('${esc(u.uid)}')" class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-[#202C33]">
-                    <img src="${esc(u.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-12 h-12 rounded-full object-cover shrink-0">
+                    <img src="${esc(u.avatar || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-12 h-12 rounded-full object-cover shrink-0">
                     <div class="min-w-0"><div class="text-[15px] font-semibold text-[#E9EDEF] truncate">${esc(n)}</div>
                     <div class="text-[13px] text-[#8696A0] truncate">${esc(u.position || 'Player')}</div></div></div>`;
             }).join('');

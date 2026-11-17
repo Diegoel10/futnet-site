@@ -260,7 +260,7 @@ window.openPlayerStatsSheet = (uid, name, avatar, communityId = '') => {
         <div class="max-w-md mx-auto p-4 pb-16 space-y-4">
             <div class="flex justify-end"><button onclick="document.getElementById('player-stats-sheet').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="flex flex-col items-center text-center gap-1.5">
-                <img src="${esc(p.avatar)}" onclick="openBigPhoto(this.src, '${esc(String(p.name).replace(/\\/g, '').replace(/'/g, ''))}')" title="See the photo bigger" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="cursor-zoom-in w-24 h-24 rounded-full object-cover border-4 border-[#00F296] shadow-[0_0_20px_rgba(0,242,150,0.35)]">
+                <img src="${esc(p.avatar)}" onclick="openBigPhoto(this.src, '${esc(String(p.name).replace(/\\/g, '').replace(/'/g, ''))}')" title="See the photo bigger" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="cursor-zoom-in w-24 h-24 rounded-full object-cover border-4 border-[#00F296] shadow-[0_0_20px_rgba(0,242,150,0.35)]">
                 <div class="text-lg font-black">${esc(p.name)}${window.statusEmoji ? window.statusEmoji(uid) : ''}</div>
                 ${(p.nickname || p.position) ? `<div class="text-xs text-white/60">${esc([p.nickname, p.position].filter(Boolean).join(' · '))}</div>` : ''}
             </div>

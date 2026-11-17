@@ -230,7 +230,7 @@ export function vsCardHtml(m) {
             </div>
             <div class="border-t border-white/10 pt-2.5 flex items-center justify-between gap-2">
                 <div class="flex items-center gap-2 min-w-0">
-                    <img src="${esc(organizerAvatar(m))}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover border border-[#00F296]/60 shrink-0">
+                    <img src="${esc(organizerAvatar(m))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover border border-[#00F296]/60 shrink-0">
                     <div class="min-w-0"><div class="text-[7px] font-bold text-white/60 uppercase leading-none">BY</div><div class="text-[10px] font-bold text-white truncate">${esc(m.organizerName || 'Organizer')}</div></div>
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">${mine}${status}</div>
@@ -685,7 +685,7 @@ window.openVsViews = async function () {
         </div>
         <p class="text-[10px] text-white/45">Counts everyone who opened this match (once per 30 minutes). Your own visits don't count.</p>
         <div class="space-y-1.5">${list.map(v => `<button onclick="document.getElementById('vs-views')?.remove(); openPlayerStatsSheet && openPlayerStatsSheet('${jsq(v.uid)}','${jsq(personName(v.uid, v.name))}','')" class="w-full flex items-center gap-3 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-left">
-            <img src="${esc(personAvatar(v.uid, v.avatar, personName(v.uid, v.name)))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover">
+            <img src="${esc(personAvatar(v.uid, v.avatar, personName(v.uid, v.name)))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover">
             <span class="flex-1 min-w-0"><span class="block text-xs font-black truncate">${esc(personName(v.uid, v.name))} ${inIds.has(String(v.uid)) ? '<span class="text-[9px] text-[#00F296]">IN THE MATCH</span>' : ''}</span>
                 <span class="block text-[10px] text-white/50">${ms(v.lastAt) ? 'Last seen ' + esc(new Date(ms(v.lastAt)).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : ''}</span></span>
             <span class="text-xs font-black text-white/80">${+v.count || 1}×</span></button>`).join('') || '<p class="text-xs text-white/50 text-center py-4">Nobody has opened it yet. Share the match to get it seen!</p>'}</div>
@@ -791,7 +791,7 @@ function drawPage() {
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296] mb-1"><i class="fa-solid ${icon} mr-1"></i>${title}</div>
                 <p class="text-xs text-white/85 whitespace-pre-line leading-relaxed">${esc(text)}</p></div>`).join('')}
             <div class="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl p-3">
-                <img src="${esc(organizerAvatar(m))}" onerror="this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover border border-[#00F296]/60">
+                <img src="${esc(organizerAvatar(m))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-10 h-10 rounded-full object-cover border border-[#00F296]/60">
                 <div><div class="text-[9px] font-bold text-white/55 uppercase">Organized by</div><div class="text-sm font-black">${esc(m.organizerName || 'Organizer')}</div></div>
             </div>
             ${clash ? `<div class="bg-amber-400/10 border border-amber-400/40 rounded-xl p-3 text-[11px] text-amber-200">👕 Both teams wear similar colors. ${esc(conf[1].name)}, please bring your second color.</div>` : ''}
@@ -979,7 +979,7 @@ function personName(uid, saved) {
 function personAvatar(uid, saved, name) { return avatarOf(uid, saved, name); }
 function membersHtml(list, captainUid) {
     return `<div class="flex flex-wrap gap-1.5">${list.map(p => { const nm = personName(p.uid, p.name); return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold">
-        <img src="${esc(personAvatar(p.uid, p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${esc(nm)}${p.uid === captainUid ? ' <span class="text-[9px] font-black text-amber-300">CAPTAIN</span>' : ''}${p.position ? ` <span class="text-white/50">${esc(p.position)}</span>` : ''}</span>`; }).join('')}</div>`;
+        <img src="${esc(personAvatar(p.uid, p.avatar, nm))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${esc(nm)}${p.uid === captainUid ? ' <span class="text-[9px] font-black text-amber-300">CAPTAIN</span>' : ''}${p.position ? ` <span class="text-white/50">${esc(p.position)}</span>` : ''}</span>`; }).join('')}</div>`;
 }
 const squadOpen = (m) => m.squadsOn !== false && m.status === 'open' && !isFull(m) && !(m.date && m.date < ymdToday());
 function squadRowHtml(m, q) {
@@ -1004,7 +1004,7 @@ function squadRowHtml(m, q) {
                 ${inThis ? `<button onclick="takeSquadCharge('${jsq(q.id)}')" class="${BTN} w-full">I'll take charge</button>` : ''}</div>` : ''}
             ${iCap && q.requests.length ? `<div class="space-y-1.5"><div class="text-[10px] font-black uppercase tracking-wider text-amber-300">Want to join (${q.requests.length})</div>
                 ${q.requests.map(p => { const nm = personName(p.uid, p.name); return `<div class="flex items-center gap-2 bg-white/5 rounded-xl px-2 py-1.5">
-                    <img src="${esc(personAvatar(p.uid, p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
+                    <img src="${esc(personAvatar(p.uid, p.avatar, nm))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
                     <span class="flex-1 min-w-0 text-xs font-bold truncate">${esc(nm)}${p.position ? ` <span class="text-white/50">${esc(p.position)}</span>` : ''}</span>
                     <button onclick="answerSquadRequest('${jsq(q.id)}','${jsq(p.uid)}', false)" class="${DARK} !px-2.5 !py-1.5">No</button>
                     <button onclick="answerSquadRequest('${jsq(q.id)}','${jsq(p.uid)}', true)" class="${BTN} !px-2.5 !py-1.5">Yes</button></div>`; }).join('')}</div>` : ''}
@@ -1084,7 +1084,7 @@ function myTeamTabHtml(m) {
             ${coming < need ? `<p class="text-[11px] text-amber-200">You need ${need - coming} more to play ${esc(m.format || '')}.</p>` : ''}
             ${members.map(p => { const st = comingOf(entry, p); const nm = p.uid ? personName(p.uid, p.name) : p.name;
                 return `<div class="flex items-center gap-2 bg-white/5 rounded-xl px-2 py-1.5">
-                <img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
+                <img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
                 <span class="w-6 text-center text-xs font-black text-[#00F296]">${esc(p.number || '')}</span>
                 <span class="flex-1 min-w-0 text-xs font-bold truncate">${esc(nm)}${p.role === 'captain' ? ' <span class="text-[9px] text-amber-300">(C)</span>' : ''}${p.position ? ` <span class="text-white/45">${esc(p.position)}</span>` : ''}</span>
                 ${iCap && canEdit ? `<button onclick="vsSetComing('${jsq(entry.teamId)}','${jsq(p.id)}', ${st !== 'in'})" class="text-[10px] font-black rounded-lg px-2 py-1 ${st === 'in' ? 'bg-[#00F296] text-slate-950' : st === 'out' ? 'bg-red-500/25 text-red-300' : 'bg-white/10 text-white/60'}">${st === 'in' ? 'COMING ✓' : st === 'out' ? 'OUT' : 'Mark in'}</button>` : chip(st)}
@@ -1774,8 +1774,9 @@ function drawManageHub(m, el) {
     const multi = (m.teamsCount || 2) > 2;
     const top = m.status === 'final'
         ? `<button onclick="openVsResultCards()" class="w-full bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-base flex items-center justify-center gap-2"><i class="fa-solid fa-trophy"></i> View final results</button>`
-        : `<button onclick="vsStartLive()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-4 rounded-2xl text-base flex items-center justify-center gap-2"><i class="fa-solid fa-play"></i> Start ${results.length ? 'Next ' : ''}Match</button>
-           ${multi && results.length ? `<button onclick="vsEndEvent()" class="w-full bg-amber-400/15 border border-amber-400/60 text-amber-300 font-black py-3 rounded-2xl text-sm flex items-center justify-center gap-2">🏁 End event (show final results)</button>` : ''}`;
+        : `<div class="text-[11px] font-black uppercase tracking-wider text-[#00F296]">Manage matches</div>
+           ${multi && results.length ? `<button onclick="vsEndEvent()" class="w-full bg-amber-400 text-slate-950 font-black py-4 rounded-2xl text-base flex items-center justify-center gap-2">🏁 End Event</button>` : ''}
+           <button onclick="vsStartLive()" class="w-full bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black py-4 rounded-2xl text-base flex items-center justify-center gap-2"><i class="fa-solid fa-play"></i> Start ${results.length ? 'Next ' : ''}Match</button>`;
     el.innerHTML = `<div class="flex-1 flex flex-col min-h-0 bg-[#060d12] rounded-t-[32px] border-t border-white/10 overflow-hidden" style="margin-top:max(12px, env(safe-area-inset-top))">
       <div class="flex-1 overflow-y-auto"><div class="max-w-2xl mx-auto w-full px-5 pt-6 pb-10 space-y-5">
         <div class="flex items-center gap-3">
@@ -1795,7 +1796,7 @@ function drawManageHub(m, el) {
         </div>` : ''}
         ${multi && m.status !== 'final' ? kotfBoxVs(m, 1) + (m.kotfPools && m.kotfPools.f2 ? kotfBoxVs(m, 2) : '') : ''}
         ${top}
-        ${results.length ? playedGamesAdminHtml(m) : `<div class="text-[11px] font-black uppercase tracking-wider text-white/50">Matches played</div><p class="text-sm text-white/50 text-center py-6">No match results recorded yet.</p>`}
+        ${results.length ? playedGamesAdminHtml(m) : `<div class="text-[11px] font-black uppercase tracking-wider text-white/50">Previous matches</div><p class="text-sm text-white/50 text-center py-6">No match results recorded yet.</p>`}
       </div></div></div>`;
 }
 window.closeVsManage = function () { V.manage = false; document.getElementById('vs-manage')?.remove(); };
@@ -1897,7 +1898,7 @@ window.vsGoalPicker = function (teamId) {
     const playersOf = (t) => { const full = teamFull(t.teamId); const roster = (t.roster || []).map(id => ((full && full.members) || []).find(p => p.id === id)).filter(Boolean); return roster.length ? roster : ((full && full.members) || []); };
     const entry = (m.teams || []).find(t => t.teamId === teamId) || {};
     const row = (p, own) => { const nm = p.uid ? personName(p.uid, p.name) : p.name; return `<button onclick="vsGoal('${jsq(teamId)}','${jsq(nm)}',${own ? 'true' : 'false'},'${jsq(p.uid || '')}')" class="w-full flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl border border-white/10 text-left">
-        <img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover"><span class="text-xs font-bold">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span></button>`; };
+        <img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover"><span class="text-xs font-bold">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span></button>`; };
     const mine = playersOf(entry), theirs = playersOf(other);
     sheet('vs-goal', `Goal for ${esc(entry.name || 'team')}`, `
         <div class="space-y-2">${mine.map(p => row(p, false)).join('') || '<p class="text-xs text-white/55">No players listed for this team.</p>'}</div>
@@ -1948,7 +1949,7 @@ window.openVsLineup = function (teamId) {
         <p class="text-[11px] text-white/60">Tick who is on the field this game. Use "Make a sub" when someone comes off.</p>
         <div class="space-y-1.5">${all.map(p => `<label class="flex items-center gap-3 p-2.5 bg-black/40 rounded-xl border border-white/10 cursor-pointer">
             <input type="checkbox" class="w-5 h-5 accent-[#00F296]" ${on.has(pid(p)) ? 'checked' : ''} onchange="vsToggleOnField('${jsq(teamId)}','${jsq(pid(p))}', this.checked)">
-            <img src="${esc(personAvatar(p.uid || '', p.avatar, pname(p)))}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
+            <img src="${esc(personAvatar(p.uid || '', p.avatar, pname(p)))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover">
             <span class="flex-1 min-w-0 text-xs font-bold truncate">${p.number ? esc(p.number) + ' · ' : ''}${esc(pname(p))}</span></label>`).join('') || '<p class="text-xs text-white/50">No players listed for this team.</p>'}</div>
         ${all.length > 1 ? `<div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
             <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">🔁 Make a sub</div>
@@ -2053,9 +2054,9 @@ function playedGamesAdminHtml(m) {
     const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { name: 'Team' };
     const scorers = (r, id, right) => (r.goals || []).filter(g => g.teamId === id).map(g => `<div class="flex items-center gap-1.5 ${right ? 'justify-end' : ''} text-[11px] text-white/80 truncate">⚽ <span class="truncate">${esc(goalName(g))}</span></div>`).join('');
     return `<div class="space-y-2">
-        <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Games played</div>
+        <div class="text-[11px] font-black uppercase tracking-wider text-[#00F296]">Previous matches</div>
         ${results.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => `<div class="space-y-1.5">
-            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Game ${i + 1}${r.field ? ` · Field ${r.field}` : ''}</div>
+            <div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Match ${i + 1}${r.field ? ` · Field ${r.field}` : ''}</div>
             <div class="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2.5">
                 <div class="flex items-center gap-2">
                     <span class="flex-1 min-w-0 flex items-center gap-1.5 text-xs font-black">${shirt(kitOf(m, r.a), 'text-sm')}<span class="truncate">${esc(teamOf(r.a).name)}</span></span>
@@ -2065,8 +2066,8 @@ function playedGamesAdminHtml(m) {
                 ${(r.goals || []).length ? `<div class="grid grid-cols-2 gap-2 border-t border-white/10 pt-2"><div class="min-w-0 space-y-0.5">${scorers(r, r.a)}</div><div class="min-w-0 space-y-0.5">${scorers(r, r.b, true)}</div></div>` : ''}
                 ${gameLineupHtml(m, r)}
                 <div class="grid grid-cols-2 gap-2 border-t border-white/10 pt-2.5">
-                    <button onclick="vsEditGame(${i})" class="bg-[#00B4AE]/15 hover:bg-[#00B4AE]/25 text-[#00F296] font-bold py-2 rounded-xl text-xs border border-[#00B4AE]/50 flex items-center justify-center gap-1.5"><i class="fa-solid fa-pen text-[10px]"></i> Edit Game</button>
-                    <button onclick="vsDeleteGame(${i})" class="bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold py-2 rounded-xl text-xs border border-red-500/40 flex items-center justify-center gap-1.5"><i class="fa-solid fa-trash text-[10px]"></i> Delete Game</button>
+                    <button onclick="vsEditGame(${i})" class="bg-[#00B4AE]/15 hover:bg-[#00B4AE]/25 text-[#00F296] font-bold py-2 rounded-xl text-xs border border-[#00B4AE]/50 flex items-center justify-center gap-1.5"><i class="fa-solid fa-pen text-[10px]"></i> Edit Match</button>
+                    <button onclick="vsDeleteGame(${i})" class="bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold py-2 rounded-xl text-xs border border-red-500/40 flex items-center justify-center gap-1.5"><i class="fa-solid fa-trash text-[10px]"></i> Delete Match</button>
                 </div>
             </div></div>`).join('')}
     </div>`;
@@ -2112,7 +2113,7 @@ window.vsEditGoalPicker = function (teamId) {
     const teamOf = (id) => (m.teams || []).find(t => t.teamId === id) || { teamId: id, name: 'Team' };
     const entry = teamOf(teamId), other = teamOf(teamId === E.a ? E.b : E.a);
     const row = (p, own) => { const nm = p.uid ? personName(p.uid, p.name) : p.name; return `<button onclick="vsEditAddGoal('${jsq(teamId)}','${jsq(nm)}',${own ? 'true' : 'false'},'${jsq(p.uid || '')}')" class="w-full flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl border border-white/10 text-left">
-        <img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover"><span class="text-xs font-bold">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span></button>`; };
+        <img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-7 h-7 rounded-full object-cover"><span class="text-xs font-bold">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span></button>`; };
     const mine = playersOfTeam(entry), theirs = playersOfTeam(other);
     sheet('vs-edit-goal', `Goal for ${esc(entry.name || 'team')}`, `
         <div class="space-y-2">${mine.map(p => row(p, false)).join('') || '<p class="text-xs text-white/55">No players listed for this team.</p>'}</div>
@@ -2321,7 +2322,7 @@ function statsHtml(m) {
     };
     const chip = (g, side) => `<div class="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 min-w-0">
         <i class="fa-solid fa-futbol ${side ? 'text-red-400' : 'text-[#00F296]'} text-[9px]"></i>
-        ${g.name ? `<img src="${esc(photoFor(g))}" onerror="this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover">` : ''}
+        ${g.name ? `<img src="${esc(photoFor(g))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover">` : ''}
         <span class="text-white font-bold text-[10px] truncate flex-1">${esc(goalName(g))}</span>
         <span class="shrink-0">${teamLogoHtml(teamOf(g.teamId), 16)}</span></div>`;
     const tabBtn = (k, label) => `<button onclick="vsStatsSub('${k}')" class="flex-1 py-2 rounded-xl text-xs font-black transition ${sub === k ? 'bg-[#00F296] text-slate-950 shadow' : 'text-white/70 hover:text-white'}">${label}</button>`;
@@ -2361,7 +2362,7 @@ function statsHtml(m) {
                     <td class="py-3 pl-4 pr-2"><div class="flex items-center gap-2.5 min-w-0"><span class="text-white/50 font-semibold w-4 text-right shrink-0">${i + 1}</span><span class="shrink-0">${teamLogoHtml(teamOf(t.id), 24)}</span><span class="font-bold truncate">${esc(teamOf(t.id).name)}</span>${t.live ? '<span class="w-2 h-2 rounded-full bg-[#00F296] inline-block animate-ping shrink-0" title="Playing live now"></span>' : ''}<i class="fa-solid fa-chevron-${open ? 'up' : 'down'} text-[9px] text-white/30 shrink-0"></i></div></td>
                     <td class="py-3 px-1.5 text-center text-white/80">${t.p}</td><td class="py-3 px-1.5 text-center text-white/80">${t.w}</td><td class="py-3 px-1.5 text-center text-white/80">${t.d}</td><td class="py-3 px-1.5 text-center text-white/80">${t.l}</td>
                     <td class="py-3 px-1.5 text-center text-white/80">${t.gd >= 0 ? '+' + t.gd : t.gd}</td><td class="py-3 pl-1.5 pr-4 text-center font-black text-[#00F296]">${t.pts}</td></tr>
-                ${open ? `<tr class="border-b border-white/5"><td colspan="7"><div class="flex flex-wrap gap-1.5 pb-3 pl-[46px] pr-4">${ps.length ? ps.map(p => { const nm = p.uid ? personName(p.uid, p.name) : p.name; return `<div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full"><img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover"><span class="text-[10px] font-bold">${esc(String(nm || '').split(' ')[0])}</span></div>`; }).join('') : '<span class="text-[10px] text-white/40 italic">No players listed</span>'}</div></td></tr>` : ''}`; }).join('')}</tbody></table></div>`;
+                ${open ? `<tr class="border-b border-white/5"><td colspan="7"><div class="flex flex-wrap gap-1.5 pb-3 pl-[46px] pr-4">${ps.length ? ps.map(p => { const nm = p.uid ? personName(p.uid, p.name) : p.name; return `<div class="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2 py-1 rounded-full"><img src="${esc(personAvatar(p.uid || '', p.avatar, nm))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-5 h-5 rounded-full object-cover"><span class="text-[10px] font-bold">${esc(String(nm || '').split(' ')[0])}</span></div>`; }).join('') : '<span class="text-[10px] text-white/40 italic">No players listed</span>'}</div></td></tr>` : ''}`; }).join('')}</tbody></table></div>`;
     } else {
         const all = [...results.flatMap(r => r.goals || []), ...(m.live ? m.live.goals || [] : []), ...(m.live2 ? m.live2.goals || [] : [])];
         const sc = {};
@@ -2372,11 +2373,11 @@ function statsHtml(m) {
         body = `<div class="bg-black/40 border border-emerald-500/30 rounded-2xl overflow-hidden shadow-xl"><table class="w-full text-left border-collapse text-xs">
             <thead><tr class="bg-black/60 border-b border-white/10 text-white/70 uppercase font-black text-[10px]"><th class="p-3">Player</th><th class="p-3 text-right">Goals</th></tr></thead>
             <tbody class="divide-y divide-white/10">${top.length ? top.map(({ g, n }, i) => `<tr class="hover:bg-white/5"><td class="p-3 font-bold"><div class="flex items-center gap-2.5 min-w-0"><span class="${i < 3 ? 'text-[#FACC15]' : 'text-white/40'} font-black">#${i + 1}</span>
-                <img src="${esc(photoFor(g))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover border border-white/20">
+                <img src="${esc(photoFor(g))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover border border-white/20">
                 <span class="min-w-0"><span class="block truncate">${esc(g.name)}</span><span class="flex items-center gap-1 text-[10px] text-white/50 font-normal">${teamLogoHtml(teamOf(g.teamId), 14)}${esc(teamOf(g.teamId).name)}</span></span></div></td>
                 <td class="p-3 text-right font-black text-[#00F296] whitespace-nowrap">⚽ ${n}</td></tr>`).join('') : '<tr><td colspan="2" class="p-6 text-center text-white/40 italic">No goalscorers recorded yet.</td></tr>'}</tbody></table></div>
             ${Object.keys(own).length ? `<div class="bg-red-500/10 border border-red-500/30 rounded-2xl p-3 space-y-2"><div class="text-[10px] font-black uppercase tracking-wider text-red-300">🙈 Own goals (oops)</div>
-                ${Object.values(own).map(({ g, n }) => `<div class="flex items-center gap-2 text-xs"><img src="${esc(photoFor({ ...g, teamId: '' }))}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover grayscale"><span class="flex-1 font-bold truncate">${esc(g.name)}</span><span class="font-black text-red-300">${n}</span></div>`).join('')}</div>` : ''}`;
+                ${Object.values(own).map(({ g, n }) => `<div class="flex items-center gap-2 text-xs"><img src="${esc(photoFor({ ...g, teamId: '' }))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover grayscale"><span class="flex-1 font-bold truncate">${esc(g.name)}</span><span class="font-black text-red-300">${n}</span></div>`).join('')}</div>` : ''}`;
     }
     return `<div class="space-y-4 py-1">
         <div class="bg-black/40 border border-emerald-500/30 p-1 rounded-2xl flex items-center gap-1">${tabBtn('matches', 'Matches')}${tabBtn('leaderboard', 'Leaderboard')}${tabBtn('top-scorers', 'Top Scorers')}</div>
@@ -2469,7 +2470,7 @@ function commentsHtml(m) {
     return `<div class="space-y-3">
         <div class="flex justify-end">${window.muteButtonHtml ? window.muteButtonHtml('vs_' + m.id, 'this match') : ''}</div>
         <div class="space-y-2">${list.map(c => `<div class="flex items-start gap-2">
-            <img src="${esc(personAvatar(c.byUid, c.avatar, c.byName))}" onerror="this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover shrink-0">
+            <img src="${esc(personAvatar(c.byUid, c.avatar, c.byName))}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-8 h-8 rounded-full object-cover shrink-0">
             <div class="min-w-0 flex-1 ${c.announce ? 'bg-amber-400/10 border-amber-400/40' : 'bg-black/40 border-white/10'} border rounded-2xl px-3 py-2">
                 <div class="flex items-baseline justify-between gap-2"><span class="text-xs font-black truncate">${c.announce ? '📣 ' : ''}${esc(c.byName || 'Player')}${c.announce ? ' <span class="text-[9px] font-black text-amber-300">ORGANIZER</span>' : ''}</span><span class="text-[10px] text-white/45 shrink-0">${msTs(c.at) ? esc(new Date(msTs(c.at)).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : ''}</span></div>
                 <div class="text-sm text-white/90 whitespace-pre-wrap break-words">${smartText(c.text)}</div>
@@ -2547,7 +2548,7 @@ window.openVsTeamCard = function (teamId) {
     const pct = price ? Math.min(100, Math.round(paid * 100 / price)) : 100;
     const H = (x) => `<div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">${x}</div>`;
     const chip = (p) => { const nm = p.uid ? personName(p.uid, p.name) : p.name;
-        return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold"><img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span>`; };
+        return `<span class="flex items-center gap-1.5 rounded-full bg-white/10 pl-1 pr-2.5 py-1 text-[11px] font-bold"><img src="${esc(p.uid ? personAvatar(p.uid, p.avatar, nm) : DEFAULT_AV)}" onerror="this.onerror=null;this.src='${DEFAULT_AV}'" class="w-6 h-6 rounded-full object-cover">${p.number ? esc(p.number) + ' · ' : ''}${esc(nm)}</span>`; };
     const methodName = { cash: 'Cash', venmo: 'Venmo', zelle: 'Zelle', cashapp: 'Cash App', applepay: 'Apple Pay', other: 'Other' };
     sheet('vs-teamcard', esc(t.name), `
         <div class="flex items-center gap-3">${teamLogoHtml(t, 56)}

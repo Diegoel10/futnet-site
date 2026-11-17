@@ -71,7 +71,7 @@ export function renderAdminTab(event) {
                 <div class="bg-black/40 border border-white/10 p-3 rounded-2xl space-y-2">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-3 overflow-hidden">
-                            <img src="${attAvatar}" class="w-8 h-8 rounded-full object-cover bg-black border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <img src="${attAvatar}" class="w-8 h-8 rounded-full object-cover bg-black border border-white/20 shrink-0" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate">
                                 <div class="flex items-center gap-1.5 flex-wrap">
                                     <span class="text-xs font-bold text-white truncate">${att.name || 'Player'}</span>
@@ -168,7 +168,7 @@ export function renderAdminTab(event) {
                 return `
                     <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1.5 rounded-full border border-white/10 text-xs min-w-0">
                         <i class="fa-solid fa-futbol text-[#00F296] text-[10px]"></i>
-                        <img src="${avatar}" class="w-5 h-5 shrink-0 rounded-full object-cover border border-[#00F296]/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${avatar}" class="w-5 h-5 shrink-0 rounded-full object-cover border border-[#00F296]/40" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="text-white font-bold truncate min-w-0 flex-1 whitespace-nowrap">${scorer}</span>
                     </div>
                 `;
@@ -179,7 +179,7 @@ export function renderAdminTab(event) {
                 return `
                     <div class="flex items-center gap-1.5 bg-black/50 px-2.5 py-1.5 rounded-full border border-white/10 text-xs min-w-0">
                         <i class="fa-solid fa-futbol text-red-400 text-[10px]"></i>
-                        <img src="${avatar}" class="w-5 h-5 shrink-0 rounded-full object-cover border border-red-400/40" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${avatar}" class="w-5 h-5 shrink-0 rounded-full object-cover border border-red-400/40" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="text-white font-bold truncate min-w-0 flex-1 whitespace-nowrap">${scorer}</span>
                     </div>
                 `;

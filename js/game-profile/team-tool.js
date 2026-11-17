@@ -707,7 +707,7 @@ export function renderTeamToolTab(event) {
                     const pUid = p?.uid || '';
                     return `
                         <div class="flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl border text-xs shadow-md" style="border-color: ${tColor};">
-                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <span class="font-bold text-white">${escapeHtml(pName)}${waitTag(event, pUid)} ${isCap ? CAP_BADGE : ''}</span>
                             ${canEditTeam(event, i) ? `<button data-action="unassign-team-slot" data-event-id="${event.id}" data-team-index="${i}" data-uid="${pUid}" class="text-white/40 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>` : ''}
                         </div>
@@ -743,7 +743,7 @@ export function renderTeamToolTab(event) {
                 const aName = a?.name || 'Player';
                 return `
                     <div class="flex items-center gap-2 bg-black/60 px-3 py-2 rounded-2xl border border-white/10 text-xs">
-                        <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${aAvatar}" class="w-6 h-6 rounded-full object-cover" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <span class="font-bold text-white">${escapeHtml(aName)}</span>${subTag(a)}
                     </div>
                 `;
@@ -792,7 +792,7 @@ export function renderTeamToolTab(event) {
                     const pAvatar = resolvePlayerAvatar(p, event.attendees);
                     rowSlots += `
                         <div ${canEdit ? `data-action="prompt-remove-slot"` : ''} data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${slotIdx}" data-player-name="${escapeHtml(p.name || '')}" class="flex-1 min-w-0 max-w-[7rem] h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 relative group transition hover:scale-105" style="border-color: ${currentAccent};">
-                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <img src="${pAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div class="truncate text-left leading-tight pointer-events-none">
                                 <span class="text-[6px] font-black uppercase block tracking-wider" style="color: ${currentAccent};">${positionName}</span>
                                 <span class="text-[9px] font-black text-white truncate block">${escapeHtml(p.name)}</span>
@@ -818,7 +818,7 @@ export function renderTeamToolTab(event) {
             rowsHtml += `
                 <div class="flex justify-center mt-3">
                     <div ${canEdit ? `data-action="prompt-remove-slot"` : ''} data-event-id="${event.id}" data-team-index="${teamIdx}" data-slot-index="${goalieSlotIdx}" data-player-name="${escapeHtml(goaliePlayer.name || '')}" class="w-28 h-10 bg-black/90 border-2 rounded-full px-2 text-center cursor-pointer shadow-lg flex items-center gap-1.5 transition hover:scale-105" style="border-color: ${currentAccent};">
-                        <img src="${gAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                        <img src="${gAvatar}" class="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                         <div class="truncate text-left leading-tight pointer-events-none">
                             <span class="text-[6px] font-black uppercase block tracking-wider text-amber-400">GK</span>
                             <span class="text-[9px] font-black text-white truncate block">${escapeHtml(goaliePlayer.name)}</span>
@@ -851,7 +851,7 @@ export function renderTeamToolTab(event) {
                 return `
                     <div class="flex items-center justify-between p-3 bg-black/60 rounded-2xl border border-white/10 text-xs shadow-sm">
                         <div class="flex items-center gap-3">
-                            <img src="${pAvatar}" class="w-8 h-8 rounded-full object-cover border border-white/20" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <img src="${pAvatar}" class="w-8 h-8 rounded-full object-cover border border-white/20" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <div>
                                 <div class="font-bold text-white">${escapeHtml(pName)} ${isCap ? CAP_BADGE + ' <span class="text-[10px] text-amber-300">Captain</span>' : ''}</div>
                                 <div class="text-[10px] text-white/50">${pPos}</div>
@@ -904,7 +904,7 @@ export function renderTeamToolTab(event) {
                     </div>
                 </div>`}
 
-                <div class="relative border-2 rounded-3xl p-3 shadow-2xl overflow-hidden min-h-[440px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.png'); background-size: cover; background-position: center; border-color: ${currentAccent};">
+                <div class="relative border-2 rounded-3xl p-3 shadow-2xl overflow-hidden min-h-[440px] flex flex-col justify-between bg-[#03140C]" style="background-image: url('img/TeamBuildField.jpg'); background-size: cover; background-position: center; border-color: ${currentAccent};">
                     <div class="absolute inset-0 bg-black/50 pointer-events-none"></div>
 
                     <div class="flex justify-between items-center relative z-10">
@@ -1075,7 +1075,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                                 const pAvatar = resolvePlayerAvatar(p, event.attendees);
                                 return `
                                     <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                                        <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                                        <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                                         <span class="text-xs font-bold text-white">${escapeHtml(p.name)} (Move)</span>
                                     </div>
                                 `;
@@ -1098,7 +1098,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                         const pAvatar = resolvePlayerAvatar(p, event.attendees);
                         return `
                             <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}',${teamIndex}, ${slotIndex}, '${p.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                                <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                                <img src="${pAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                                 <span class="text-xs font-bold text-white">${escapeHtml(p.name)}</span>
                             </div>
                         `;
@@ -1136,7 +1136,7 @@ window.openAssignPicker = function(eventId, teamIndex, slotIndex) {
                     const aAvatar = resolvePlayerAvatar(a, event.attendees);
                     return `
                         <div onclick="document.getElementById('assign-picker-modal')?.remove(); window.assignPlayerToSlot('${event.id}', ${teamIndex}, null, '${a.uid}')" class="flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl cursor-pointer transition">
-                            <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                            <img src="${aAvatar}" class="w-7 h-7 rounded-full object-cover" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
                             <span class="text-xs font-bold text-white">${escapeHtml(a.name)}</span>${subTag(a)}
                         </div>
                     `;
@@ -1553,7 +1553,7 @@ function renderCapsTab(event) {
     const canPick = myPickTeam(event) !== null && pool.length > 0;
     const live = d.status === 'live';
     const capName = (i) => (teamList(ta, i).find(p => String(p.uid) === captainOf(event, i)) || {}).name || 'Captain';
-    const avatar = (p) => `<img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.src='${AV_FALLBACK}'">`;
+    const avatar = (p) => `<img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-8 h-8 rounded-full object-cover border border-white/20 shrink-0" onerror="this.onerror=null;this.src='${AV_FALLBACK}'">`;
 
     // A captain who cancelled (or was removed from the game): the admin picks a new one.
     const goingIds = new Set(getFlattenedPlayersList(event.attendees).map(p => String(p.uid)));
@@ -1568,7 +1568,7 @@ function renderCapsTab(event) {
             <div class="text-[10px] font-black uppercase tracking-wider ${mine ? '' : 'text-white/60'}">Pick ${(d.picks || []).length + 1}${makeUp ? ' · extra pick: a player on this team cancelled' : ''}</div>
             ${mine ? `<div class="text-sm font-black">🧢 It's your turn! Pick a player</div>` : noCap.includes(turn) ? `<div class="text-sm font-black">${escapeHtml(names[turn])} needs a new captain before picking</div>` : (() => {
                 const cp = teamList(ta, turn).find(p => String(p.uid) === captainOf(event, turn)) || { uid: captainOf(event, turn), name: capName(turn) };
-                return `<div class="flex items-center justify-center gap-2.5 mt-1"><img src="${escapeHtml(resolvePlayerAvatar(cp, event.attendees))}" class="w-10 h-10 rounded-full object-cover border-2" style="border-color:${window.teamAccent(colors[turn])}" onerror="this.src='${AV_FALLBACK}'">
+                return `<div class="flex items-center justify-center gap-2.5 mt-1"><img src="${escapeHtml(resolvePlayerAvatar(cp, event.attendees))}" class="w-10 h-10 rounded-full object-cover border-2" style="border-color:${window.teamAccent(colors[turn])}" onerror="this.onerror=null;this.src='${AV_FALLBACK}'">
                     <div class="text-sm font-black text-left">Waiting for ${escapeHtml(capName(turn))}<div class="text-[10px] font-bold text-white/60">${escapeHtml(names[turn])} is picking…</div></div></div>`;
             })()}</div>`;
     } else banner = `<div class="bg-black/50 border border-white/15 rounded-2xl p-3 text-center text-xs font-black text-white">🧢 Open pick: captains pick whenever they want.</div>`;
@@ -1657,7 +1657,7 @@ window.openCapsPicker = function(eventId, chosenTeam) {
             </div>
             ${teamChooser || `<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">${pool.map(p => `
                 <button onclick="window.capsPick('${jsArg(eventId)}', ${team}, '${jsArg(String(p.uid))}')" class="w-full flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl text-left transition">
-                    <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-9 h-9 rounded-full object-cover border border-white/20" onerror="this.src='${AV_FALLBACK}'">
+                    <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-9 h-9 rounded-full object-cover border border-white/20" onerror="this.onerror=null;this.src='${AV_FALLBACK}'">
                     <div class="min-w-0"><div class="text-xs font-bold text-white truncate">${escapeHtml(p.name)}</div><div class="text-[10px] text-white/50">${escapeHtml(p.isHostGuest ? 'Guest' : (p.position || 'Player'))}</div></div>
                 </button>`).join('') || '<p class="text-xs text-white/50 text-center py-4">Everyone has been picked.</p>'}</div>`}
         </div>`;
@@ -1720,7 +1720,7 @@ window.openCapsPosition = function(eventId, team, uid) {
     const spot = (i, label) => {
         const p = takenBy[i];
         if (p) return `<div class="flex-1 max-w-[6rem] h-10 bg-black/80 border-2 rounded-full px-1.5 flex items-center gap-1 opacity-70" style="border-color:${accent}">
-            <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-6 h-6 rounded-full object-cover" onerror="this.src='${AV_FALLBACK}'"><span class="text-[8px] font-black text-white truncate">${escapeHtml(p.name)}</span></div>`;
+            <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-6 h-6 rounded-full object-cover" onerror="this.onerror=null;this.src='${AV_FALLBACK}'"><span class="text-[8px] font-black text-white truncate">${escapeHtml(p.name)}</span></div>`;
         return `<button onclick="window.capsSetSlot('${jsArg(eventId)}', ${team}, '${jsArg(String(uid))}', ${i})" class="flex-1 max-w-[6rem] h-10 bg-black/60 hover:bg-[#00F296]/25 border-2 border-dashed rounded-full text-[10px] font-black text-white transition" style="border-color:${accent}">${label}</button>`;
     };
     let rowsHtml = '';
@@ -1732,7 +1732,7 @@ window.openCapsPosition = function(eventId, team, uid) {
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-sm w-full p-4 space-y-3 shadow-2xl text-white pointer-events-auto">
             <div class="text-center"><div class="text-[10px] font-black uppercase tracking-wider text-[#00F296]">Pick position</div>
                 <div class="text-sm font-black">${escapeHtml(who.name || 'Player')}</div></div>
-            <div class="relative border-2 rounded-2xl p-3 bg-[#03140C] overflow-hidden" style="background-image:url('img/TeamBuildField.png');background-size:cover;background-position:center;border-color:${accent}">
+            <div class="relative border-2 rounded-2xl p-3 bg-[#03140C] overflow-hidden" style="background-image:url('img/TeamBuildField.jpg');background-size:cover;background-position:center;border-color:${accent}">
                 <div class="absolute inset-0 bg-black/50 pointer-events-none"></div><div class="relative z-10 py-1">${rowsHtml}</div></div>
             <button onclick="window.capsSetSlot('${jsArg(eventId)}', ${team}, '${jsArg(String(uid))}', -1)" class="w-full bg-black/60 border border-white/20 text-white font-bold py-2.5 rounded-xl text-xs">Skip (any open spot)</button>
         </div>`;
@@ -1856,7 +1856,7 @@ window.openCapsCaptainPicker = function(eventId, team) {
     const mates = teamList(event.teamAssignments, team).filter(p => String(p.uid) !== cur && !p.isHostGuest);
     const pool = draftPool(event, event.teamAssignments).filter(p => !p.isHostGuest);
     const row = (p, from) => `<button onclick="window.capsSetCaptain('${jsArg(eventId)}', ${team}, '${jsArg(String(p.uid))}')" class="w-full flex items-center gap-3 p-2.5 bg-black/40 hover:bg-black border border-white/10 rounded-xl text-left">
-        <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-8 h-8 rounded-full object-cover" onerror="this.src='${AV_FALLBACK}'">
+        <img src="${escapeHtml(resolvePlayerAvatar(p, event.attendees))}" class="w-8 h-8 rounded-full object-cover" onerror="this.onerror=null;this.src='${AV_FALLBACK}'">
         <span class="text-xs font-bold text-white flex-1 truncate">${escapeHtml(p.name || 'Player')}</span><span class="text-[9px] text-white/50">${from}</span></button>`;
     let m = document.getElementById('assign-picker-modal');
     if (!m) { m = document.createElement('div'); m.id = 'assign-picker-modal'; m.className = 'fixed inset-0 z-[190] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm pointer-events-auto'; document.body.appendChild(m); }

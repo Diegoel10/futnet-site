@@ -193,7 +193,7 @@ window.openBlockedList = function () {
         <p class="text-[11px] text-white/55">You don't see their messages, posts or comments, and you don't get notifications about them.</p>
         ${list.length ? list.map(([uid, v]) => `
             <div class="flex items-center gap-3 bg-white/5 rounded-xl p-2.5">
-                <img src="${esc(photo(uid, v && v.name))}" onerror="this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-9 h-9 rounded-full object-cover">
+                <img src="${esc(photo(uid, v && v.name))}" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'" class="w-9 h-9 rounded-full object-cover">
                 <span class="flex-1 min-w-0 text-xs font-bold truncate">${esc((v && v.name) || 'Player')}</span>
                 <button onclick="unblockPlayer('${jsq(uid)}')" class="text-[11px] font-black text-[#00F296] border border-[#00F296]/50 rounded-full px-3 py-1.5">Unblock</button>
             </div>`).join('') : '<p class="text-xs text-white/45 text-center py-6">Nobody is blocked.</p>'}`, 'blocked-list-sheet');

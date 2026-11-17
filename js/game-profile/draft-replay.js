@@ -330,7 +330,7 @@ function youMark(ctx, x, y, r) {
 export async function teamCardFiles(ev) {
     await loadFonts();
     const d = await dataOf(ev);
-    const pitch = await loadImage('img/TeamBuildField.png');
+    const pitch = await loadImage('img/TeamBuildField.jpg');
     const out = [];
     const make = async (key, title, teamIndex, fn) => {
         const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -350,7 +350,7 @@ export async function teamCardFiles(ev) {
 let personalCache = null;
 export async function personalCardFile(ev, teamIndex, uid, line) {
     await loadFonts();
-    if (!personalCache || personalCache.id !== ev.id) personalCache = { id: ev.id, d: await dataOf(ev), pitch: await loadImage('img/TeamBuildField.png') };
+    if (!personalCache || personalCache.id !== ev.id) personalCache = { id: ev.id, d: await dataOf(ev), pitch: await loadImage('img/TeamBuildField.jpg') };
     const { d, pitch } = personalCache;
     const t = d.teams[teamIndex]; if (!t) return null;
     const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -368,7 +368,7 @@ window.openTeamCard = async function(eventId) {
     const m = modalShell('team-card-modal', '📸 Team cards');
     await loadFonts();
     const d = await dataOf(ev);
-    const pitch = await loadImage('img/TeamBuildField.png');
+    const pitch = await loadImage('img/TeamBuildField.jpg');
     const cards = [];
     const make = async (key, title, fn) => {
         const c = document.createElement('canvas');

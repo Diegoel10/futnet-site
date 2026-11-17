@@ -209,7 +209,7 @@ const photoOf = (who) => {
     const d = (window.directoryList || []).find(u => String(u.uid) === String(who.uid));
     return safeImg(d?.avatar || d?.photoURL || who.avatar);
 };
-const photoImg = (who, cls) => `<img src="${esc(photoOf(who))}" class="${cls} rounded-full object-cover shrink-0" onerror="this.src='${DEFAULT_AVATAR}'">`;
+const photoImg = (who, cls) => `<img src="${esc(photoOf(who))}" class="${cls} rounded-full object-cover shrink-0" onerror="this.onerror=null;this.src='${DEFAULT_AVATAR}'">`;
 
 const ledgerLine = (l, showName) => {
     const plus = (l.amountCents || 0) > 0;
