@@ -5,6 +5,7 @@
 // Drawn on a <canvas>, so they can be shared straight to WhatsApp or downloaded.
 
 import { mountShareBar } from './card-share.js';
+import { loadCardLines, pickLine, twoLines, spiceSwitchHtml, wireSpiceSwitch } from '../card-lines.js';
 
 const W = 1400, H = 1120;
 const GREEN = '#00F296';
@@ -284,7 +285,7 @@ function footer(ctx) {
 }
 
 function scribble(ctx, str, x, y, rot, color = GREEN, size = 40) {
-    text(ctx, str, x, y, { font: `${size}px ${MARKER}`, color, rotate: rot });
+    text(ctx, str, x, y, { font: `${size}px ${MARKER}`, color, rotate: rot, maxWidth: 400 });
 }
 
 /** Lays out photos in rows so any team size fits. Returns the y after the last row. */
@@ -382,7 +383,7 @@ async function drawChampions(ctx, d, assets) {
     const color = d.accent(t.color);
     background(ctx, assets.bg, color);
     header(ctx, assets.logo, d.info);
-    scribble(ctx, pick(WIN_LINES, d.seed), W - 210, 110, -0.18, GREEN, 38);
+    scribble(ctx, twoLines(d.lines.win), W - 210, 110, -0.18, d.spicy ? '#FB923C' : GREEN, 38);
 
     brush(ctx, W / 2, 238, 820, 150, '#1D4ED8', 3);
     text(ctx, '🏆 CHAMPIONS', W / 2, 236, { font: `110px ${MARKER}`, color: '#ffffff', maxWidth: 780 });
@@ -449,12 +450,12 @@ async function drawLosers(ctx, d, assets) {
     const color = d.accent(t.color);
     background(ctx, assets.bg, RED);
     header(ctx, assets.logo, d.info);
-    scribble(ctx, pick(LOSER_SIDE, d.seed), W - 230, 110, -0.16, '#FCA5A5', 36);
+    scribble(ctx, twoLines(d.lines.loseSide), W - 230, 110, -0.16, '#FCA5A5', 36);
 
     brush(ctx, W / 2, 238, 760, 150, RED, 9);
     text(ctx, '😂 LOSERS', W / 2, 236, { font: `118px ${MARKER}`, color: '#0b0f14', shadow: false, maxWidth: 720 });
     text(ctx, t.name.toUpperCase(), W / 2, 352, { font: fitFont(ctx, t.name.toUpperCase(), BLOCK, '', 66, 1000), color, stroke: { width: 6, color: 'rgba(0,0,0,0.6)' } });
-    text(ctx, pick(LOSER_LINES, d.seed).replace('\n', ' '), W / 2, 422, { font: `40px ${MARKER}`, color: '#fff', rotate: -0.015, maxWidth: 1240 });
+    text(ctx, d.lines.lose, W / 2, 422, { font: `40px ${MARKER}`, color: '#fff', rotate: -0.015, maxWidth: 1240 });
 
     const gd = t.gf - t.ga;
     statPills(ctx, [[t.points, 'POINTS', '#FCA5A5'], [t.wins, 'WINS'], [t.draws, 'DRAWS'], [t.losses, 'LOSSES', RED], [gd > 0 ? '+' + gd : gd, 'GOAL DIFF', RED]], 470, RED);
@@ -483,6 +484,13 @@ export async function makeCelebrationCards(results, info, opts = {}) {
         accent: opts.accent || (c => c),
         seed: Math.floor(Math.random() * 1000),
     };
+    // 🃏 the jokes: from the card lines list (Manager), Friendly or 🌶 Spicy = the organizer's pick
+    const all = await loadCardLines();
+    const spice = opts.spice === 'spicy' ? 'spicy' : 'friendly';
+    d.spicy = spice === 'spicy';
+    d.lines = { win: pickLine(all, 'win', spice, d.seed), lose: pickLine(all, 'lose', spice, d.seed) };
+    d.lines.loseSide = pickLine(all, 'lose', spice, d.seed + 1);
+    if (d.lines.loseSide === d.lines.lose) d.lines.loseSide = pickLine(all, 'lose', spice, d.seed + 2);
     const out = [];
     const make = async (key, title, fn) => {
         const c = document.createElement('canvas');
@@ -530,9 +538,16 @@ export async function openCelebrationCards(results, info, opts = {}) {
             </div>
             ${tainted ? `<div class="text-xs bg-amber-500/10 border border-amber-400/40 rounded-xl p-3">Some photos couldn't be added to the images. Take a screenshot of each one instead.</div>` : ''}
             ${cards.length ? '' : '<p class="text-sm text-white/60">No results to share yet.</p>'}
+            ${opts.canSpice ? `<div id="cc-spice">${spiceSwitchHtml(opts.spice === 'spicy' ? 'spicy' : 'friendly')}</div>` : ''}
             <div id="cc-share-bar"></div>
             <div id="celebration-cards-list" class="space-y-5"></div>
         </div>`;
+    const sw = m.querySelector('#cc-spice');
+    if (sw) wireSpiceSwitch(sw, async (v) => {
+        if (v === opts.spice || !opts.onSpice) return;
+        try { await opts.onSpice(v); } catch (e) { window.showToast && window.showToast("Couldn't save it.", 'error'); return; }
+        openCelebrationCards(results, info, { ...opts, spice: v });
+    });
     mountShareBar(m.querySelector('#cc-share-bar'), cards.map((c, i) => ({ title: c.title, file: files[i] })),
         { eventId: opts.eventId, communityId: opts.communityId, caption: `🏆 ${info.title || 'Game'} results${info.date ? ' · ' + (window.fmtGameDate || String)(info.date) : ''}` });
     const list = m.querySelector('#celebration-cards-list');

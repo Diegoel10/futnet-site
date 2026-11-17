@@ -4,6 +4,8 @@
 // 2) "Team card": one image with every team (captain first, gold C), like the celebration cards.
 import { cardKit, loadFonts } from './celebration-cards.js';
 import { mountShareBar } from './card-share.js';
+import { makePregameCanvas } from '../pregame-card.js';
+import { loadCardLines, pickLine, spiceOf, spiceSwitchHtml, wireSpiceSwitch } from '../card-lines.js';
 
 const { W, H, GREEN, GOLD, BLOCK, BODY, loadImage, background, rr, text, fitFont, avatar, header, footer, toBlob } = cardKit;
 const AV_FALLBACK = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -47,6 +49,29 @@ async function dataOf(ev) {
     ]);
     const info = [ev.date, ev.location].filter(Boolean).join('  ·  ');
     return { ev, count, teams, picks, imgs, bg, logo, title: ev.title || 'FutNet game', info, people };
+}
+
+// ⚔️ The pre-game card (A vs B with the rosters), first in the team cards. Null with fewer than 2 teams with players.
+async function pregameCanvas(d, ev, seed) {
+    const teams = d.teams.filter(t => t.players.length).map(t => ({
+        name: t.name, color: t.color, crest: null,
+        players: t.players.map(p => ({ name: p.name, img: d.imgs[String(p.uid)] || null, captain: t.captain === p })),
+    }));
+    if (teams.length < 2) return null;
+    const spice = spiceOf(ev, 'friendly');
+    const all = await loadCardLines();
+    return makePregameCanvas({
+        info: { title: ev.title || '', date: ev.date ? (window.fmtGameDate || String)(ev.date) : '', time: ev.time || '', location: ev.locationName || ev.location || '', format: ev.format || ev.gameFormat || '' },
+        line: pickLine(all, 'pregame', spice, seed), spicy: spice === 'spicy', teams,
+    });
+}
+const canSpice = (ev) => !!(window.currentUser && ev && (String(ev.organizerId) === String(window.currentUser.uid) || (ev.communityId && (window.myCommunityRoles || {})[ev.communityId] === 'admin')));
+/** Organizer: Friendly / 🌶 Spicy for this game's cards (saved on the game, everyone's cards follow it). */
+export async function saveEventSpice(eventId, spice) {
+    const { mutateEvent } = await import('./event-store.js');
+    const r = await mutateEvent(eventId, (draft) => { if (draft.cardSpice === spice) return false; draft.cardSpice = spice; });
+    const ev = (window.eventsList || []).find(e => e.id === eventId); if (ev) ev.cardSpice = spice;
+    return r;
 }
 
 // ---------------------------------------------------------------- layout
@@ -339,6 +364,8 @@ export async function teamCardFiles(ev) {
         try { file = new File([await toBlob(c)], `${slug(d.title)}-${key}.jpg`, { type: 'image/jpeg' }); } catch (e) { /* photo blocked */ }
         out.push({ key, title, teamIndex, file });
     };
+    const pre = await pregameCanvas(d, ev, Math.floor(Math.random() * 1000));
+    if (pre) await make('gameday', 'Game day', -1, async (ctx) => ctx.drawImage(pre, 0, 0));
     await make('teams', 'All teams', -1, async (ctx) => drawFrame(ctx, d, { shownPicks: [], heading: 'THE TEAMS', sub: (d.info || d.title).toUpperCase(), finalTeams: true }));
     for (let i = 0; i < d.teams.length; i++) {
         if (!d.teams[i].players.length) continue;
@@ -376,6 +403,8 @@ window.openTeamCard = async function(eventId) {
         await fn(c.getContext('2d'));
         cards.push({ key, title, canvas: c });
     };
+    const pre = await pregameCanvas(d, ev, Math.floor(Math.random() * 1000));
+    if (pre) cards.push({ key: 'gameday', title: '⚔️ Game day', canvas: pre });
     await make('teams', 'All teams', async (ctx) => drawFrame(ctx, d, { shownPicks: [], heading: 'THE TEAMS', sub: (d.info || d.title).toUpperCase(), finalTeams: true }));
     for (let i = 0; i < d.teams.length; i++) {
         if (!d.teams[i].players.length) continue;
@@ -387,6 +416,10 @@ window.openTeamCard = async function(eventId) {
     }
     const body = m.querySelector('[data-body]');
     body.innerHTML = '<p class="text-[11px] text-white/60">Send them one by one so each one pops in the chat.</p>';
+    if (canSpice(ev)) {
+        const sw = document.createElement('div'); sw.innerHTML = spiceSwitchHtml(spiceOf(ev, 'friendly')); body.appendChild(sw);
+        wireSpiceSwitch(sw, async (v) => { if (v === spiceOf(ev, 'friendly')) return; await saveEventSpice(ev.id, v); window.openTeamCard(eventId); });
+    }
     if (files.some(f => !f)) body.innerHTML += '<p class="text-xs text-amber-300">Some photos couldn\'t be added. Take a screenshot instead.</p>';
     const bar = document.createElement('div');
     body.appendChild(bar);

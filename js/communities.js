@@ -1316,11 +1316,16 @@ const LBF = {};   // communityId -> { teams, format, day, park }
 const LB_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const lbDow = (ev) => { const [y, m, d] = String(ev.date || '').slice(0, 10).split('-').map(Number); return y ? LB_DOW[new Date(y, m - 1, d).getDay()] : ''; };
 const lbPark = (ev) => String(ev.location || '').split(',')[0].trim();
+const LB_VS = {};   // communityId -> { matches, teams }: this community's VS matches count too (loaded when the leaderboard opens)
 function leaderboardHtml(c, tab) {
-    const all = (window.eventsList || []).filter(e => e.communityId === c.id);
+    const vs = LB_VS[c.id] || { matches: [], teams: {} };
+    const all = [...(window.eventsList || []).filter(e => e.communityId === c.id), ...vs.matches];
     const f = LBF[c.id] || {};
-    const events = all.filter(e => (!f.teams || String(e.teamsCount || '') === f.teams) && (!f.format || e.format === f.format)
-        && (!f.day || lbDow(e) === f.day) && (!f.park || lbPark(e) === f.park));
+    const keep = (e) => (!f.teams || String(e.teamsCount || '') === f.teams) && (!f.format || e.format === f.format)
+        && (!f.day || lbDow(e) === f.day) && (!f.park || lbPark(e) === f.park);
+    const shown = all.filter(keep);
+    const vsShown = vs.matches.filter(keep);
+    const events = shown.filter(e => !vs.matches.includes(e));
     const uniqSorted = (a) => [...new Set(a.filter(Boolean))].sort((x, y) => String(x).localeCompare(String(y), undefined, { numeric: true }));
     const opts = { teams: uniqSorted(all.map(e => e.teamsCount ? String(e.teamsCount) : '')), formats: uniqSorted(all.map(e => e.format)),
         days: LB_DOW.filter(d => all.some(e => lbDow(e) === d)), parks: uniqSorted(all.map(lbPark)) };
@@ -1329,8 +1334,18 @@ function leaderboardHtml(c, tab) {
         <option value="">${label}</option>${list.map(v => `<option value="${esc(v)}" ${f[key] === v ? 'selected' : ''}>${esc(fmt(v))}</option>`).join('')}</select>`;
     const cur = LB_TABS.find(t => t[0] === tab) || LB_TABS[0];
     // Working out everyone's stats is the slow part: remember it until the games change.
-    const sig = `${c.id}|${f.teams || ''}|${f.format || ''}|${f.day || ''}|${f.park || ''}|${events.length}|${events.reduce((n, e) => n + (e.matches || []).length + (e.isSessionEnded ? 1000 : 0), 0)}`;
-    if (!LB_CACHE[sig]) LB_CACHE[sig] = computePlayerStats(events);
+    const sig = `${c.id}|${f.teams || ''}|${f.format || ''}|${f.day || ''}|${f.park || ''}|${events.length}|${events.reduce((n, e) => n + (e.matches || []).length + (e.isSessionEnded ? 1000 : 0), 0)}|vs${vsShown.length}:${vsShown.reduce((n, m) => n + (m.results || []).length, 0)}`;
+    if (!LB_CACHE[sig]) {
+        const rows = computePlayerStats(events);
+        // ⚔️ VS matches of this community (same rules as the apps)
+        const lines = window.vsPlayerLines ? window.vsPlayerLines(vsShown, vs.teams) : {};
+        Object.values(lines).forEach(v => {
+            const r = rows.find(x => x.uid === v.uid);
+            if (r) { r.played += v.played; r.goals += v.goals; r.matchesWon += v.matchesWon; r.sessionsWon = (r.sessionsWon || 0) + v.sessionsWon; r.sessionsPlayed = (r.sessionsPlayed || 0) + v.sessionsPlayed; }
+            else rows.push({ uid: v.uid, name: v.name || 'Player', avatar: v.avatar, played: v.played, goals: v.goals, matchesWon: v.matchesWon, sessionsWon: v.sessionsWon, sessionsPlayed: v.sessionsPlayed });
+        });
+        LB_CACHE[sig] = rows;
+    }
     const rows = LB_CACHE[sig].filter(p => p[cur[2]] > 0)
         .sort((a, b) => b[cur[2]] - a[cur[2]] || (b[cur[4]] || 0) - (a[cur[4]] || 0) || String(a.name).localeCompare(String(b.name))).slice(0, 25);
     return `
@@ -1346,7 +1361,7 @@ function leaderboardHtml(c, tab) {
             ${sel('teams', 'Any # of teams', opts.teams, (v) => `${v} teams`)}${sel('format', 'Any format', opts.formats)}
             ${sel('day', 'Any day', opts.days)}${sel('park', 'Any park', opts.parks)}
         </div>
-        ${filtered ? `<div class="text-[11px] text-white/55">${events.length} of ${all.length} games</div>` : ''}
+        ${filtered ? `<div class="text-[11px] text-white/55">${shown.length} of ${all.length} games</div>` : ''}
         <div data-lb-list>${rows.length ? `<div class="divide-y divide-white/10 bg-black/30 rounded-xl border border-white/10">${rows.map((r, i) => `
             <div ${r.uid ? `onclick="openPlayerStatsSheet('${jsArg(r.uid)}', '${jsArg(r.name)}', '', '${jsArg(c.id)}')"` : ''} class="flex items-center gap-3 p-2.5 text-xs ${r.uid ? 'cursor-pointer hover:bg-white/5' : ''}">
                 <span class="w-6 text-center font-black text-white/60">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
@@ -1373,6 +1388,14 @@ window.showCommunityLeaderboard = (id) => {
     const c = window.communitiesCache[id]; if (!c) return;
     modalShell('community-leaderboard-modal', 'Leaderboard', esc(c.name), `<div id="lb-body" class="space-y-3"><div data-lb-list><div class="text-center text-xs text-white/60 py-8"><i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Loading…</div></div></div>`);
     setTimeout(() => { const box = document.getElementById('lb-body'); if (box) box.innerHTML = leaderboardHtml(c, 'wins'); }, 30);
+    // then this community's VS matches (they count too)
+    if (window.loadCommunityVs) window.loadCommunityVs(id).then(v => {
+        LB_VS[id] = v;
+        const box = document.getElementById('lb-body'); if (!box) return;
+        const on = box.querySelector('button.bg-\\[\\#00F296\\]');
+        const tab = (LB_TABS.find(t => on && on.textContent.trim() === t[1]) || LB_TABS[0])[0];
+        box.innerHTML = leaderboardHtml(c, tab);
+    }).catch(() => {});
 };
 
 // ------------------------------------------------------------------ GAMES TAB + COMMUNITY GAME CREATION
@@ -2468,6 +2491,29 @@ window.sendCommunityChatMessage = async function(text, media, poll) {
             text, ...(media ? { media } : {}), ...(poll ? { poll } : {}), ...(replyTo ? { replyTo } : {}), createdAt: serverTimestamp()
         });
     } catch (e) { console.error(e); toast('Message failed to send', 'error'); }
+};
+
+// Share cards (celebration / team / VS cards) sent to a community's group chat: one message per image, the first one has the caption.
+window.postToCommunityChat = async function(communityId, caption, files) {
+    if (!me() || !communityId || !files || !files.length) return false;
+    try {
+        const ms = await getDoc(doc(db, 'artifacts', appId, 'communities', communityId, 'members', me().uid));
+        const _sc = ms.exists() ? suspendedScopes(ms.data()) : null;
+        if (_sc && _sc.chat) { toast(`You are suspended from chat until ${fmtDate(tsMs(ms.data().suspendedUntil))}.`, 'error'); return false; }
+        for (let k = 0; k < files.length; k++) {
+            const label = `Sending image ${k + 1} of ${files.length}…`;
+            showUploadProgress(label, 0);
+            const media = await uploadMedia(files[k], `community/${communityId}`, (pr) => showUploadProgress(label, pr));
+            const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+            await setDoc(doc(groupMsgs(communityId), msgId), {
+                id: msgId, senderUid: me().uid, sender: myName(), avatar: /^https?:\/\//i.test(myAvatar()) && myAvatar().length < 400 ? myAvatar() : '',
+                text: k === 0 && caption ? caption : '📷 Photo', media, createdAt: serverTimestamp()
+            });
+        }
+        toast(`Sent to the community chat 💬`);
+        return true;
+    } catch (e) { console.error('community chat share', e); toast(mediaErrorText(e) || "Couldn't send to the chat.", 'error'); return false; }
+    finally { hideUploadProgress(); }
 };
 
 // ------------------------------------------------------------------ startup + deep links

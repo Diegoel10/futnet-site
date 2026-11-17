@@ -5,6 +5,7 @@ import { mutateEvent, pruneTeamsForUid, safeAvatar, escapeHtml } from './event-s
 import { joinHooks, refundHooks, creditGame, refundAllowed, feeCents, costCents, costSummary, policyText, hydrateBalances, refundEveryoneForGame, dollars, plusOneExtraCents, myBalanceCents, myLeaveRefund, paymentMethodsHtml } from '../credits.js';
 import { mayTakeSpot, startMsOf, freeSpotsOf, offerEligible, claimMinutesOf, waitingUids } from '../money-rules.js';
 import { renderAdminTab } from './admin-tab.js';
+import '../game-analytics.js';   // 📈 who opened the game (Admin > Analytics)
 import { gameStatusCardHtml } from '../game-status.js';
 import { renderRosterTab } from './roster-tab.js';
 import { renderStatsTab } from './stats-tab.js';
@@ -568,6 +569,7 @@ window.openEventDetails = function(eventId) {
 
     window.activeModalEventId = eventId;
     if (event.communityId && window.recordCommunityView) window.recordCommunityView(event.communityId, 'game', event.id, event.title || 'Game');   // analytics
+    if (window.recordGameView && event.organizerId !== (window.currentUser && window.currentUser.uid)) window.recordGameView(event.id);   // 📈 the organizer's Analytics
     
     window.teamNames = window.teamNames || {};
     window.teamNames[event.id] = event.teamNames || {};
@@ -638,6 +640,11 @@ window.switchModalTab = function(tabName) {
     window.renderEventDetailModalContent();
 };
 
+window.setStatsTeamFilter = function (eventId, v) {
+    window.statsTeamFilter = window.statsTeamFilter || {};
+    window.statsTeamFilter[eventId] = v;
+    window.renderEventDetailModalContent();
+};
 window.switchStatsSubTab = function(subTab) {
     window.activeStatsSubTab = subTab;
     window.renderEventDetailModalContent();

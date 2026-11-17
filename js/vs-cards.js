@@ -4,6 +4,9 @@
 //   DRAW card:   both crests, neutral.
 // Data comes from vs.js (window.openVsResultCards builds it).
 import { cardKit, loadFonts } from './game-profile/celebration-cards.js';
+import { mountShareBar } from './game-profile/card-share.js';
+import { loadCardLines, pickLine, spiceSwitchHtml, wireSpiceSwitch } from './card-lines.js';
+import { makePregameCanvas, crestImage as preCrest } from './pregame-card.js';
 
 const { W, H, GREEN, GOLD, BLOCK, BODY, MARKER, loadImage, background, rr, text, fitFont, avatar, header, footer, brush, toBlob } = cardKit;
 const RED = '#EF4444';
@@ -128,7 +131,7 @@ async function drawWinner(ctx, d, A) {
     rays(ctx, W / 2, 380, GOLD);
     confetti(ctx, d.seed);
     header(ctx, A.logo, d.info);
-    text(ctx, pick(WIN_LINES, d.seed), W - 60, 82, { font: `40px ${MARKER}`, color: GOLD, align: 'right', rotate: -0.05 });
+    text(ctx, d.lines.win, W - 60, 82, { font: fitFont(ctx, d.lines.win, MARKER, '', 40, 720), color: GOLD, align: 'right', rotate: -0.05 });
 
     ctx.save(); ctx.shadowColor = GOLD; ctx.shadowBlur = 40;
     text(ctx, '🏆 WINNERS', W / 2, 205, { font: `120px ${BLOCK}`, color: GOLD, shadow: false, stroke: { width: 10, color: '#3b2a00' } });
@@ -165,7 +168,7 @@ async function drawLoser(ctx, d, A) {
     text(ctx, nm, W / 2, 505, { font, color: '#9CA3AF', stroke: { width: 8, color: 'rgba(0,0,0,0.7)' } });
     ctx.font = font; const nw = ctx.measureText(nm).width;   // crossed out
     ctx.save(); ctx.strokeStyle = RED; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(W / 2 - nw / 2 - 20, 517); ctx.lineTo(W / 2 + nw / 2 + 20, 493); ctx.stroke(); ctx.restore();
-    const line = d.forfeit ? pick(NOSHOW_LINES, d.seed) : pick(LOSE_LINES, d.seed);
+    const line = d.forfeit ? pick(NOSHOW_LINES, d.seed) : d.lines.lose;
     if (d.multi) {
         text(ctx, `${t.w}W ${t.d}D ${t.l}L  ·  ${t.pts} PTS  ·  LAST PLACE`, W / 2, 590, { font: `900 40px ${BODY}`, color: '#FCA5A5' });
         text(ctx, line, W / 2, 650, { font: `46px ${MARKER}`, color: '#fff', rotate: -0.02, maxWidth: 1260 });
@@ -193,7 +196,7 @@ async function drawDraw(ctx, d, A) {
     text(ctx, 'VS', W / 2, 420, { font: `90px ${BLOCK}`, color: '#E8262B', stroke: { width: 8, color: '#000' } });
     text(ctx, a.name.toUpperCase(), W / 2 - 300, 560, { font: fitFont(ctx, a.name.toUpperCase(), BLOCK, '', 52, 520), color: '#fff' });
     text(ctx, b.name.toUpperCase(), W / 2 + 300, 560, { font: fitFont(ctx, b.name.toUpperCase(), BLOCK, '', 52, 520), color: '#fff' });
-    scorePill(ctx, a.gf, b.gf, 620, '#E5E7EB', pick(DRAW_LINES, d.seed));
+    scorePill(ctx, a.gf, b.gf, 620, '#E5E7EB', d.lines.draw);
     const sc = [...a.scorers, ...b.scorers];
     if (sc.length) text(ctx, '⚽ ' + scorerLine(sc), W / 2, 830, { font: `900 30px ${BODY}`, color: '#fff', maxWidth: 1260 });
     footer(ctx, A.logo);
@@ -254,6 +257,8 @@ export async function makeVsCards(d) {
     ]);
     const A = { bg, logo, win, lose };
     d = { ...d, seed: Math.floor(Math.random() * 1000) };
+    const all = await loadCardLines(), spice = d.spice === 'friendly' ? 'friendly' : 'spicy';
+    d.lines = { win: pickLine(all, 'win', spice, d.seed), lose: pickLine(all, 'lose', spice, d.seed), draw: pickLine(all, 'draw', spice, d.seed) };
     const out = [];
     const make = async (key, title, fn) => { const c = document.createElement('canvas'); c.width = W; c.height = H; await fn(c.getContext('2d'), d, A); out.push({ key, title, canvas: c }); };
     if (d.draw) await make('draw', 'Draw', drawDraw);
@@ -265,6 +270,17 @@ export async function makeVsCards(d) {
     return out;
 }
 
+/** ⚔️ Pre-game card for a VS match. d.pregame = { teams:[{ team (for the crest), name, color, sub, players:[{ name, avatar, captain }] }] } */
+async function pregameCard(d) {
+    const all = await loadCardLines(), spice = d.spice === 'friendly' ? 'friendly' : 'spicy';
+    const teams = await Promise.all(d.pregame.teams.map(async t => ({
+        name: t.name, color: t.color, sub: t.sub || '', crest: await preCrest(t.team),
+        players: await Promise.all((t.players || []).map(async p => ({ name: p.name, captain: !!p.captain, img: await loadImage(p.avatar) }))),
+    })));
+    const canvas = await makePregameCanvas({ info: d.info, teams, line: pickLine(all, 'pregame', spice, Math.floor(Math.random() * 1000)), spicy: spice === 'spicy' });
+    return { key: 'gameday', title: 'Game day', canvas };
+}
+
 /** Full-screen viewer with Share / Save under each image. */
 export async function openVsCards(d) {
     let m = document.getElementById('vs-cards-modal');
@@ -272,18 +288,27 @@ export async function openVsCards(d) {
     m.className = 'fixed inset-0 z-[190] bg-[#040E13] text-white overflow-y-auto';
     m.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-white/70"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Making your images…</div>';
     let cards = [];
-    try { cards = await makeVsCards(d); } catch (e) { console.error(e); }
+    try { cards = d.pregame ? [await pregameCard(d)] : await makeVsCards(d); } catch (e) { console.error(e); }
     const slug = String(d.info.title || 'vs-match').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const files = [];
     for (const c of cards) { try { files.push(new File([await toBlob(c.canvas)], `${slug}-${c.key}.jpg`, { type: 'image/jpeg' })); } catch (e) { files.push(null); } }
     m.innerHTML = `<div class="max-w-2xl mx-auto p-4 pb-16 space-y-4">
         <div class="flex items-center justify-between sticky top-0 bg-[#040E13] py-2 z-10">
-            <div><div class="text-base font-black">Result cards 📸</div><div class="text-[11px] text-white/60">Winners, losers and top scorers. Send them one by one.</div></div>
+            <div><div class="text-base font-black">${d.title || 'Result cards 📸'}</div><div class="text-[11px] text-white/60">${d.subtitle || 'Winners, losers and top scorers. Send them one by one.'}</div></div>
             <button onclick="document.getElementById('vs-cards-modal').remove()" aria-label="Close" class="w-9 h-9 rounded-full bg-black/60 border border-white/15 flex items-center justify-center"><i class="fa-solid fa-xmark text-sm"></i></button>
         </div>
         ${files.some(f => !f) ? '<div class="text-xs bg-amber-500/10 border border-amber-400/40 rounded-xl p-3">Some photos couldn\'t be added to the images. Take a screenshot instead.</div>' : ''}
         ${cards.length ? '' : '<p class="text-sm text-white/60">No result to share yet.</p>'}
+        ${d.canSpice ? `<div id="vs-spice">${spiceSwitchHtml(d.spice === 'friendly' ? 'friendly' : 'spicy')}</div>` : ''}
+        <div id="vs-share-bar"></div>
         <div id="vs-cards-list" class="space-y-5"></div></div>`;
+    const sw = m.querySelector('#vs-spice');
+    if (sw) wireSpiceSwitch(sw, async (v) => {
+        if (v === d.spice || !d.onSpice) return;
+        try { await d.onSpice(v); } catch (e) { window.showToast && window.showToast("Couldn't save it.", 'error'); return; }
+        (d.reopen || openVsCards)({ ...d, spice: v });
+    });
+    if (d.share) mountShareBar(m.querySelector('#vs-share-bar'), cards.map((c, i) => ({ title: c.title, file: files[i] })), d.share);
     const list = m.querySelector('#vs-cards-list');
     cards.forEach((c, i) => {
         const box = document.createElement('div'); box.className = 'space-y-2';

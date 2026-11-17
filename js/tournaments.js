@@ -890,6 +890,9 @@ window.openTourneyPlayers = async function (teamId, joining) {
     }
     const members = membersOfTeam(teamId);
     const cur = new Set(rosterOf(teamOf(t, teamId)).map(r => r.id));
+    // 🔁 fill-ins: people who aren't on the team but play for it in this tournament (subs / borrowed players)
+    window._ttFill = rosterOf(teamOf(t, teamId)).filter(r => r.fillIn || String(r.id).startsWith('fill_'));
+    window._ttFillTeam = teamId;
     const min = +t.minPlayers || 1, max = +t.maxPlayers || 30;
     const name = joining ? (myCaptainTeams().find(x => x.id === teamId) || {}).name : nameOf(t, teamId);
     document.getElementById('tt-join')?.remove();
@@ -899,9 +902,40 @@ window.openTourneyPlayers = async function (teamId, joining) {
         <div class="space-y-1.5">${members.map(p => `<label class="flex items-center gap-3 p-2.5 bg-black/40 rounded-xl border border-white/10 cursor-pointer">
             <input type="checkbox" class="w-5 h-5 accent-[#00F296]" data-pl="${esc(pId(p))}" onchange="ttCountPl()" ${!cur.size || cur.has(pId(p)) ? 'checked' : ''}>
             <span class="flex-1 min-w-0 text-xs font-bold truncate">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name || 'Player')}${p.uid ? '' : ' <span class="text-[9px] text-white/40">(no app)</span>'}</span><span class="text-[10px] text-white/45">${esc(p.position || '')}</span></label>`).join('') || '<p class="text-xs text-white/50">This team has no players yet. Add them in the Teams tab first.</p>'}</div>
+        <div id="tt-fill-list" class="space-y-1.5">${ttFillRows()}</div>
+        <div class="bg-black/40 border border-sky-400/30 rounded-2xl p-3 space-y-2">
+            <div class="text-[10px] font-black uppercase tracking-wider text-sky-300">➕ Add a fill-in (not on the team)</div>
+            <input id="tt-fill-q" oninput="ttFillSearch()" placeholder="Search a FutNet player, or type a name" maxlength="40" class="w-full bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-sm text-white">
+            <div id="tt-fill-res" class="space-y-1.5"></div>
+            <button onclick="ttAddFill('', '')" class="w-full bg-sky-400/20 border border-sky-400/40 text-sky-100 font-bold py-2 rounded-xl text-xs">Add by name (not on FutNet)</button>
+        </div>
         ${mineTeam ? `<button onclick="ttGoAddPlayers('${jsq(t.id)}','${jsq(teamId)}')" class="w-full text-[11px] font-bold text-[#00F296] py-1">➕ Add more players to the team</button>` : ''}
         <div id="tt-pl-count" class="text-[11px] text-center text-white/60"></div>
         <button onclick="saveTourneyPlayers('${jsq(teamId)}', ${joining ? 'true' : 'false'})" class="${BTN} w-full py-3 text-sm">${joining ? 'Register my team' : 'Save players'}</button>`);
+    window.ttCountPl();
+};
+function ttFillRows() {
+    return (window._ttFill || []).map(f => `<label class="flex items-center gap-3 p-2.5 bg-sky-400/10 rounded-xl border border-sky-400/30 cursor-pointer">
+        <input type="checkbox" class="w-5 h-5 accent-[#00F296]" data-pl="${esc(f.id)}" onchange="ttCountPl()" checked>
+        <span class="flex-1 min-w-0 text-xs font-bold truncate">🔁 ${esc(f.name || 'Player')}${f.uid ? '' : ' <span class="text-[9px] text-white/40">(no app)</span>'}</span><span class="text-[10px] text-sky-300">fill-in</span></label>`).join('');
+}
+window.ttFillSearch = function () {
+    const q = String(document.getElementById('tt-fill-q')?.value || '').trim().toLowerCase(), box = document.getElementById('tt-fill-res'); if (!box) return;
+    if (q.length < 2) { box.innerHTML = ''; return; }
+    const seen = new Set();
+    const list = [...(window.cachedDirectoryList || []), ...(window.directoryList || [])].filter(u => {
+        const id = String(u.uid || u.id || ''); if (!id || seen.has(id)) return false; seen.add(id);
+        return (u.name || `${u.firstName || ''} ${u.lastName || ''}`).toLowerCase().includes(q);
+    }).slice(0, 6);
+    box.innerHTML = list.map(u => { const id = String(u.uid || u.id), nm = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim(); return `<button onclick="ttAddFill('${jsq(id)}', '${jsq(nm)}')" class="w-full flex items-center justify-between p-2.5 bg-black/40 rounded-xl border border-white/10 text-left"><span class="text-xs font-bold truncate">${esc(nm)}</span><span class="text-[11px] font-black text-[#00F296]">Add</span></button>`; }).join('');
+};
+window.ttAddFill = function (uid, name) {
+    name = String(name || document.getElementById('tt-fill-q')?.value || '').trim().slice(0, 40);
+    if (!name) { toast('Type their name.', 'error'); return; }
+    if ((window._ttFill || []).some(f => (uid && f.uid === uid) || f.name === name)) { toast('Already added.'); return; }
+    window._ttFill = [...(window._ttFill || []), { id: 'fill_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, number: '', uid: uid || '', position: '', fillIn: true }];
+    const el = document.getElementById('tt-fill-list'); if (el) el.innerHTML = ttFillRows();
+    const q = document.getElementById('tt-fill-q'); if (q) q.value = ''; const r = document.getElementById('tt-fill-res'); if (r) r.innerHTML = '';
     window.ttCountPl();
 };
 window.ttCountPl = () => {
@@ -916,8 +950,9 @@ window.saveTourneyPlayers = async function (teamId, joining) {
     const members = membersOfTeam(teamId);
     const ids = [...document.querySelectorAll('[data-pl]')].filter(c => c.checked).map(c => c.dataset.pl);
     const min = +t0.minPlayers || 1, max = +t0.maxPlayers || 30;
-    if (ids.length < min || ids.length > max) { toast(`Pick ${min === max ? min : `between ${min} and ${max}`} players.`, 'error'); return; }
-    const roster = members.filter(p => ids.includes(pId(p))).map(p => ({ id: pId(p), name: p.name || 'Player', number: p.number || '', uid: p.uid || '', position: p.position || '' }));
+    if ((ids.length < min || ids.length > max) && !(isTTBoss(t0) && !joining && ids.length)) { toast(`Pick ${min === max ? min : `between ${min} and ${max}`} players.`, 'error'); return; }
+    const roster = [...members.filter(p => ids.includes(pId(p))).map(p => ({ id: pId(p), name: p.name || 'Player', number: p.number || '', uid: p.uid || '', position: p.position || '' })),
+        ...(window._ttFill || []).filter(f => ids.includes(f.id))];
     const x = myCaptainTeams().find(y => y.id === teamId);
     try {
         await change(t0.id, (t) => {
@@ -1176,6 +1211,7 @@ window.openTourney = function (id, initial, tab) {
 };
 window.closeTourney = () => { TT.open = null; if (TT.chatUnsub) { TT.chatUnsub(); TT.chatUnsub = null; TT.chatId = ''; } document.getElementById('tt-page')?.remove(); };
 window.ttTab = (k) => { TT.tab = k; drawPage(); };
+window.ttTeamFilter = (id) => { TT.teamFilter = id; TT.teamFilterOf = TT.open && TT.open.id; drawPage(); };
 window.shareTourney = async function () {
     const t = TT.open; if (!t) return;
     const text = `🏆 ${t.name} · ${daysText(t)} at ${t.location || ''}. ${canRegister(t) ? 'Register your team on FutNet!' : ''}`;
@@ -1287,12 +1323,24 @@ function drawPage() {
                 ${boss && +t.priceCents ? `<button onclick="toggleTourneyPaid('${jsq(x.teamId)}')" class="${x.paid ? DARK : BTN} shrink-0">${x.paid ? 'Undo paid' : '💵 Paid'}</button>` : ''}
             </div>
             ${r.length ? `<div class="flex flex-wrap gap-1">${r.map(p => `<span class="text-[10px] font-bold rounded-full px-2 py-1 bg-white/10">${p.number ? esc(p.number) + ' · ' : ''}${esc(p.name || 'Player')}${p.uid && window.badgeHtml ? window.badgeHtml(p.uid) : ''}</span>`).join('')}</div>` : ''}
-            ${(mine || boss) && t.status !== 'final' ? `<div class="flex gap-2">${mine || boss ? `<button onclick="openTourneyPlayers('${jsq(x.teamId)}', false)" class="${DARK}">👥 ${mine ? 'Change players' : 'Pick players'}</button>` : ''}
+            ${(mine && t.status !== 'final') || boss ? `<div class="flex gap-2">${`<button onclick="openTourneyPlayers('${jsq(x.teamId)}', false)" class="${DARK}">👥 ${boss && t.status === 'final' ? 'Fix players' : mine ? 'Change players' : 'Pick players'}</button>`}
                 ${t.status === 'signup' ? `<button onclick="leaveTourney('${jsq(x.teamId)}')" class="text-[11px] font-bold text-red-400 px-2">${mine ? 'Leave' : 'Remove'}</button>` : ''}</div>` : ''}
         </div>`; }).join('') || '<p class="text-xs text-white/45 text-center py-6">No teams yet. Share it so captains can register!</p>'}
         ${t.status === 'signup' ? `<p class="text-[11px] text-white/50 text-center">${n} of ${max} teams${n < min ? ` · needs at least ${min}` : ''}</p>` : ''}</div>`;
     const ms = t.matches || [];
-    const bracket = !ms.length ? `<p class="text-xs text-white/50 text-center py-6">The bracket shows here after the draw.${t.status === 'signup' ? ' Registration is still open.' : ''}</p>` : `<div class="space-y-4">
+    // 🔎 all matches, or only one team's
+    const tf = TT.teamFilter && TT.teamFilterOf === t.id ? TT.teamFilter : '';
+    const inTeams = (t.teams || []).filter(x => ms.some(m => m.a === x.teamId || m.b === x.teamId));
+    const ttPicker = inTeams.length > 2 ? `<select onchange="ttTeamFilter(this.value)" aria-label="Show matches of"
+        class="w-full bg-black/60 border ${tf ? 'border-amber-400 text-amber-200' : 'border-white/15 text-white'} rounded-xl px-3 py-2.5 text-xs font-bold">
+        <option value="">All teams (${ms.length} matches)</option>
+        ${inTeams.map(x => `<option value="${esc(x.teamId)}" ${tf === x.teamId ? 'selected' : ''}>${esc(nameOf(t, x.teamId) || x.name || 'Team')} (${ms.filter(m => m.a === x.teamId || m.b === x.teamId).length})</option>`).join('')}
+    </select>` : '';
+    const bracket = !ms.length ? `<p class="text-xs text-white/50 text-center py-6">The bracket shows here after the draw.${t.status === 'signup' ? ' Registration is still open.' : ''}</p>` : tf ? `<div class="space-y-3">
+        ${ttPicker}
+        ${ms.filter(m => m.a === tf || m.b === tf).map(m => `<div class="space-y-1"><div class="text-[10px] font-black uppercase tracking-wider text-white/55">${esc(matchLabel(m))}</div>${matchRow(t, m, boss)}</div>`).join('') || '<p class="text-xs text-white/45 text-center py-6">This team has no matches yet.</p>'}
+    </div>` : `<div class="space-y-4">
+        ${ttPicker}
         ${t.status === 'draw' ? `<div class="text-[11px] text-center text-amber-200 font-bold">🎲 Draw preview${boss ? ': redraw or confirm it in Admin.' : ': not final yet.'}</div>` : ''}
         ${boss && canScore(t) && t.status !== 'final' ? '<p class="text-[11px] text-white/55">Tap a game to enter its score. The next round fills in by itself.</p>' : ''}
         ${plan === 'league' ? `${tableHtml(t, 'league', '', 'League table', 2)}<div class="space-y-2">${ms.filter(m => m.stage === 'league').map(m => matchRow(t, m, boss)).join('')}</div>` : ''}

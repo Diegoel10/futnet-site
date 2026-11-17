@@ -9,7 +9,7 @@
 // Saved on the game: teamsSet = { at, by, byName } (or null).
 import { mutateEvent, escapeHtml as esc, jsArg } from './event-store.js';
 import { teamCardFiles, personalCardFile, resetPersonalCards } from './draft-replay.js';
-import { postFilesToComments, postFilesToFeed, canPostToFeed } from './card-share.js';
+import { postFilesToComments, postFilesToFeed, canPostToFeed, postFilesToChat, canPostToChat } from './card-share.js';
 import { showUploadProgress, hideUploadProgress } from '../wa-chat.js';
 
 const toast = (m, t) => window.showToast && window.showToast(m, t);
@@ -129,7 +129,7 @@ window.openTeamsSetShare = function (eventId) {
     const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
     const { teams } = teamsOf(ev);
     const players = teams.flatMap(t => t.players.filter(p => p.uid && !String(p.uid).startsWith('usr_') && String(p.uid) !== meUid()));
-    const feed = canPostToFeed(ev.communityId);
+    const feed = canPostToFeed(ev.communityId), chat = canPostToChat(ev.communityId);
     document.getElementById('teams-share')?.remove();
     const m = document.createElement('div');
     m.id = 'teams-share';
@@ -140,7 +140,8 @@ window.openTeamsSetShare = function (eventId) {
     m.innerHTML = `<div class="bg-[#040E13] border border-[#00F296]/40 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-5 space-y-3 text-white" onclick="event.stopPropagation()">
         <div class="flex items-center justify-between"><div class="text-base font-black">📸 Share the teams?</div>
             <button onclick="document.getElementById('teams-share').remove()" class="w-8 h-8 rounded-full bg-black/60 border border-white/15"><i class="fa-solid fa-xmark text-xs"></i></button></div>
-        ${row('ts-comments', true, '💬 Team cards in the game comments', '"All teams" + one card per team.')}
+        ${row('ts-comments', true, '💬 Team cards in the game comments', '"Game day" (A vs B) + "All teams" + one card per team.')}
+        ${chat ? row('ts-chat', false, '💬 Team cards in the community chat', 'Game day card + one per team.') : ''}
         ${feed ? row('ts-feed', false, '📣 Team cards in the community feed', 'One post with all the cards.') : ''}
         ${row('ts-inbox', true, `✉️ Each player's own card in their inbox (${players.length})`, 'Their team with a gold "YOU" on them: "You\'re on Team 2. Please wear red."')}
         <button id="ts-go" onclick="sendTeamsSetShare('${jsArg(eventId)}')" class="w-full bg-[#00F296] text-slate-950 font-black py-3 rounded-xl text-sm">Send</button>
@@ -151,18 +152,19 @@ window.openTeamsSetShare = function (eventId) {
 };
 window.sendTeamsSetShare = async function (eventId) {
     const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
-    const want = { comments: !!document.getElementById('ts-comments')?.checked, feed: !!document.getElementById('ts-feed')?.checked, inbox: !!document.getElementById('ts-inbox')?.checked };
-    if (!want.comments && !want.feed && !want.inbox) { toast('Tick at least one.', 'error'); return; }
+    const want = { comments: !!document.getElementById('ts-comments')?.checked, feed: !!document.getElementById('ts-feed')?.checked, chat: !!document.getElementById('ts-chat')?.checked, inbox: !!document.getElementById('ts-inbox')?.checked };
+    if (!want.comments && !want.feed && !want.chat && !want.inbox) { toast('Tick at least one.', 'error'); return; }
     document.getElementById('teams-share')?.remove();
     const caption = `👕 Teams for ${ev.title || 'the game'}${ev.date ? ' · ' + (window.fmtGameDate || String)(ev.date) : ''}`;
     const done = [];
     try {
-        if (want.comments || want.feed) {
+        if (want.comments || want.feed || want.chat) {
             showUploadProgress('Making the team cards…', null);
             const files = (await teamCardFiles(ev)).map(c => c.file).filter(Boolean);
             hideUploadProgress();
             if (!files.length) throw new Error('no cards');
             if (want.comments) { await postFilesToComments(ev.id, files, caption); done.push('comments'); }
+            if (want.chat && await postFilesToChat(ev.communityId, files, caption)) done.push('chat');
             if (want.feed && await postFilesToFeed(ev.communityId, files, caption)) done.push('feed');
         }
         if (want.inbox) {

@@ -2801,6 +2801,63 @@ function buildPlayerStats(games, uid, communityId) {
 //   Skill is pulled toward 3 stars while there are few games, so one lucky night isn't 5 stars.
 // ---------------------------------------------------------------------------
 let ratingIndex = { at: 0, byUid: null, cancels: null };
+/**
+ * One record per player per finished VS match (same shape as playerGame), for the skill stars.
+ * Who played: the team's picked roster for that match (member ids -> uids), else the players who scored for it.
+ */
+async function vsSkillRecords() {
+  const [ms, ts] = await Promise.all([col("vsMatches").get(), col("teams").get()]);
+  const teams = {};
+  ts.docs.forEach((d) => { teams[d.id] = d.data() || {}; });
+  const out = [];
+  for (const doc of ms.docs) {
+    const m = doc.data() || {};
+    if (m.status === "cancelled") continue;
+    const results = arr(m.results).filter((r) => r && r.a && r.b && r.a !== r.b);
+    if (!results.length) continue;
+    // table: points, then goal difference, then goals
+    const tbl = {};
+    const row = (id) => (tbl[id] = tbl[id] || { id, pts: 0, gf: 0, ga: 0 });
+    results.forEach((r) => {
+      const ga = Number(r.ga) || 0, gb = Number(r.gb) || 0, A = row(r.a), B = row(r.b);
+      A.gf += ga; A.ga += gb; B.gf += gb; B.ga += ga;
+      if (ga > gb) A.pts += 3; else if (gb > ga) B.pts += 3; else { A.pts++; B.pts++; }
+    });
+    const order = Object.values(tbl).sort((x, y) => (y.pts - x.pts) || ((y.gf - y.ga) - (x.gf - x.ga)) || (y.gf - x.gf));
+    const final = m.status === "final";
+    for (const t of arr(m.teams)) {
+      if (!t || !t.teamId || !tbl[t.teamId]) continue;
+      const td = teams[t.teamId] || {};
+      const members = arr(td.members);
+      const uidOfMember = (id) => { const p = members.find((x) => x && (x.id === id || x.uid === id)); return p && p.uid ? p.uid : ""; };
+      let uids = arr(t.roster).map((id) => uidOfMember(String(id))).filter(Boolean);
+      if (uids.length) uids = uids.concat(arr(t.fillIns).map((f) => f && f.uid).filter(Boolean));   // fill-ins / subs added for this match
+      if (!uids.length) uids = results.flatMap((r) => arr(r.goals)).filter((g) => g && g.teamId === t.teamId && g.uid && !g.own).map((g) => g.uid);
+      uids = [...new Set(uids)];
+      if (!uids.length) continue;
+      let w = 0, d = 0, l = 0, gf = 0, ga = 0;
+      results.forEach((r) => {
+        if (r.a !== t.teamId && r.b !== t.teamId) return;
+        const mine = r.a === t.teamId ? Number(r.ga) || 0 : Number(r.gb) || 0, theirs = r.a === t.teamId ? Number(r.gb) || 0 : Number(r.ga) || 0;
+        gf += mine; ga += theirs;
+        if (mine > theirs) w++; else if (mine < theirs) l++; else d++;
+      });
+      if (!(w + d + l)) continue;
+      const place = order.findIndex((x) => x.id === t.teamId) + 1;
+      for (const u of uids) {
+        const goals = results.reduce((n, r) => n + arr(r.goals).filter((g) => g && g.uid === u && g.teamId === t.teamId && !g.own).length, 0);
+        const ownGoals = results.reduce((n, r) => n + arr(r.goals).filter((g) => g && g.uid === u && g.own).length, 0);
+        out.push([u, {
+          eventId: `vs_${doc.id}`, title: m.title || "VS match", date: String(m.date || "").slice(0, 10), communityId: m.communityId || "",
+          goals, ownGoals, w, d, l, gf, ga, place, champion: final && place === 1, lastPlace: final && order.length > 1 && place === order.length,
+          team: t.name || "", attendance: "", signedUp: false, vs: true,
+        }]);
+      }
+    }
+  }
+  return out;
+}
+
 async function ratingData() {
   if (ratingIndex.byUid && Date.now() - ratingIndex.at < 3 * 60000) return ratingIndex;
   const games = await endedGames();
@@ -2814,6 +2871,8 @@ async function ratingData() {
       if (r) (byUid[u] = byUid[u] || []).push(r);
     }
   }
+  // ⚔️ VS matches count for the skill stars too (wins weigh more, losses less: see rates()).
+  try { for (const [u, r] of await vsSkillRecords()) if (isRealPlayer(u)) (byUid[u] = byUid[u] || []).push(r); } catch (e) { logger.warn("vs stars", e.message); }
   Object.values(byUid).forEach((list) => list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)));
   let cancels = {};
   try {
@@ -2844,12 +2903,16 @@ function attendanceRating(records, cancels, communityId) {
   };
 }
 
+// ⚔️ VS mode is real competition: a VS win weighs 1.5 wins, a VS loss only half a loss (for the skill stars).
+const VS_WIN = 1.5, VS_LOSS = 0.5;
 function rates(list) {
   const showed = list.filter((r) => r.attendance !== "noshow");
   const m = showed.reduce((s, r) => s + r.w + r.d + r.l, 0);
   if (!m) return null;
+  const ww = (r) => r.w * (r.vs ? VS_WIN : 1), lw = (r) => r.l * (r.vs ? VS_LOSS : 1);
+  const weighted = showed.reduce((s, r) => s + ww(r) + r.d + lw(r), 0);
   return {
-    win: showed.reduce((s, r) => s + r.w, 0) / m,
+    win: showed.reduce((s, r) => s + ww(r), 0) / weighted,
     pm: showed.reduce((s, r) => s + r.gf - r.ga, 0) / m,
     gpm: showed.reduce((s, r) => s + r.goals, 0) / m,
     title: showed.filter((r) => r.champion).length / showed.length,
@@ -2946,25 +3009,7 @@ async function computeCommunityTop(communityId) {
     if (!mine.length) continue;
     rows.push({ uid: u, list: mine, games: mine.length, goals: mine.reduce((s, r) => s + r.goals, 0) });
   }
-  // VS matches posted in this community: their goals count too (players picked from the app have a uid).
-  try {
-    const vs = await col("vsMatches").where("communityId", "==", communityId).get();
-    const vsGoals = {}, vsGames = {};
-    vs.docs.forEach((d) => {
-      const m = d.data() || {};
-      if (m.status === "cancelled") return;
-      arr(m.results).forEach((r) => {
-        const seen = new Set();
-        arr(r.goals).forEach((g) => { if (g && g.uid && !g.own) { vsGoals[g.uid] = (vsGoals[g.uid] || 0) + 1; seen.add(g.uid); } });
-        seen.forEach((u) => { vsGames[u] = (vsGames[u] || 0) + 1; });
-      });
-    });
-    Object.entries(vsGoals).forEach(([u, n]) => {
-      const row = rows.find((r) => r.uid === u);
-      if (row) row.goals += n;
-      else rows.push({ uid: u, list: [], games: 0, goals: n });   // games: 0 keeps VS-only players out of the skill list
-    });
-  } catch (e) { logger.warn("vs goals for community", communityId, e.message); }
+  // (VS matches posted in this community are in byUid already, as "vs" records: their wins, goals and games count.)
   const scorers = rows.filter((r) => r.goals > 0).sort((a, b) => (b.goals - a.goals) || (a.games - b.games)).slice(0, 5);
   const candidates = rows.filter((r) => r.games >= 3);
   const positions = await Promise.all(candidates.map((r) => positionOf(r.uid)));
@@ -4164,6 +4209,8 @@ exports.tourneyReminders = onSchedule({ schedule: "every day 18:00", timeZone: D
 //           (during registration) and change their own team's players.
 // ---------------------------------------------------------------------------
 const byUser = (e) => e.authId && !["service_account", "system"].includes(e.authType) ? e.authId : "";
+// ⚠️ The guard's own put-back (it stamps a new guardFix). Never react to it, or two put-backs undo each other forever.
+const guardWrite = (before, after) => !!(after && after.guardFix && (!before || after.guardFix !== before.guardFix));
 const isOwnerUid = async (uid) => { try { const u = await admin.auth().getUser(uid); return isOwner({ token: { email: u.email || "" } }); } catch (e) { return false; } };
 const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
 const teamBoss = (t, uid) => !!t && !!uid && (t.ownerId === uid || arr(t.members).some((m) => m && m.uid === uid && (m.role === "captain" || m.role === "co")));
@@ -4266,6 +4313,7 @@ async function teamChangeProblem(before, after, uid, teamId) {
 exports.teamGuard = onDocumentUpdatedWithAuthContext(`${BASE}/teams/{teamId}`, async (event) => {
   const uid = byUser(event); if (!uid) return;
   const before = event.data.before.data() || {}, after = event.data.after.data() || {};
+  if (guardWrite(before, after)) return;
   if (before.temp || before.chatOnly) return;
   const why = await teamChangeProblem(before, after, uid, event.params.teamId);
   if (!why || await isOwnerUid(uid)) return;
@@ -4310,6 +4358,7 @@ async function tourneyChangeProblem(before, after, uid) {
 exports.tourneyGuard = onDocumentUpdatedWithAuthContext(`${BASE}/tournaments/{id}`, async (event) => {
   const uid = byUser(event); if (!uid) return;
   const before = event.data.before.data() || {}, after = event.data.after.data() || {};
+  if (guardWrite(before, after)) return;
   const why = await tourneyChangeProblem(before, after, uid);
   if (!why || await isOwnerUid(uid)) return;
   await event.data.after.ref.set({ ...before, guardFix: Date.now() });
@@ -4642,6 +4691,18 @@ exports.manager = onCall({ timeoutSeconds: 300, memory: "512MiB" }, async (reque
     await col("managerLog").add({ action: "purge", uid, name: c.name || "", by: me, at: now });
     return { ok: true };
   }
+  if (action === "cardLines") {
+    // 🃏 the card jokes / disses / hype: read, or save the whole list (Settings > Card lines)
+    if (d.save && typeof d.save === "object") {
+      const clean = {};
+      for (const k of ["win", "lose", "draw", "pregame"]) {
+        clean[k] = arr(d.save[k]).map((x) => ({ t: String((x && x.t) || "").trim().slice(0, 80), s: !!(x && x.s) })).filter((x) => x.t).slice(0, 400);
+      }
+      await cardLinesRef().set({ ...clean, updatedAt: now, by: me });
+      cardLinesCache = { at: 0, lines: null };
+    }
+    return { lines: await readCardLines() };
+  }
   if (action === "blocked") {
     const snap = await col("managerLog").where("action", "==", "blocked").get();
     const list = snap.docs.map((x) => { const v = x.data() || {}; return { ...v, at: v.at && v.at.toMillis ? v.at.toMillis() : 0 }; }).sort((a, b) => b.at - a.at).slice(0, 50);
@@ -4721,4 +4782,199 @@ exports.liveAccessTourney = onDocumentWritten(`${BASE}/tournaments/{id}`, async 
       tx.update(event.data.after.ref, { matches: ms });
     });
   } catch (e) { logger.warn("liveAccessTourney", event.params.id, e.message); }
+});
+
+// ---------------------------------------------------------------- 📈 Game analytics: who opened a game (organizer / community admins)
+//   eventsList/{gameId}/views/{uid} = { uid, name, avatar, count (+1 per visit), days: ['YYYY-MM-DD'], lastAt }
+//   Written and read here (server), so it works the same from the website and the apps. The organizer's own visits don't count.
+async function canSeeGameViews(g, uid, auth) {
+  if (!g) return false;
+  if (g.organizerId === uid || isOwner(auth)) return true;
+  if (!g.communityId) return false;
+  try {
+    const [cs, ms] = await Promise.all([col("communities").doc(g.communityId).get(), col("communities").doc(g.communityId).collection("members").doc(uid).get()]);
+    const au = ms.exists ? (ms.data() || {}).adminUntil : 0;
+    const until = au && au.toMillis ? au.toMillis() : Number(au) || 0;
+    return (cs.exists && (cs.data() || {}).adminId === uid) || (ms.exists && (ms.data() || {}).role === "admin" && (!until || until > Date.now()));
+  } catch (e) { return false; }
+}
+exports.recordGameView = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) return { ok: false };
+  const gameId = String((request.data || {}).gameId || "");
+  if (!gameId || gameId.includes("/")) return { ok: false };
+  const g = (await col("eventsList").doc(gameId).get()).data();
+  if (!g || g.organizerId === uid) return { ok: true };
+  const d = (await col("directory").doc(uid).get()).data() || {};
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TZ }).format(new Date());
+  await col("eventsList").doc(gameId).collection("views").doc(uid).set({
+    uid, name: cardName(d) || "Player", avatar: String(d.avatar || "").startsWith("http") ? d.avatar : "",
+    count: admin.firestore.FieldValue.increment(1), days: admin.firestore.FieldValue.arrayUnion(today), lastAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { ok: true };
+});
+exports.gameViews = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const gameId = String((request.data || {}).gameId || "");
+  const g = gameId && !gameId.includes("/") ? (await col("eventsList").doc(gameId).get()).data() : null;
+  if (!g) throw new HttpsError("not-found", "Game not found.");
+  if (!(await canSeeGameViews(g, uid, request.auth))) throw new HttpsError("permission-denied", "Only the organizer can see this.");
+  const snap = await col("eventsList").doc(gameId).collection("views").get();
+  const list = snap.docs.map((x) => { const v = x.data() || {}; return { uid: v.uid || x.id, name: v.name || "Player", avatar: v.avatar || "", count: Number(v.count) || 1, days: arr(v.days), lastAt: v.lastAt && v.lastAt.toMillis ? v.lastAt.toMillis() : 0 }; })
+    .sort((a, b) => b.lastAt - a.lastAt);
+  return { list };
+});
+
+// ---------------------------------------------------------------- 🃏 Card lines (the jokes / disses / hype on the share cards)
+//   futnetPrivate/cardLines = { win: [{ t, s }], lose: [...], draw: [...], pregame: [...] }   (s = 🌶 spicy, else friendly)
+//   Edited by the owner in the Manager (Settings > Card lines); everyone reads them with cardLines() (the apps too).
+//   The organizer of each game picks Friendly or Spicy for its cards.
+const F = (t) => ({ t, s: false }), SP = (t) => ({ t, s: true });
+const DEFAULT_CARD_LINES = {
+  win: [
+    F("GOOD GAMES, BETTER PEOPLE"), F("TOO EASY 😮‍💨"), F("NO MERCY TONIGHT"), F("CHAMPIONS BEHAVIOR 🏆"), F("TELL YOUR FRIENDS 📣"), F("BUILT DIFFERENT"),
+    F("THE TEAM TO BEAT"), F("ON ANOTHER LEVEL"), F("WINNING IS A HABIT"), F("SMOOTH OPERATORS"), F("CLINICAL. 🎯"), F("THEY CAME, THEY SAW, THEY WON"),
+    F("HISTORY MADE TONIGHT"), F("LEGENDS ONLY 🐐"), F("PURE CLASS"), F("TEAMWORK MAKES THE DREAM WORK"), F("¡CAMPEONES! 🏆"), F("SE GANÓ CON CLASE"),
+    F("NADIE LOS PARA"), F("PURO TALENTO ⚽"), F("ASÍ SE JUEGA"), F("DE OTRO PLANETA 🚀"),
+    SP("NOBODY CAN STOP US"), SP("BOW DOWN 👑"), SP("NO MERCY. NO DOUBT."), SP("CALL US DADDY 👑"), SP("SIT DOWN. BE HUMBLE."), SP("WE'RE NOT THE SAME 💅"),
+    SP("TOO EASY. NEXT. 😴"), SP("THEY NEVER STOOD A CHANCE"), SP("COOKED THEM 🍳"), SP("WAKE UP, IT'S OVER"), SP("PAPÁS DE LA CANCHA 👑"), SP("LOS DEJAMOS LLORANDO 😂"),
+    SP("¿QUIÉN SIGUE? 🫵"), SP("HUMILLACIÓN TOTAL"),
+  ],
+  lose: [
+    F("CARDIO WAS THE REAL WIN 🏃"), F("THANKS FOR SHOWING UP 😂"), F("NEXT WEEK FOR SURE… RIGHT? 🤡"), F("SOMEBODY CHECK ON THEM 😭"), F("THE DONATION TEAM 🎁"),
+    F("PARTICIPATION TROPHY 🏅"), F("IT'S NOT ABOUT WINNING… RIGHT?"), F("GOOD EFFORT, BAD RESULT"), F("WE'LL GET 'EM NEXT TIME"), F("AT LEAST THE JERSEYS LOOKED GOOD 👕"),
+    F("PRACTICE STARTS MONDAY"), F("THE SNACKS WERE GREAT THOUGH 🍕"), F("MORAL VICTORY 🙃"), F("BACK TO THE DRAWING BOARD ✏️"), F("ASÍ NO SE PUEDE 😂"), F("ESTÁN DE VACACIONES 🏖️"),
+    F("EL EQUIPO DONANTE 🎁"), F("LA PRÓXIMA SERÁ… TAL VEZ"), F("AL MENOS SUDARON 💦"), F("GRACIAS POR PARTICIPAR"),
+    SP("GO HOME. PRACTICE. 🏠"), SP("THAT WAS EMBARRASSING 😭"), SP("THE BUS LEFT WITHOUT THEM 🚌"), SP("FREE 3 POINTS 🎁"), SP("DELETE THE TEAM CHAT 🗑️"),
+    SP("CARDIO MERCHANTS 🏃"), SP("NOT EVEN CLOSE 🤡"), SP("RETIRE. PLEASE. 🙏"), SP("THE GOAL WAS 8 FEET WIDE 🥅"), SP("WHO TAUGHT THEM SOCCER? 🤔"),
+    SP("PLAYING FIFA ON EASY MODE?"), SP("THE BALL IS ROUND, GUYS ⚽"), SP("DAY ONE ON THE PITCH?"), SP("CONES PLAY BETTER DEFENSE 🚧"), SP("SELL THE CLEATS 👟"),
+    SP("PAYASOS DE LA CANCHA 🤡"), SP("VAYAN A ENTRENAR 🏃"), SP("NI CON AYUDA DEL ÁRBITRO"), SP("DE PUERTA EN PUERTA PIDIENDO GOLES 🚪"), SP("BORREN EL GRUPO 🗑️"),
+  ],
+  draw: [
+    F("NOBODY WINS. NOBODY LOSES."), F("SEE YOU IN THE REMATCH 🔁"), F("TOO CLOSE TO CALL"), F("EVENLY MATCHED"), F("WE GO AGAIN 🔁"), F("EMPATE Y A LA REVANCHA"),
+    SP("BOTH TEAMS SCARED TO LOSE 🐔"), SP("BORING. REMATCH. NOW."), SP("NADIE QUISO GANAR 😴"),
+  ],
+  pregame: [
+    F("GAME DAY ⚽"), F("LET'S GET IT"), F("MAY THE BEST TEAM WIN"), F("LACE 'EM UP 👟"), F("IT'S TIME"), F("WHO WANTS IT MORE?"), F("NO EXCUSES TONIGHT"),
+    F("BRING YOUR A-GAME"), F("ROUND 1. FIGHT. 🥊"), F("THE PITCH IS WAITING"), F("HOY SE JUEGA ⚽"), F("A DARLO TODO"), F("QUE GANE EL MEJOR"),
+    SP("SOMEBODY'S GOING HOME SAD 😭"), SP("BRING TISSUES 🧻"), SP("PICK YOUR SIDE. CHOOSE WISELY."), SP("CAN'T WAIT TO SEE WHO CRIES 😂"), SP("LOSER BUYS THE DRINKS 🍻"),
+    SP("TALK IS CHEAP. SHOW UP. 🫵"), SP("PREPAREN LOS PAÑUELOS 🧻"), SP("EL QUE PIERDA PAGA 🍻"), SP("HOY HAY LLANTO 😭"),
+  ],
+};
+const CARD_KINDS = ["win", "lose", "draw", "pregame"];
+const cardLinesRef = () => db.collection("futnetPrivate").doc("cardLines");   // server-only
+let cardLinesCache = { at: 0, lines: null };
+async function readCardLines() {
+  if (cardLinesCache.lines && Date.now() - cardLinesCache.at < 5 * 60000) return cardLinesCache.lines;
+  let d = null;
+  try { const s = await cardLinesRef().get(); d = s.exists ? s.data() : null; } catch (e) { d = null; }
+  const lines = {};
+  CARD_KINDS.forEach((k) => { lines[k] = d && Array.isArray(d[k]) ? d[k] : DEFAULT_CARD_LINES[k]; });
+  cardLinesCache = { at: Date.now(), lines };
+  return lines;
+}
+exports.cardLines = onCall(async (request) => {
+  if (!(request.auth && request.auth.uid)) throw new HttpsError("unauthenticated", "Please sign in.");
+  return { lines: await readCardLines() };
+});
+
+// ---------------------------------------------------------------- 🚩 Score flags: a captain says "this score is wrong"
+//   eventsList/{id}/flags/{auto} or vsMatches/{id}/flags/{auto}  (server only)
+//   doc.scoreFlags = { off: true (organizer turned flags off), banned: [uid] (people who can't flag this game),
+//                      who: "captains" (default) | "players" (anyone in the game), hours: 1 (default; 0 = no limit, how long after a match ends) }
+//   The organizer gets a notification and sees the flags in the Admin tab (Fix / Dismiss / stop this captain).
+const flagGoals = (list) => arr(list).length;
+async function flagTarget(kind, id) {
+  if (!id || String(id).includes("/")) throw new HttpsError("invalid-argument", "Missing game.");
+  const ref = col(kind === "vs" ? "vsMatches" : "eventsList").doc(String(id));
+  const s = await ref.get();
+  if (!s.exists) throw new HttpsError("not-found", "Game not found.");
+  return { ref, g: s.data() || {} };
+}
+async function isFlagCaptain(kind, g, uid) {
+  if (kind === "vs") {
+    const ids = arr(g.teams).filter((t) => t && t.state === "confirmed").map((t) => t.teamId).filter(Boolean);
+    const docs = await Promise.all(ids.map((t) => col("teams").doc(String(t)).get().catch(() => null)));
+    return docs.some((d) => d && d.exists && teamBoss(d.data(), uid));
+  }
+  if (Object.values(g.teamCaptains || {}).map(String).includes(uid)) return true;
+  return arr(g.attendees).some((a) => a && a.uid === uid && a.isCaptain);
+}
+async function isFlagPlayer(kind, g, uid) {
+  if (kind === "vs") {
+    const ids = arr(g.teams).filter((t) => t && t.state === "confirmed").map((t) => t.teamId).filter(Boolean);
+    const docs = await Promise.all(ids.map((t) => col("teams").doc(String(t)).get().catch(() => null)));
+    return docs.some((d) => d && d.exists && arr((d.data() || {}).members).some((m) => m && m.uid === uid)) || arr(g.memberUids).includes(uid);
+  }
+  if (arr(g.attendees).some((a) => a && a.uid === uid)) return true;
+  return Object.values(g.teamAssignments || {}).some((l) => arr(l).some((p) => p && p.uid === uid));
+}
+function flagEndedAt(kind, g, idx) {
+  const m = kind === "vs" ? arr(g.results)[idx] : arr(g.matches)[idx];
+  const t = m && (m.endedAt || m.at || m.timestamp);
+  return !t ? 0 : typeof t === "number" ? t : Date.parse(t) || 0;
+}
+function flagLabel(kind, g, idx) {
+  if (kind === "vs") {
+    const name = (tid) => (arr(g.teams).find((t) => t && t.teamId === tid) || {}).name || "Team";
+    const r = arr(g.results)[idx];
+    if (r) return `Game ${idx + 1}: ${name(r.a)} ${r.ga} - ${r.gb} ${name(r.b)}`;
+    if (idx === -1 && g.score) { const [a, b] = Object.keys(g.score); return `Final: ${name(a)} ${g.score[a]} - ${g.score[b]} ${name(b)}`; }
+    return "";
+  }
+  const m = arr(g.matches)[idx];
+  return m ? `Match ${idx + 1}: ${m.teamA || "Team A"} ${flagGoals(m.team1Goals)} - ${flagGoals(m.team2Goals)} ${m.teamB || "Team B"}` : "";
+}
+async function canRunFlags(kind, g, uid, auth) {
+  if (kind === "vs") return g.organizerId === uid || isOwner(auth);
+  return canSeeGameViews(g, uid, auth);
+}
+exports.flagScore = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const d = request.data || {};
+  const kind = d.kind === "vs" ? "vs" : "event";
+  const { ref, g } = await flagTarget(kind, d.id);
+  const set = g.scoreFlags || {};
+  if (set.off) throw new HttpsError("failed-precondition", "The organizer turned off score flags for this game.");
+  if (arr(set.banned).includes(uid)) throw new HttpsError("permission-denied", "The organizer turned off flags for you in this game.");
+  const who = set.who === "players" ? "players" : "captains";
+  const ok = (await isFlagCaptain(kind, g, uid)) || (who === "players" && (await isFlagPlayer(kind, g, uid)));
+  if (!ok) throw new HttpsError("permission-denied", who === "players" ? "Only players in this game can flag a score." : "Only team captains can flag a score.");
+  const idx = Number.isInteger(+d.match) ? +d.match : -2;
+  const label = flagLabel(kind, g, idx);
+  if (!label) throw new HttpsError("not-found", "That match isn't there any more.");
+  const hours = Number.isFinite(Number(set.hours)) && Number(set.hours) >= 0 ? Number(set.hours) : 1;
+  const ended = flagEndedAt(kind, g, idx);
+  if (hours && ended && Date.now() - ended > hours * 3600000) throw new HttpsError("failed-precondition", `Too late: scores can only be flagged up to ${hours < 1 ? Math.round(hours * 60) + " minutes" : hours + (hours === 1 ? " hour" : " hours")} after the match.`);
+  const mine = await ref.collection("flags").where("uid", "==", uid).where("status", "==", "open").get();
+  if (mine.size >= 5) throw new HttpsError("resource-exhausted", "You already have 5 open flags here. Wait for the organizer.");
+  const card = (await col("directory").doc(uid).get()).data() || {};
+  const name = cardName(card) || "A player";
+  const num = (v) => (v === "" || v === null || v === undefined || !Number.isFinite(+v) ? null : Math.max(0, Math.min(99, Math.round(+v))));
+  const note = String(d.note || "").trim().slice(0, 300);
+  const flag = { uid, name, avatar: String(card.avatar || "").startsWith("http") ? card.avatar : "", match: idx, label, note, a: num(d.a), b: num(d.b), status: "open", at: Date.now() };
+  const added = await ref.collection("flags").add(flag);
+  const fix = flag.a !== null && flag.b !== null ? ` (says it was ${flag.a} - ${flag.b})` : "";
+  await notify([g.organizerId], {
+    senderUid: uid, type: "score_flag", title: "🚩 Score flagged",
+    body: `${name}: ${label}${fix}${note ? ". " + note : ""}`.slice(0, 240),
+    ...(kind === "vs" ? { matchId: String(d.id) } : { eventId: String(d.id) }), tab: "admin",
+  }, { exclude: [uid], key: `flag_${added.id}` });
+  return { ok: true, id: added.id };
+});
+exports.scoreFlags = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const d = request.data || {};
+  const kind = d.kind === "vs" ? "vs" : "event";
+  const { ref, g } = await flagTarget(kind, d.id);
+  if (!(await canRunFlags(kind, g, uid, request.auth))) throw new HttpsError("permission-denied", "Only the organizer can see the flags.");
+  if (d.flagId && ["fixed", "dismissed"].includes(d.status)) {
+    await ref.collection("flags").doc(String(d.flagId)).set({ status: d.status, doneBy: uid, doneAt: Date.now() }, { merge: true });
+  }
+  const snap = await ref.collection("flags").get();
+  const list = snap.docs.map((x) => ({ id: x.id, ...x.data() })).sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || (b.at || 0) - (a.at || 0)).slice(0, 100);
+  return { list };
 });

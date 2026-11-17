@@ -4,8 +4,10 @@
 // photos, and the top scorers. Same rules as the app and the community leaderboard.
 import { escapeHtml, isOwnGoal } from './event-store.js';
 import { openCelebrationCards, makeCelebrationCards } from './celebration-cards.js';
-import { postFilesToComments, postFilesToFeed, canPostToFeed } from './card-share.js';
+import { postFilesToComments, postFilesToFeed, canPostToFeed, postFilesToChat, canPostToChat } from './card-share.js';
 import { showUploadProgress, hideUploadProgress } from '../wa-chat.js';
+import { spiceOf } from '../card-lines.js';
+import { saveEventSpice } from './draft-replay.js';
 
 const FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#eab308', '#22c55e', '#a855f7', '#ec4899', '#f97316', '#ffffff', '#000000'];
 const DEFAULT_AVATAR = 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg';
@@ -172,7 +174,7 @@ window.openSessionResults = function(eventId) {
                     <div class="text-[11px] text-white/60 truncate">${escapeHtml(ev.title || 'Game')} · ${escapeHtml((window.fmtGameDate || String)(ev.date || ''))} · ${r.matches} match${r.matches === 1 ? '' : 'es'}</div>
                 </div>
             </div>
-            ${isCelebrationOwner() && r.winner ? `
+            ${isCelebrationOwner(ev) && r.winner ? `
             <div class="flex gap-2">
                 <button onclick="shareCelebrationCards('${escapeHtml(String(ev.id))}')" class="flex-1 bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-2xl text-sm shadow-[0_0_20px_rgba(251,191,36,0.35)]">📸 Make share images</button>
                 <button onclick="openCelebration('${escapeHtml(String(ev.id))}')" class="bg-black/50 border border-white/20 text-white font-bold py-3 px-4 rounded-2xl text-sm">🎉 Page</button>
@@ -188,8 +190,11 @@ window.openSessionResults = function(eventId) {
 // Made to look good in a screenshot for the group chat / Instagram.
 // ---------------------------------------------------------------------------
 const CELEBRATION_OWNERS = ['XytHMG8nIRg4BbLRHOmp5jVK1T23'];
-function isCelebrationOwner() {
-    return !!(window.currentUser && CELEBRATION_OWNERS.includes(String(window.currentUser.uid)));
+// The celebration cards: FutNet owner, the game's organizer, or an admin of its community.
+function isCelebrationOwner(ev) {
+    const u = window.currentUser; if (!u) return false;
+    if (CELEBRATION_OWNERS.includes(String(u.uid))) return true;
+    return !!(ev && (String(ev.organizerId) === String(u.uid) || (ev.communityId && (window.myCommunityRoles || {})[ev.communityId] === 'admin')));
 }
 
 function photoGrid(players, ring, size) {
@@ -209,9 +214,8 @@ const LOSER_LINES = [
 ];
 
 window.openCelebration = function(eventId) {
-    if (!isCelebrationOwner()) return;
     const ev = (window.eventsList || []).find(e => e.id === eventId);
-    if (!ev) return;
+    if (!ev || !isCelebrationOwner(ev)) return;
     const r = computeSessionResults(ev);
     const w = r.winner;
     if (!w) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
@@ -304,12 +308,13 @@ function celebrationInputs(ev) {
         location: ev.locationName || ev.location || ev.venue || '',
         format: ev.format || ev.gameFormat || '',
     };
-    return { results, info, opts: { accent, logo: 'img/celebration_logo.png', communityId: ev.communityId || '', eventId: ev.id } };
+    const spice = spiceOf(ev, 'friendly');
+    return { results, info, opts: { accent, logo: 'img/celebration_logo.png', communityId: ev.communityId || '', eventId: ev.id,
+        spice, canSpice: isCelebrationOwner(ev), onSpice: (v) => saveEventSpice(ev.id, v) } };
 }
 window.shareCelebrationCards = function(eventId) {
-    if (!isCelebrationOwner()) return;
     const ev = (window.eventsList || []).find(e => e.id === eventId);
-    if (!ev) return;
+    if (!ev || !isCelebrationOwner(ev)) return;
     const x = celebrationInputs(ev);
     if (!x) { window.showToast && window.showToast('No winner yet: finish some matches first.', 'error'); return; }
     openCelebrationCards(x.results, x.info, x.opts);
@@ -318,10 +323,9 @@ window.shareCelebrationCards = function(eventId) {
 // After "End event": send the celebration cards (Champions, Top scorers, Losers) straight to the game comments
 // and/or the community feed, or open them to look first.
 window.openEndShare = function(eventId) {
-    if (!isCelebrationOwner()) return;
     const ev = (window.eventsList || []).find(e => e.id === eventId);
-    if (!ev || !celebrationInputs(ev)) return;
-    const feed = canPostToFeed(ev.communityId);
+    if (!ev || !isCelebrationOwner(ev) || !celebrationInputs(ev)) return;
+    const feed = canPostToFeed(ev.communityId), chat = canPostToChat(ev.communityId);
     document.getElementById('end-share')?.remove();
     const m = document.createElement('div');
     m.id = 'end-share';
@@ -334,6 +338,7 @@ window.openEndShare = function(eventId) {
             <button onclick="document.getElementById('end-share').remove()" class="w-8 h-8 rounded-full bg-black/60 border border-white/15"><i class="fa-solid fa-xmark text-xs"></i></button></div>
         <p class="text-[11px] text-white/60">Champions, Top scorers and the Losers card.</p>
         ${row('es-comments', true, '💬 Game comments', 'One message per card.')}
+        ${chat ? row('es-chat', false, '💬 Community chat', 'One message per card.') : ''}
         ${feed ? row('es-feed', true, '📣 Community feed', 'One post with all the cards.') : ''}
         <button onclick="sendEndShare('${escapeHtml(String(eventId))}')" class="w-full bg-gradient-to-r from-amber-400 to-[#00F296] text-slate-950 font-black py-3 rounded-xl text-sm">Send</button>
         <button onclick="document.getElementById('end-share').remove(); shareCelebrationCards('${escapeHtml(String(eventId))}')" class="w-full bg-black/50 border border-white/20 text-white font-bold py-2.5 rounded-xl text-xs">👀 Let me see them first</button>
@@ -343,8 +348,8 @@ window.openEndShare = function(eventId) {
 };
 window.sendEndShare = async function(eventId) {
     const ev = (window.eventsList || []).find(e => e.id === eventId); if (!ev) return;
-    const toComments = !!document.getElementById('es-comments')?.checked, toFeed = !!document.getElementById('es-feed')?.checked;
-    if (!toComments && !toFeed) { window.showToast && window.showToast('Tick at least one.', 'error'); return; }
+    const toComments = !!document.getElementById('es-comments')?.checked, toFeed = !!document.getElementById('es-feed')?.checked, toChat = !!document.getElementById('es-chat')?.checked;
+    if (!toComments && !toFeed && !toChat) { window.showToast && window.showToast('Tick at least one.', 'error'); return; }
     document.getElementById('end-share')?.remove();
     const x = celebrationInputs(ev); if (!x) return;
     const done = [];
@@ -358,6 +363,7 @@ window.sendEndShare = async function(eventId) {
         if (!files.length) throw new Error('no cards');
         const caption = `🏆 ${x.info.title || 'Game'} results${x.info.date ? ' · ' + (window.fmtGameDate || String)(x.info.date) : ''}`;
         if (toComments) { await postFilesToComments(ev.id, files, caption); done.push('comments'); }
+        if (toChat && await postFilesToChat(ev.communityId, files, caption)) done.push('community chat');
         if (toFeed && await postFilesToFeed(ev.communityId, files, caption)) done.push('community feed');
         window.showToast && window.showToast(`Celebration cards sent 🎉 (${done.join(' + ')})`);
     } catch (e) {

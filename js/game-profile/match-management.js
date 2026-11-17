@@ -1,5 +1,5 @@
 // js/game-profile/match-management.js: Live match tracker with direct team builder roster lookups and custom team color styling
-import { mutateEvent, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
+import { mutateEvent, mutateEventLive, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
 import { kotfNext, kotfNote } from '../kotf.js';
 
 // ---------------------------------------------------------------- 👑 King of the field (event.gameType === 'kotf')
@@ -383,7 +383,7 @@ window.removeLiveGoal = async function(eventId, teamKey, index) {
     const goal = event?.liveMatchActive?.[key]?.[index];
     const name = typeof goal === 'string' ? goal : (goal && goal.name) || 'this goal';
     if (!confirm(`Remove the goal by ${name}?`)) return;
-    const res = await mutateEvent(eventId, (draft) => {
+    const res = await mutateEventLive(eventId, (draft) => {
         const live = draft.liveMatchActive;
         if (!live || !Array.isArray(live[key]) || index >= live[key].length) return false;
         // Remove the same goal even if another phone added one meanwhile
@@ -465,7 +465,7 @@ window.resetLiveMatchTimer = async function(eventId) {
 async function syncLiveMatchState(eventId, activeState, opts = {}) {
     const event = (window.eventsList || []).find(ev => ev.id === eventId);
     if (event) event.liveMatchActive = activeState;
-    await mutateEvent(eventId, (draft) => {
+    await mutateEventLive(eventId, (draft) => {
         const live = draft.liveMatchActive;
         if (!live) {
             if (!opts.create) return false;
@@ -553,6 +553,27 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
             <span class="text-xs font-bold text-white">${escapeHtml(p.name)}</span>
         </div>`;
 
+    // 🔁 Subs: anyone else signed up (another team's player filling in, or someone not on a team yet) + add a player to this team
+    const sameP = (a, b) => (a.uid && b.uid && String(a.uid) === String(b.uid)) || (a.name && b.name && a.name === b.name);
+    const subs = (event.attendees || []).filter(a => a && a.name && !assignedPlayers.some(p => sameP(p, a)));
+    const teamOfP = (a) => { const ta = event.teamAssignments || {}; const k = Object.keys(ta).find(k => (ta[k] || []).some(p => p && sameP(p, a))); return k === undefined ? '' : (mmTeamNames(event)[+k] || ''); };
+    const free = subs.filter(a => !teamOfP(a));
+    const subsHtml = `
+            <div class="space-y-2 pt-2 border-t border-white/10">
+                <details ${subs.length <= 4 ? 'open' : ''} class="space-y-2"><summary class="cursor-pointer text-[10px] font-black uppercase tracking-wider text-sky-300">🔁 Sub / filling in for ${escapeHtml(teamName || 'this team')} (${subs.length})</summary><div class="space-y-2 pt-2">
+                ${subs.map(p => `<div data-goal="${escapeHtml(p.name)}" data-uid="${escapeHtml(String(p.uid || ''))}" onclick="recordLiveGoal('${eventId}', '${teamKey}', this.dataset.goal, this.dataset.uid)" class="flex items-center gap-3 p-3 bg-black/40 hover:bg-black rounded-xl cursor-pointer transition border border-sky-400/20">
+                    <img src="${escapeHtml((window.resolvePlayerAvatar ? window.resolvePlayerAvatar(p) : p.avatar) || 'https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg')}" class="w-7 h-7 rounded-full object-cover" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/gh/twbs/icons@1.11.3/icons/person-circle.svg'">
+                    <span class="flex-1 min-w-0 text-xs font-bold text-white truncate">${escapeHtml(p.name)}</span><span class="text-[9px] text-white/45 shrink-0">${escapeHtml(teamOfP(p) || 'no team')}</span>
+                </div>`).join('') || '<p class="text-[11px] text-white/45">Everyone signed up is on a team.</p>'}</div></details>
+                <div class="bg-black/40 border border-white/10 rounded-xl p-2.5 space-y-2">
+                    <div class="text-[10px] font-black text-white/70">➕ Add a player to ${escapeHtml(teamName || 'this team')}</div>
+                    ${free.length ? `<select id="live-add-pick" class="w-full bg-black/60 border border-white/20 rounded-xl px-2 py-2 text-xs font-bold text-white"><option value="">Pick someone signed up…</option>${free.map((a, i) => `<option value="${i}">${escapeHtml(a.name)}</option>`).join('')}</select>` : ''}
+                    <input id="live-add-name" maxlength="40" placeholder="${free.length ? 'or type a new name' : 'Type a name'}" class="w-full bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-xs text-white">
+                    <button onclick="liveAddToTeam('${eventId}', '${teamKey}')" class="w-full bg-sky-400 text-slate-950 font-black py-2 rounded-xl text-xs">Add to team</button>
+                </div>
+            </div>`;
+    window._liveFree = free;
+
     picker.innerHTML = `
         <div class="bg-[#040E13] border border-emerald-500/40 rounded-3xl max-w-xs w-full p-6 space-y-4 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between border-b border-white/10 pb-3">
@@ -567,6 +588,7 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
                 <span class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-sm">🤷</span>
                 <span class="text-xs font-bold text-white/90">Don't recall / someone else</span>
             </div>
+            ${subsHtml}
             ${otherPlayers.length ? `
             <div class="space-y-2 pt-2 border-t border-white/10">
                 <div class="text-[10px] font-black uppercase tracking-wider text-amber-300">Own goal by ${escapeHtml(otherName || 'the other team')}</div>
@@ -575,6 +597,34 @@ window.openGoalScorerPicker = function(eventId, teamKey) {
             <button onclick="document.getElementById('goal-scorer-picker-modal').remove()" class="w-full bg-black/60 text-white py-2.5 rounded-xl text-xs font-bold border border-white/20">Cancel</button>
         </div>
     `;
+};
+
+// ➕ Put a player on a live team (someone signed up with no team, or a new name: they're added to the game too).
+//   Saved like the clock and goals: works with no signal.
+window.liveAddToTeam = async function(eventId, teamKey) {
+    const event = (window.eventsList || []).find(ev => ev.id === eventId);
+    const live = event && event.liveMatchActive; if (!live) return;
+    const idx = teamKey === 'A' ? live.teamAIndex : live.teamBIndex;
+    if (!Number.isInteger(idx)) { window.showToast && window.showToast('Pick the teams first.', 'error'); return; }
+    const pick = document.getElementById('live-add-pick')?.value;
+    const typed = (document.getElementById('live-add-name')?.value || '').trim();
+    const att = pick !== undefined && pick !== '' ? (window._liveFree || [])[+pick] : null;
+    if (!att && !typed) { window.showToast && window.showToast('Pick someone or type a name.', 'error'); return; }
+    const person = att ? { uid: String(att.uid || ''), name: att.name } : { uid: 'usr_' + Math.random().toString(36).substring(2, 9), name: typed.slice(0, 40) };
+    const res = await mutateEventLive(eventId, (draft) => {
+        draft.teamAssignments = draft.teamAssignments || {};
+        const key = draft.teamAssignments[idx] !== undefined ? idx : String(idx);
+        const list = Array.isArray(draft.teamAssignments[key]) ? draft.teamAssignments[key] : [];
+        if (list.some(p => p && ((person.uid && String(p.uid) === person.uid) || p.name === person.name))) return false;
+        draft.teamAssignments[key] = [...list, { uid: person.uid, name: person.name, position: 'Player', guests: [] }];
+        if (!att) {
+            draft.attendees = draft.attendees || [];
+            draft.attendees.push({ uid: person.uid, name: person.name, avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(person.name)}`, role: 'Player', status: 'confirmed', paid: 'Unpaid', guests: [], addedByAdmin: true });
+        }
+    });
+    if (res.aborted) { window.showToast && window.showToast(`${person.name} is already on this team.`); }
+    else if (res.ok) window.showToast && window.showToast(`${person.name} added ✅`);
+    window.openGoalScorerPicker(eventId, teamKey);
 };
 
 window.recordLiveGoal = async function(eventId, teamKey, scorerName, scorerUid) {
@@ -586,7 +636,7 @@ window.recordLiveGoal = async function(eventId, teamKey, scorerName, scorerUid) 
 
     // The goal is added to the LIVE match, so a goal added at the same moment on a phone is kept too.
     const key = teamKey === 'A' ? 'team1Goals' : 'team2Goals';
-    const res = await mutateEvent(eventId, (draft) => {
+    const res = await mutateEventLive(eventId, (draft) => {
         if (!draft.liveMatchActive) return false;   // the match was already saved somewhere else
         draft.liveMatchActive[key] = Array.isArray(draft.liveMatchActive[key]) ? draft.liveMatchActive[key] : [];
         // team1GoalsBy: [{ n: name, u: user id }] next to the names, lined up (apps that don't know it just ignore it)
@@ -611,7 +661,7 @@ window.saveLiveMatchResult = async function(eventId) {
 
     // Built from the LIVE game: if a phone (or another browser) already saved this match when the
     // timer hit 00:00, nothing is saved twice. Goals added on other devices are included.
-    const res = await mutateEvent(eventId, (draft) => {
+    const res = await mutateEventLive(eventId, (draft) => {
         const live = draft.liveMatchActive;
         if (!live) return false;
         const namesNow = mmTeamNames(draft.id ? draft : { ...draft, id: eventId });
@@ -652,7 +702,7 @@ window.saveLiveMatchResult = async function(eventId) {
 
 window.discardLiveMatch = async function(eventId) {
     if (!confirm("Delete this live match? The score will not be saved.")) return;
-    const res = await mutateEvent(eventId, (draft) => { draft.liveMatchActive = null; });
+    const res = await mutateEventLive(eventId, (draft) => { draft.liveMatchActive = null; });
     if (res.ok) {
         if (window.liveMatchTimerInterval) clearInterval(window.liveMatchTimerInterval);
         document.getElementById('start-match-screen-modal')?.remove();

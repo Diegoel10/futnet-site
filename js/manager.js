@@ -478,6 +478,7 @@ async function settings() {
             <div class="lbl">🛡️ Blocked changes (someone tried to change a team or tournament that isn't theirs, and it was put back)</div>
             ${blk.list.map(x => `<div class="text-sm flex items-start gap-2 py-1 border-b border-white/5"><button onclick="mgrPlayer('${jsq(x.uid)}')" class="font-bold text-[#00F296] shrink-0">${esc(x.who || x.uid)}</button><span class="flex-1 text-white/80">${esc(x.kind)} <b>${esc(x.name)}</b>: ${esc(x.why)}</span><span class="text-[11px] text-white/45 shrink-0">${x.at ? new Date(x.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span></div>`).join('') || '<p class="text-sm text-white/50">Nothing blocked yet.</p>'}
         </div>
+        <div class="card space-y-2" id="cl-box"><div class="lbl">🃏 Card lines</div><p class="text-sm text-white/50">Loading…</p></div>
         <div class="card space-y-3 ${g.creatorsOnly ? 'border-amber-400/60' : ''}">
             <div class="flex items-center justify-between gap-3">
                 <div><div class="font-black">🧪 Beta mode: only approved people create</div>
@@ -498,7 +499,40 @@ async function settings() {
             <div class="lbl">Deleted / merged accounts</div>
             ${del.list.map(x => `<button onclick="mgrPlayer('${jsq(x.uid)}')" class="w-full text-left text-sm flex items-center gap-2 py-1"><span class="flex-1">${esc(x.name || x.uid)}</span><span class="text-[11px] text-white/50">${x.mergedInto ? 'merged' : 'deleted ' + dt(x.deletedAt)}</span></button>`).join('') || '<p class="text-sm text-white/50">None.</p>'}
         </div>`);
+    call('cardLines').then(r => { S.cl = r.lines; S.clTab = S.clTab || 'win'; drawCardLines(); }).catch(() => { const b = $('cl-box'); if (b) b.innerHTML = '<div class="lbl">🃏 Card lines</div><p class="text-sm text-red-300">Couldn\'t load. Is the newest server code deployed?</p>'; });
 }
+// 🃏 Card lines: the jokes/disses on the share cards. 🌶 = spicy (only used when the organizer picks Spicy).
+const CL_TABS = [['win', '🏆 Winners'], ['lose', '😭 Losers'], ['draw', '🤝 Draws'], ['pregame', '⚔️ Pre-game']];
+function drawCardLines() {
+    const b = $('cl-box'); if (!b || !S.cl) return;
+    const list = S.cl[S.clTab] || [];
+    const spicy = list.filter(x => x.s).length;
+    b.innerHTML = `<div class="lbl">🃏 Card lines (the jokes on share cards)</div>
+        <p class="text-[11px] text-white/55">Picked at random for the cards. Each game's organizer chooses <b>Friendly</b> (only plain lines) or <b>Spicy</b> (🌶 lines too). Keep it about soccer, never about the person.</p>
+        <div class="flex gap-1 flex-wrap">${CL_TABS.map(([k, l]) => `<button onclick="mgrClTab('${k}')" class="${S.clTab === k ? 'btn' : 'btn-dark'} !py-1 !px-2 text-[12px]">${l} (${(S.cl[k] || []).length})</button>`).join('')}</div>
+        <div class="text-[11px] text-white/45">${list.length - spicy} friendly · ${spicy} 🌶 spicy. Tap 🌶 to switch a line.</div>
+        <div class="max-h-[360px] overflow-y-auto space-y-1">${list.map((x, i) => `<div class="flex items-center gap-2 text-sm py-1 border-b border-white/5">
+            <button onclick="mgrClSpicy(${i})" title="Spicy?" class="shrink-0 w-7 text-center ${x.s ? '' : 'opacity-25 grayscale'}">🌶</button>
+            <span class="flex-1 ${x.s ? 'text-orange-200' : ''}">${esc(x.t)}</span>
+            <button onclick="mgrClDel(${i})" class="text-red-300 text-[12px] font-bold shrink-0">✕</button></div>`).join('') || '<p class="text-sm text-white/50">No lines yet.</p>'}</div>
+        <div class="flex gap-2"><input id="cl-new" class="inp" maxlength="80" placeholder="New line, e.g. TOO EASY 😮‍💨" onkeydown="if(event.key==='Enter')mgrClAdd()">
+            <label class="flex items-center gap-1 text-[12px] shrink-0"><input type="checkbox" id="cl-sp"> 🌶</label><button onclick="mgrClAdd()" class="btn">Add</button></div>
+        <button onclick="mgrClSave()" id="cl-save" class="btn w-full ${S.clDirty ? '' : 'opacity-50'}">${S.clDirty ? 'Save changes' : 'Saved ✓'}</button>`;
+}
+const clChanged = () => { S.clDirty = true; drawCardLines(); };
+window.mgrClTab = (k) => { S.clTab = k; drawCardLines(); };
+window.mgrClSpicy = (i) => { const x = S.cl[S.clTab][i]; if (x) { x.s = !x.s; clChanged(); } };
+window.mgrClDel = (i) => { S.cl[S.clTab].splice(i, 1); clChanged(); };
+window.mgrClAdd = () => {
+    const t = val('cl-new').toUpperCase(); if (!t) return;
+    S.cl[S.clTab] = [{ t, s: !!$('cl-sp')?.checked }, ...(S.cl[S.clTab] || [])]; clChanged();
+    setTimeout(() => $('cl-new')?.focus(), 0);
+};
+window.mgrClSave = async () => {
+    if (!S.clDirty) return;
+    const r = await call('cardLines', { save: S.cl }).catch(() => null);
+    if (r) { S.cl = r.lines; S.clDirty = false; drawCardLines(); toast('Card lines saved 🃏'); }
+};
 window.mgrGate = async (on) => {
     if (!confirm(on ? 'Turn ON beta mode? Only approved people will be able to create.' : 'Turn OFF beta mode? Everyone will be able to create again.')) return;
     await call('gate', { creatorsOnly: on }); toast(on ? 'Beta mode ON 🧪' : 'Beta mode OFF'); settings();

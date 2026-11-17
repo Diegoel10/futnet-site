@@ -725,8 +725,9 @@
         import './js/badges.js';
         import './js/track.js';
         import './js/beta-gate.js';
-        // Tournaments load once the page is ready (never slows down opening the app)
-        (window.requestIdleCallback || ((f) => setTimeout(f, 2500)))(() => import('./js/tournaments.js').catch(() => {}));
+        // Tournaments load right after the rest of the page (⚡ before: iPhones waited 2.5 s, since they have no "idle" signal,
+        // then the tournament box popped in and pushed the page down)
+        setTimeout(() => import('./js/tournaments.js').catch(() => {}), 0);
         import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 

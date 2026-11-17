@@ -73,6 +73,7 @@ window.initEventsLiveListener = function() {
             if (!evData.declinedList) evData.declinedList = [];
             list.push(evData);
         });
+        if (window.overlayPendingLive) window.overlayPendingLive(list);   // 📶 live-match changes still waiting on this phone
         window.eventsList = list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
         // Only redraw what actually changed. Before, ANY game changing anywhere redrew the open game

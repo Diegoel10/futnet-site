@@ -1,9 +1,14 @@
 // js/game-profile/stats-tab.js: Dark-mode themed Game Stats with goalscorers displayed on match cards, live points, and live top scorers
 import { escapeHtml, jsArg, isOwnGoal } from './event-store.js';
+import { flagButtonHtml, canFlagMatch, isEventCaptain, isEventPlayer, matchEndedAt } from '../score-flags.js';
 export function renderStatsTab(event) {
     const subTab = window.activeStatsSubTab || 'matches';
     const teamsCount = event.teamsCount || 3;
     const liveActive = event.liveMatchActive;
+    // 🚩 captains can flag a wrong score (unless the organizer turned it off or stopped them)
+    const flagMe = { captain: isEventCaptain(event), player: isEventPlayer(event) };
+    const notBoss = String(event.organizerId) !== String((window.currentUser || {}).uid);
+    const canFlag = (m) => notBoss && canFlagMatch(event, matchEndedAt(m), flagMe);
     const attendees = Array.isArray(event.attendees) ? event.attendees : [];
 
     // Photo for a name (goal scorers are saved by name): find the player, then use their live profile photo.
@@ -28,6 +33,18 @@ export function renderStatsTab(event) {
         return fallback;
     };
 
+    // 🔎 Matches: show all, or only one team's (dropdown)
+    window.statsTeamFilter = window.statsTeamFilter || {};
+    const tf = window.statsTeamFilter[event.id] ?? '';
+    const playedBy = (m) => [teamIdx(m.teamAIndex, m.teamA, 0), teamIdx(m.teamBIndex, m.teamB, 1)];
+    const showMatch = (m) => tf === '' || playedBy(m).includes(+tf);
+    const shownCount = (event.matches || []).filter(showMatch).length;
+    const teamPicker = teamsCount > 2 && (event.matches || []).length ? `<select onchange="setStatsTeamFilter('${event.id}', this.value)" aria-label="Show matches of"
+        class="w-full bg-black/60 border ${tf !== '' ? 'border-[#00F296] text-[#00F296]' : 'border-white/15 text-white'} rounded-xl px-3 py-2.5 text-xs font-bold">
+        <option value="">All teams (${(event.matches || []).length} matches)</option>
+        ${Array.from({ length: teamsCount }, (_, i) => `<option value="${i}" ${tf === String(i) ? 'selected' : ''}>${escapeHtml(getTeamNameByIndex(i))} (${(event.matches || []).filter(m => playedBy(m).includes(i)).length})</option>`).join('')}
+    </select>` : '';
+
     return `
         <div class="space-y-4 py-2 text-white">
             <div class="bg-black/40 border border-emerald-500/30 p-1 rounded-2xl flex items-center space-x-1 backdrop-blur-md">
@@ -38,6 +55,8 @@ export function renderStatsTab(event) {
 
             ${subTab === 'matches' ? `
                 <div class="space-y-3">
+                    ${teamPicker}
+                    ${tf !== '' && !shownCount ? '<p class="text-xs text-white/40 italic text-center py-6">This team has no matches yet.</p>' : ''}
                     ${liveActive ? `
                         <div class="bg-gradient-to-r from-emerald-950 to-teal-950 border-2 border-[#00F296] rounded-2xl p-4 space-y-3 shadow-xl animate-pulse">
                             <div class="flex items-center justify-between">
@@ -74,7 +93,7 @@ export function renderStatsTab(event) {
 
                     ${(event.matches || []).length === 0 && !liveActive ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
                     
-                    ${(event.matches || []).map((m, idx) => ({ m, idx })).reverse().map(({ m, idx }) => {
+                    ${(event.matches || []).map((m, idx) => ({ m, idx })).filter(({ m }) => showMatch(m)).reverse().map(({ m, idx }) => {
                         window.teamNames[event.id] = window.teamNames[event.id] || {};
                         const teamA = m.teamA || window.teamNames[event.id][0] || "Team 1";
                         const teamB = m.teamB || window.teamNames[event.id][1] || "Team 2";
@@ -113,6 +132,7 @@ export function renderStatsTab(event) {
                                     <div class="space-y-1 min-w-0">${t1ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
                                     <div class="space-y-1 min-w-0">${t2ScorersHtml || '<span class="text-[10px] text-white/40 italic">No goals</span>'}</div>
                                 </div>
+                                ${canFlag(m) && isFinished ? `<div class="flex justify-end">${flagButtonHtml('event', event.id, idx, `Match ${idx + 1}: ${teamA} ${t1Goals.length} - ${t2Goals.length} ${teamB}`, true)}</div>` : ''}
                             </div>
                         `;
                     }).join('')}

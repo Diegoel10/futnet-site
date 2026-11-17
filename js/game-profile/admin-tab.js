@@ -3,6 +3,7 @@ import { db, appId } from '../firebase-config.js';
 import { doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { mutateEvent, stripBigPhotos, safeAvatar, escapeHtml, ownGoalLabel, UNKNOWN_SCORER } from './event-store.js';
 import { adminStatusHtml } from '../game-status.js';
+import { adminFlagsHtml, mountAdminFlags } from '../score-flags.js';
 import { payOptionsHtml, plusExtraHtml, waitlistOptionsHtml, readWaitlistOptions, readPayOptions, refundMember, dollars, creditGame, costCents, joinHooks, refundHooks } from '../credits.js';
 import { offerEligible, startMsOf, freeSpotsOf, waitingUids, offerExpiry, unpaidList } from '../money-rules.js';
 
@@ -273,6 +274,7 @@ export function renderAdminTab(event) {
                     ${tool(`switchGameProfileTab('manage-storm')`, '⛈️', 'Storm watch', stormOnNow ? DARKT + ' !border-amber-400/70 !text-amber-200' : DARKT)}
                     ${tool(`openTwoPageGameWizard('${event.id}', 'edit')`, '✏️', 'Edit')}
                     ${tool(`openTwoPageGameWizard('${event.id}', 'copy')`, '📋', 'Copy')}
+                    ${tool(`openGameAnalytics('${event.id}')`, '📈', 'Analytics')}
                     ${event.livestream && event.livestream.status === 'live' ? '' : tool(`openStartLivestream('${event.id}')`, '🔴', 'Go live')}
                     ${event.teamsSet && event.teamsSet.at ? tool(`openTeamsSetShare('${event.id}')`, '📸', 'Share teams') + tool(`setTeamsReady('${event.id}', false)`, '↩️', 'Unset teams') : tool(`setTeamsReady('${event.id}', true)`, '✅', 'Teams set', 'bg-[#00F296] text-slate-950 font-black rounded-xl text-xs px-2 transition')}
                     ${tool(`switchGameProfileTab('manage-matches')`, '⏱️', 'Match management', liveActive ? 'bg-gradient-to-r from-[#00F296] to-[#00B4AE] text-slate-950 font-black rounded-xl text-xs px-2 transition' : DARKT)}
@@ -280,7 +282,12 @@ export function renderAdminTab(event) {
                     ${tool(`confirmCancelGame('${event.id}')`, '❌', 'Cancel game', DARKT + ' !text-red-400')}
                 </div>
                 <p class="text-[11px] text-white/45">"Need players?" Notify everyone sends this game to everyone on FutNet (once an hour).</p>
+                ${matches.length ? adminFlagsHtml('event', event.id) : ''}
             </div>`;
+        if (matches.length) setTimeout(() => mountAdminFlags('event', event.id, event, async (next) => {
+            const r = await mutateEvent(event.id, (draft) => { draft.scoreFlags = next; });
+            if (!r.ok) throw new Error('not saved');
+        }), 0);
     }
 
     return `
@@ -905,8 +912,11 @@ window.openEditMatchModal = function(eventId, matchIndex) {
         return (event.attendees || []).map(a => ({ name: a.name || 'Player', avatar: a.avatar || a.photoURL }));
     };
 
-    const t1Players = getTeamPlayers(teamA);
-    const t2Players = getTeamPlayers(teamB);
+    const byIndex = (i) => { const ta = event.teamAssignments || {}; const l = Number.isInteger(i) ? (ta[i] || ta[String(i)]) : null; return Array.isArray(l) ? l.filter(p => p && p.name) : null; };
+    const t1Players = byIndex(match.teamAIndex) || getTeamPlayers(teamA);
+    const t2Players = byIndex(match.teamBIndex) || getTeamPlayers(teamB);
+    // 🔁 a sub who scored: anyone else signed up for the game (fixing it after the game too)
+    const subsOf = (team) => (event.attendees || []).filter(a => a && a.name && !team.some(p => p.name === a.name));
 
     let modal = document.getElementById('edit-match-admin-modal');
     if (!modal) {
@@ -935,6 +945,7 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                         <option value="">+ Add Goal Scorer</option>
                         ${t1Players.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
                         <option value="${UNKNOWN_SCORER}">🤷 Don't recall / someone else</option>
+                        ${subsOf(t1Players).length ? `<optgroup label="🔁 Sub / other players">${subsOf(t1Players).map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('')}</optgroup>` : ''}
                         ${t2Players.length ? `<optgroup label="Own goal by ${escapeHtml(teamB)}">${t2Players.map(p => `<option value="${escapeHtml(ownGoalLabel(p.name))}">${escapeHtml(ownGoalLabel(p.name))}</option>`).join('')}</optgroup>` : ''}
                     </select>
                 </div>
@@ -958,6 +969,7 @@ window.openEditMatchModal = function(eventId, matchIndex) {
                         <option value="">+ Add Goal Scorer</option>
                         ${t2Players.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
                         <option value="${UNKNOWN_SCORER}">🤷 Don't recall / someone else</option>
+                        ${subsOf(t2Players).length ? `<optgroup label="🔁 Sub / other players">${subsOf(t2Players).map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join('')}</optgroup>` : ''}
                         ${t1Players.length ? `<optgroup label="Own goal by ${escapeHtml(teamA)}">${t1Players.map(p => `<option value="${escapeHtml(ownGoalLabel(p.name))}">${escapeHtml(ownGoalLabel(p.name))}</option>`).join('')}</optgroup>` : ''}
                     </select>
                 </div>
