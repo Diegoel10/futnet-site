@@ -130,11 +130,29 @@ function start() {
         V.list = s.docs.map(d => ({ ...d.data(), id: d.id })).filter(m => (m.date || '') >= cut);
         // ⚡ a live-game tap still saving: keep showing it (an older update from the server would flicker it back)
         V.list.forEach(m => { const loc = liveLocal[m.id]; if (loc && loc.n > 0) Object.assign(m, loc.v); });
+        if (V.open) { const fresh = V.list.find(m => m.id === V.open.id); if (fresh) V.open = fresh; }
+        redrawAfterUpdate();
+    }, () => {});
+}
+// ⚡ Every live tap / goal on ANY VS match sends an update. Redrawing the whole games list, teams and community
+//   on each one made the site slow (taps on games felt stuck). Now: the open match redraws at most every 0.2 s,
+//   only if it really changed, and the lists at most once a second.
+let openTimer = 0, listTimer = 0, openSig = '';
+function redrawAfterUpdate() {
+    if (!openTimer) openTimer = setTimeout(() => {
+        openTimer = 0;
+        if (!V.open) return;
+        const sig = JSON.stringify(V.open);
+        if (sig === openSig) return;
+        openSig = sig;
+        try { drawPage(); if (V.manage) drawManage(); } catch (e) { /* ignore */ }
+    }, 200);
+    if (!listTimer) listTimer = setTimeout(() => {
+        listTimer = 0;
         try { window.renderEvents && document.getElementById('events-grid') && window.renderEvents(); } catch (e) { /* ignore */ }
         try { window.refreshTeamsUi && window.refreshTeamsUi(); } catch (e) { /* ignore */ }
         try { window.refreshCommunityGamesTab && window.refreshCommunityGamesTab(); } catch (e) { /* ignore */ }
-        if (V.open) { const fresh = V.list.find(m => m.id === V.open.id); if (fresh) { V.open = fresh; drawPage(); if (V.manage) drawManage(); } }
-    }, () => {});
+    }, 1000);
 }
 let started = '';
 setInterval(() => { const u = myUid(); if (u && started !== u) { started = u; start(); } if (!u && started) { started = ''; if (V.unsub) V.unsub(); V.list = []; } }, 1000);
@@ -609,7 +627,9 @@ window.answerChallenge = async function (matchId, yes) {
 };
 
 // ---------------------------------------------------------------- one transaction per change
+const livePending = {};   // matchId -> live taps still saving (a full save waits for them, so it reads the newest goals / clock)
 async function changeMatch(id, fn) {
+    if (livePending[id] && livePending[id].size) await Promise.allSettled([...livePending[id]]);
     await runTransaction(db, async (tx) => {
         const ref = D('vsMatches', id);
         const s = await tx.get(ref);
@@ -1623,30 +1643,60 @@ window.vsSetKotfAll = async function (on) {
     const m = V.open; if (!m) return;
     try { await changeMatch(m.id, (x) => { x._edit = { kotfAllFields: !!on }; }); drawManage(); } catch (e) { toast("Couldn't save it.", 'error'); }
 };
+// ⚡ Live taps save with a plain update of ONLY what changed (e.g. "live.isRunning"), not a full locked read-and-write.
+//   Field 1 and Field 2 are in the same match, so before, a tap on one field waited for (and retried around) a tap
+//   on the other. Now each tap is one small write: the screen shows it right away, it never waits on the other
+//   field, and on a weak signal it's sent as soon as the phone gets a connection.
+const liveSame = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+function liveUpdates(key, prev, next) {
+    if (!prev || !next) return { [key]: next || null };
+    const up = {};
+    new Set([...Object.keys(prev), ...Object.keys(next)]).forEach(k => {
+        if (k === 'goals' || liveSame(prev[k], next[k])) return;
+        up[key + '.' + k] = next[k] === undefined ? null : next[k];
+    });
+    const g0 = prev.goals || [], g1 = next.goals || [];
+    if (!liveSame(g0, g1)) {
+        // goals only added at the end: add them (a goal another phone just added on this field isn't lost)
+        const added = g1.length > g0.length && g0.every((g, i) => liveSame(g, g1[i])) ? g1.slice(g0.length) : null;
+        up[key + '.goals'] = added ? arrayUnion(...added) : g1;
+    }
+    return up;
+}
 async function saveLive(fn) {
     const m = V.open; if (!m) return false;
     const key = liveKey();
-    let shown = false;
+    const prev = m[key] ? { ...m[key], goals: [...(m[key].goals || [])] } : null;
+    let next;
     try {
-        const L0 = m[key] ? { ...m[key], goals: [...(m[key].goals || [])] } : null;
-        const r = fn(L0, m);
-        if (r !== false) { showLiveNow(m, key, r === null ? null : (r || L0)); shown = true; }
-    } catch (e) { /* e.g. BUSY: the real save below says why */ }
+        const r = fn(prev ? { ...prev, goals: [...prev.goals] } : null, m);
+        if (r === false) return false;
+        next = r === null ? null : (r || prev);
+    } catch (e) {
+        toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : String(e && e.message) === 'BUSY' ? 'That team is playing on the other field.' : "Couldn't save it.", 'error');
+        return false;
+    }
+    const up = liveUpdates(key, prev, next);
+    if (!Object.keys(up).length) return true;
+    showLiveNow(m, key, next);
     try {
-        await changeMatch(m.id, (x) => { const L = x[key] ? { ...x[key], goals: [...(x[key].goals || [])] } : null; const r = fn(L, x); if (r === false) return false; x._edit = { ...(x._edit || {}), [key]: r === null ? null : (r || L) }; });
-        if (shown) liveSaved(m.id);
+        const w = updateDoc(D('vsMatches', m.id), { ...up, updatedBy: myUid(), updatedAt: serverTimestamp() });
+        (livePending[m.id] || (livePending[m.id] = new Set())).add(w);
+        try { await w; } finally { livePending[m.id].delete(w); }
+        liveSaved(m.id);
         return true;
     } catch (e) {
-        if (shown) {   // put back what's really saved
-            delete liveLocal[m.id];
-            getDoc(D('vsMatches', m.id)).then(d => {
-                if (!d.exists()) return;
-                const f = d.data();
-                [V.open && V.open.id === m.id ? V.open : null, V.list.find(x => x.id === m.id)].forEach(x => { if (x) { x.live = f.live || null; x.live2 = f.live2 || null; } });
-                drawPage(); if (V.manage) drawManage();
-            }).catch(() => {});
-        }
-        toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : String(e && e.message) === 'BUSY' ? 'That team is playing on the other field.' : "Couldn't save. Check your connection.", 'error'); return false; }
+        console.error(e);
+        // put back what's really saved
+        delete liveLocal[m.id];
+        getDoc(D('vsMatches', m.id)).then(d => {
+            if (!d.exists()) return;
+            const f = d.data();
+            [V.open && V.open.id === m.id ? V.open : null, V.list.find(x => x.id === m.id)].forEach(x => { if (x) { x.live = f.live || null; x.live2 = f.live2 || null; } });
+            drawPage(); if (V.manage) drawManage();
+        }).catch(() => {});
+        toast("Couldn't save. Check your connection.", 'error'); return false;
+    }
 }
 window.openVsManage = async function () {
     const m = V.open; if (!m) return;
