@@ -127,6 +127,8 @@ function start() {
     V.unsub = onSnapshot(C('vsMatches'), s => {
         const cut = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
         V.list = s.docs.map(d => ({ ...d.data(), id: d.id })).filter(m => (m.date || '') >= cut);
+        // ⚡ a live-game tap still saving: keep showing it (an older update from the server would flicker it back)
+        V.list.forEach(m => { const loc = liveLocal[m.id]; if (loc && loc.n > 0) Object.assign(m, loc.v); });
         try { window.renderEvents && document.getElementById('events-grid') && window.renderEvents(); } catch (e) { /* ignore */ }
         try { window.refreshTeamsUi && window.refreshTeamsUi(); } catch (e) { /* ignore */ }
         try { window.refreshCommunityGamesTab && window.refreshCommunityGamesTab(); } catch (e) { /* ignore */ }
@@ -201,7 +203,7 @@ export function vsCardHtml(m) {
             <h3 class="text-base font-bold text-white tracking-tight line-clamp-1">${esc(vsTitleOf(m))}</h3>
             ${vsStormOn(m) ? `<div class="flex justify-center gap-1.5"><span class="px-2 py-0.5 rounded-full border text-[10px] font-black bg-amber-500/15 text-amber-200 border-amber-400/60">⛈️ Storm watch</span><span class="px-2 py-0.5 rounded-full border text-[10px] font-black ${VS_STORM[vsStormState(m)].cls}">${VS_STORM[vsStormState(m)].emoji} ${VS_STORM[vsStormState(m)].label}</span></div>` : ''}
             ${n >= 5 ? `<div class="grid grid-cols-3 gap-2 justify-items-center">${slots.map(s => slotHtml(s, 36)).join('')}</div>` : `<div class="flex items-center justify-center gap-2">${n === 2 ? `${slotHtml(slots[0])}${middle}${slotHtml(slots[1])}` : slots.map(s => slotHtml(s, 36)).join(vsBadge(24))}</div>`}
-            ${isLiveNow && n > 2 ? (() => { const [a, b] = livePair(m); return a && b ? `<div class="text-center text-[11px] font-black"><span class="text-red-400">● LIVE</span> ${esc(a.name)} ${liveGoals(m, a.teamId)} - ${liveGoals(m, b.teamId)} ${esc(b.name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span>${m.live2 ? ' <span class="text-red-300">· +1 more game</span>' : ''}</div>` : ''; })() : ''}
+            ${n > 2 && m.status === 'open' && anyLive(m) ? fieldLinesHtml(m) : ''}
             <div class="space-y-1.5 text-[11px] font-medium text-white/90">
                 <div class="flex items-center gap-2"><i class="fa-solid fa-calendar text-[#00F296] w-3.5"></i><span>${esc((window.fmtGameDate || prettyDate)(m.date || ''))}</span></div>
                 <div class="flex items-center gap-2"><i class="fa-solid fa-clock text-[#00F296] w-3.5"></i><span>${esc(prettyTime(m.time))}</span></div>
@@ -736,7 +738,7 @@ function drawPage() {
         : vsBadge(n === 2 ? 70 : 34);
     const canTakeSpot = m.status === 'open' && !isFull(m) && !(m.date && m.date < ymdToday()) && !!myUid();
     const lp = liveNow ? livePair(m) : [];
-    const statusLine = liveNow && n > 2 ? `<span class="${liveRunning(m.live) ? 'text-red-400' : 'text-amber-300'}">${liveRunning(m.live) ? '● LIVE' : 'PAUSED'}</span> ${esc(lp[0].name)} ${liveGoals(m, lp[0].teamId)} - ${liveGoals(m, lp[1].teamId)} ${esc(lp[1].name)} · <span data-vs-clock="${esc(m.id)}" class="font-mono">${clockText(liveSecs(m.live))}</span>${m.live2 ? ' <span class="text-red-300">· +1 game on Field 2</span>' : ''}`
+    const statusLine = n > 2 && m.status === 'open' && anyLive(m) && conf.length >= 2 ? fieldLinesHtml(m)
         : m.status === 'cancelled' ? '❌ Cancelled' : m.status === 'final' ? `🏁 Final${m.forfeit ? ` · ${esc((shown.find(t => t.teamId === m.forfeit) || {}).name || '')} didn't show` : ''}`
         : m.status === 'challenge' ? 'Challenge · waiting for an answer' : isFull(m) ? '✅ All spots taken' : `${n - spotsTaken(m)} of ${n} spots open`;
     const mapsUrl = m.location ? 'https://maps.apple.com/?q=' + encodeURIComponent(m.location) : '';
@@ -1503,6 +1505,19 @@ function livePair(m, L0) {
     const a = conf.find(t => t.teamId === L.a), b = conf.find(t => t.teamId === L.b);
     return a && b ? [a, b] : [conf[0], conf[1]];
 }
+/** The ticking clock on a live game's card (Stats tab): "● 05:12" or "PAUSED 05:12". */
+const liveBadge = (m, k) => { const L = m[k]; const run = liveRunning(L); return `<span class="text-[11px] font-black ${run ? 'text-red-400' : 'text-amber-300'}">${run ? '● ' : 'PAUSED '}<span data-vs-clock="${esc(m.id)}" data-vs-key="${k}" class="font-mono">${clockText(liveSecs(L))}</span></span>`; };
+/** "● LIVE A 1 - 0 B · 05:12" for each field that has a game on (Field 1 / Field 2), with the clock ticking.
+ *  Games list card + match page (3+ team matches). */
+function fieldLinesHtml(m) {
+    const both = !!(m.live && m.live2);
+    return [['live', 1], ['live2', 2]].filter(([k]) => m[k]).map(([k, f]) => {
+        const L = m[k], [a, b] = livePair(m, L);
+        if (!a || !b) return '';
+        const run = liveRunning(L);
+        return `<div class="text-center text-[11px] font-black text-white/90"><span class="${run ? 'text-red-400' : 'text-amber-300'}">${run ? '● LIVE' : 'PAUSED'}${both || f === 2 ? ` · Field ${f}` : ''}</span> ${esc(a.name)} ${liveGoals(m, a.teamId, L)} - ${liveGoals(m, b.teamId, L)} ${esc(b.name)} · <span data-vs-clock="${esc(m.id)}" data-vs-key="${k}" class="font-mono">${clockText(liveSecs(L))}</span></div>`;
+    }).join('');
+}
 const goalName = (g) => g.own ? `${g.name || 'Player'} (own goal)` : (g.name || 'Goal');
 /** Live score card (everyone sees it on the match page). Two games at once = two cards (Field 1, Field 2). */
 function liveScoreHtml(m) {
@@ -1527,13 +1542,44 @@ function liveScoreOne(m, L, key, field) {
 }
 
 // ---- the full-screen "Manage Live Match" (organizer), same look as a normal game's
+// ⚡ Live-game taps (Start / Pause, goals, teams…) show on screen RIGHT AWAY, and save in the background.
+//   Before, the screen waited for the save to go to the server and back (1–3 seconds on a weak signal at the field).
+//   If the save fails, the next update from the server puts the real values back and a message says so.
+const liveLocal = {};   // matchId -> { n: saves still going, v: { live / live2 } shown meanwhile }
+function showLiveNow(m, key, v) {
+    const loc = liveLocal[m.id] || (liveLocal[m.id] = { n: 0, v: {} });
+    loc.n++; loc.v[key] = v;
+    [m, V.list.find(x => x.id === m.id)].forEach(x => { if (x) x[key] = v; });
+    try { drawPage(); if (V.manage) drawManage(); } catch (e) { /* drawn again on the next update */ }
+}
+function liveSaved(id) {
+    const loc = liveLocal[id]; if (!loc) return;
+    if (--loc.n <= 0) delete liveLocal[id];
+}
 async function saveLive(fn) {
     const m = V.open; if (!m) return false;
+    const key = liveKey();
+    let shown = false;
     try {
-        const key = liveKey();
+        const L0 = m[key] ? { ...m[key], goals: [...(m[key].goals || [])] } : null;
+        const r = fn(L0, m);
+        if (r !== false) { showLiveNow(m, key, r === null ? null : (r || L0)); shown = true; }
+    } catch (e) { /* e.g. BUSY: the real save below says why */ }
+    try {
         await changeMatch(m.id, (x) => { const L = x[key] ? { ...x[key], goals: [...(x[key].goals || [])] } : null; const r = fn(L, x); if (r === false) return false; x._edit = { ...(x._edit || {}), [key]: r === null ? null : (r || L) }; });
+        if (shown) liveSaved(m.id);
         return true;
-    } catch (e) { toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : String(e && e.message) === 'BUSY' ? 'That team is playing on the other field.' : "Couldn't save. Check your connection.", 'error'); return false; }
+    } catch (e) {
+        if (shown) {   // put back what's really saved
+            delete liveLocal[m.id];
+            getDoc(D('vsMatches', m.id)).then(d => {
+                if (!d.exists()) return;
+                const f = d.data();
+                [V.open && V.open.id === m.id ? V.open : null, V.list.find(x => x.id === m.id)].forEach(x => { if (x) { x.live = f.live || null; x.live2 = f.live2 || null; } });
+                drawPage(); if (V.manage) drawManage();
+            }).catch(() => {});
+        }
+        toast(String(e && e.message) === 'SAME' ? 'Pick two different teams.' : String(e && e.message) === 'BUSY' ? 'That team is playing on the other field.' : "Couldn't save. Check your connection.", 'error'); return false; }
 }
 window.openVsManage = async function () {
     const m = V.open; if (!m) return;
@@ -2154,8 +2200,8 @@ function statsHtml(m) {
         const lp = m.live ? livePair(m) : [];
         const lp2 = m.live2 ? livePair(m, m.live2) : [];
         body = `<div class="space-y-3">
-            ${m.live && lp.length === 2 ? matchCard(`🔴 Live · Match ${results.length + 1}${m.live2 ? ' · Field 1' : ''}`, lp[0].teamId, lp[1].teamId, m.live.goals || [], '<span class="text-[10px] text-[#00F296] font-bold animate-pulse">In progress</span>') : ''}
-            ${m.live2 && lp2.length === 2 ? matchCard(`🔴 Live · Match ${results.length + (m.live ? 2 : 1)} · Field 2`, lp2[0].teamId, lp2[1].teamId, m.live2.goals || [], '<span class="text-[10px] text-[#00F296] font-bold animate-pulse">In progress</span>') : ''}
+            ${m.live && lp.length === 2 ? matchCard(`🔴 Live · Match ${results.length + 1}${m.live2 ? ' · Field 1' : ''}`, lp[0].teamId, lp[1].teamId, m.live.goals || [], liveBadge(m, 'live')) : ''}
+            ${m.live2 && lp2.length === 2 ? matchCard(`🔴 Live · Match ${results.length + (m.live ? 2 : 1)} · Field 2`, lp2[0].teamId, lp2[1].teamId, m.live2.goals || [], liveBadge(m, 'live2')) : ''}
             ${!results.length && !anyLive(m) ? '<p class="text-xs text-white/40 italic text-center py-8">No match results recorded yet.</p>' : ''}
             ${results.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => matchCard(`Match ${i + 1}${r.field ? ` · Field ${r.field}` : ''}`, r.a, r.b, r.goals || [], '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Finished</span>', r.ga, r.gb)).join('')}
         </div>`;
