@@ -48,16 +48,22 @@ const HEX_ROLE = {
 const NAMED_ROLE = { 'emerald-300': 'accent', 'emerald-400': 'accent', 'emerald-500': 'accent', 'teal-300': 'accent2', 'teal-400': 'accent2', 'teal-500': 'accent2' };
 const OPACITIES = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95];
 const PROPS = [['text', 'color'], ['bg', 'background-color'], ['border', 'border-color'], ['accent', 'accent-color'], ['fill', 'fill'], ['stroke', 'stroke'], ['decoration', 'text-decoration-color']];
+// ⚡ Real class selectors (".bg-\[\#00F296\]"), NOT attribute ones ('[class~="bg-[#00F296]"]').
+//   The browser looks class selectors up by name in an instant; attribute ones it had to try on EVERY element,
+//   ~30,000 of them, on every redraw: that made game pages take seconds on phones (Roster / Stats tabs).
+const esc = (c) => (window.CSS && CSS.escape) ? CSS.escape(c) : c.replace(/([^a-zA-Z0-9_-])/g, '\\$1');
+const sel = (root, c) => `${root} .${esc(c)}`;
+const hov = (root, c) => `${root} .${esc('hover:' + c)}:hover`;
 function rulesFor(root, cls, to) {
     const out = [];
     PROPS.forEach(([p, css]) => {
-        out.push(`${root} [class~="${p}-${cls}"],${root} [class~="hover:${p}-${cls}"]:hover{${css}:${to}!important}`);
-        OPACITIES.forEach(o => out.push(`${root} [class~="${p}-${cls}/${o}"],${root} [class~="hover:${p}-${cls}/${o}"]:hover{${css}:color-mix(in srgb,${to} ${o}%,transparent)!important}`));
+        out.push(`${sel(root, `${p}-${cls}`)},${hov(root, `${p}-${cls}`)}{${css}:${to}!important}`);
+        OPACITIES.forEach(o => out.push(`${sel(root, `${p}-${cls}/${o}`)},${hov(root, `${p}-${cls}/${o}`)}{${css}:color-mix(in srgb,${to} ${o}%,transparent)!important}`));
     });
-    out.push(`${root} [class~="from-${cls}"]{--tw-gradient-from:${to}!important;--tw-gradient-stops:var(--tw-gradient-from),var(--tw-gradient-to,transparent)!important}`);
-    out.push(`${root} [class~="to-${cls}"]{--tw-gradient-to:${to}!important}`);
-    out.push(`${root} [class~="ring-${cls}"]{--tw-ring-color:${to}!important}`);
-    out.push(`${root} [class~="shadow-${cls}"]{--tw-shadow-color:${to}!important}`);
+    out.push(`${sel(root, `from-${cls}`)}{--tw-gradient-from:${to}!important;--tw-gradient-stops:var(--tw-gradient-from),var(--tw-gradient-to,transparent)!important}`);
+    out.push(`${sel(root, `to-${cls}`)}{--tw-gradient-to:${to}!important}`);
+    out.push(`${sel(root, `ring-${cls}`)}{--tw-ring-color:${to}!important}`);
+    out.push(`${sel(root, `shadow-${cls}`)}{--tw-shadow-color:${to}!important}`);
     return out;
 }
 function colorCss(theme, pal) {

@@ -98,6 +98,8 @@ function resolvePlayerAvatar(person, attendees) {
 
 async function updateTeamToolFirestore(event) {
     if (!event || !event.id) return;
+    // ⚡ Show the change right away (before, the screen waited for the save to reach the server and come back).
+    showTeamsNow(event);
 
     event.teamAssignments = window.teamAssignments[event.id] || event.teamAssignments || {};
     event.teamNames = window.teamNames[event.id] || event.teamNames || {};
@@ -146,6 +148,17 @@ async function updateTeamToolFirestore(event) {
         rememberTeamBase(res.event || event);
         window.dispatchEvent(new CustomEvent('eventsDataUpdated', { detail: { eventId: event.id } }));
     }
+}
+function showTeamsNow(event) {
+    const modal = document.getElementById('standalone-team-builder-modal');
+    if (!modal || window.activeModalEventId !== event.id) return;
+    ['teamAssignments', 'teamNames', 'teamColors', 'teamCaptains', 'teamFormations'].forEach(k => { if (window[k] && window[k][event.id]) event[k] = window[k][event.id]; });
+    const y = modal.scrollTop;
+    // (drawing remembers "the teams as on the server": keep the old one, or the save below would see no change)
+    const base = (window.__teamBase || {})[event.id];
+    try { window.openTeamMakingModal(event.id); } catch (e) { /* drawn again after the save */ }
+    if (base) window.__teamBase[event.id] = base;
+    modal.scrollTop = y;
 }
 const TEAM_FIELDS = ['teamAssignments', 'teamNames', 'teamColors', 'teamCaptains', 'teamFormations', 'teamSlots', 'teamSlotsSig'];
 /** What the teams looked like on the server when this person last saw them (to tell their changes apart). */

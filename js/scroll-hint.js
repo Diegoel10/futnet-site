@@ -29,7 +29,7 @@ function setup(bar) {
     L.onclick = (e) => { e.stopPropagation(); bar.scrollBy({ left: -bar.clientWidth * 0.6, behavior: 'smooth' }); };
     R.onclick = (e) => { e.stopPropagation(); bar.scrollBy({ left: bar.clientWidth * 0.6, behavior: 'smooth' }); };
     bar.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
+    bar._hintUpdate = update;   // one shared resize listener below (before: one more per redraw, never removed, so pages got slower over time)
     // keep the picked tab in view, then check the arrows
     const on = bar.querySelector('.bg-\\[\\#00F296\\], .bg-red-600, [aria-selected="true"]');
     if (on && on.scrollIntoView) { try { bar.scrollLeft = Math.max(0, on.offsetLeft - bar.clientWidth / 2 + on.clientWidth / 2); } catch (e) { /* old browsers */ } }
@@ -42,3 +42,4 @@ new MutationObserver((list) => {
     for (const m of list) m.addedNodes.forEach(n => { if (n.nodeType === 1) { if (n.hasAttribute && n.hasAttribute('data-scroll-hint')) setup(n); scan(n); } });
 }).observe(document.documentElement, { childList: true, subtree: true });
 scan(document);
+window.addEventListener('resize', () => { document.querySelectorAll('[data-hinted]').forEach(b => { try { b._hintUpdate && b._hintUpdate(); } catch (e) { /* ignore */ } }); }, { passive: true });
