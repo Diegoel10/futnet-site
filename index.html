@@ -63,27 +63,27 @@
                 font-size: 16px !important;
             }
         }
-        html, body {
-            margin: 0;
-            padding: 0;
-            background: #040E13 url('img/GamesBackground.jpg') center top / cover no-repeat fixed !important;
-            min-height: 100vh;
+        /* ⚡ iPhone-safe background: the photo is ONE screen-sized layer that stays still behind the page.
+           (Before: "background-attachment: fixed" on html + body. iPhones don't support that, so they stretched the
+           photo to the whole page height, twice, and the blurred cards re-blurred it on every scroll: blank patches,
+           taps freezing.) */
+        html { background: #040E13 !important; touch-action: manipulation; }   /* touch-action: no double-tap zoom when a tap is repeated */
+        html, body { margin: 0; padding: 0; min-height: 100vh; }
+        body { background: transparent !important; }
+        body::before {
+            content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1; pointer-events: none;
+            background: #040E13 url('img/GamesBackground.jpg') center top / cover no-repeat;
+            transform: translateZ(0);
         }
         /* Themes (Settings > Theme). js/themes.js swaps the button colors. */
-        html[data-futtheme="cage"], html[data-futtheme="cage"] body {
-            background: #04070F url('img/theme-cage.jpg') center 72% / cover no-repeat fixed !important;
-        }
-        html[data-futtheme="favela"], html[data-futtheme="favela"] body {
-            background: #0C0A14 url('img/theme-favela.jpg') center 62% / cover no-repeat fixed !important;
-        }
-        html[data-futtheme="faveladay"], html[data-futtheme="faveladay"] body {
-            background: linear-gradient(rgba(8,18,26,.25), rgba(8,18,26,.25)), #08121A url('img/theme-favela-day.jpg') center 60% / cover no-repeat fixed !important;
-            background-attachment: fixed !important;
-        }
-        html[data-futtheme="tokyo"], html[data-futtheme="tokyo"] body {
-            background: linear-gradient(rgba(6,14,30,.30), rgba(6,14,30,.30)), #081226 url('img/theme-tokyo.jpg') center 65% / cover no-repeat fixed !important;
-            background-attachment: fixed !important;
-        }
+        html[data-futtheme="cage"] { background: #04070F !important; }
+        html[data-futtheme="cage"] body::before { background: #04070F url('img/theme-cage.jpg') center 72% / cover no-repeat; }
+        html[data-futtheme="favela"] { background: #0C0A14 !important; }
+        html[data-futtheme="favela"] body::before { background: #0C0A14 url('img/theme-favela.jpg') center 62% / cover no-repeat; }
+        html[data-futtheme="faveladay"] { background: #08121A !important; }
+        html[data-futtheme="faveladay"] body::before { background: linear-gradient(rgba(8,18,26,.25), rgba(8,18,26,.25)), #08121A url('img/theme-favela-day.jpg') center 60% / cover no-repeat; }
+        html[data-futtheme="tokyo"] { background: #081226 !important; }
+        html[data-futtheme="tokyo"] body::before { background: linear-gradient(rgba(6,14,30,.30), rgba(6,14,30,.30)), #081226 url('img/theme-tokyo.jpg') center 65% / cover no-repeat; }
     </style>
     <script>
         tailwind.config = {
